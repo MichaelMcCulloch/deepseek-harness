@@ -384,6 +384,19 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源：[`packages/compaction/compaction/src/types.ts:33`](../packages/compaction/compaction/src/types.ts)
 
+### `dag/*`
+
+<a id="dagstate--log-only"></a>
+
+#### `dag/state` — log-only
+
+```ts persistence-catalog
+/** One complete immutable native DAG state value. */
+'dag/state': { readonly state: DagState }
+```
+
+来源：[`packages/dag/dag/src/types.ts:226`](../packages/dag/dag/src/types.ts)
+
 ### `feedback/*`
 
 <a id="feedbackrecord--log-only"></a>
@@ -738,7 +751,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'subagent/descriptor': SubagentDescriptorData
 ```
 
-来源：[`packages/subagent/subagent/src/descriptor.ts:38`](../packages/subagent/subagent/src/descriptor.ts)
+来源：[`packages/subagent/subagent/src/descriptor.ts:39`](../packages/subagent/subagent/src/descriptor.ts)
 
 <a id="subagentmodel-selection-policy--log-only"></a>
 

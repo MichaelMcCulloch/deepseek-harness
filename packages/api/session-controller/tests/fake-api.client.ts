@@ -4,7 +4,7 @@
 import type {
   MessageId,
   RpcError, RpcResponse, SessionId, SessionSearchItem,
-  SubagentCatalog, SubagentInterruptReceipt, SubagentPromptReceipt,
+  SubagentCatalog, SubagentInterruptReceipt, SubagentPromptReceipt, SubagentSteerReceipt,
   WorkspaceId, WorkspaceView,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type {
@@ -178,6 +178,9 @@ export class FakeApiClient {
   onSubagentPrompt: (payload: unknown) => Promise<RemoteResult<SubagentPromptReceipt>>
     = () => Promise.resolve(remoteOk({ messageId: 'fake-message' as MessageId }))
 
+  onSubagentSteer: (payload: unknown) => Promise<RemoteResult<SubagentSteerReceipt>>
+    = () => Promise.resolve(remoteOk({ messageId: 'fake-steer' as MessageId }))
+
   onSubagentInterrupt: (payload: unknown) => Promise<RemoteResult<SubagentInterruptReceipt>>
     = () => Promise.resolve(remoteOk({ accepted: true as const }))
 
@@ -252,6 +255,7 @@ export class FakeApiClient {
           this.onSubagentList(parentSessionId),
         ),
         prompt: request => this.record('subagents.prompt', request, this.onSubagentPrompt(request)),
+        steer: request => this.record('subagents.steer', request, this.onSubagentSteer(request)),
         interruptByParent: (childSessionId, parentSessionId, mode) => this.record(
           'subagents.interruptByParent',
           { childSessionId, parentSessionId, mode },

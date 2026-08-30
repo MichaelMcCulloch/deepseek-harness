@@ -126,7 +126,7 @@ function childEvents(descriptor: unknown): SessionEvent[] {
 }
 
 function descriptorPayload(label: string, version = SUBAGENT_DESCRIPTOR_VERSION) {
-  return { version, mode: 'continuable' as const, provider: 'spawn', label }
+  return { version, mode: 'continuable' as const, provider: 'spawn', label, settlementDelivery: 'adaptive' as const }
 }
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
@@ -674,6 +674,7 @@ describe('SubagentRuntime.listChildren', () => {
       mode: 'continuable',
       provider: 'not-mounted',
       label: 'orphan provider',
+      settlementDelivery: 'adaptive',
     }))
     const entries = await ctx.subagents.listChildren(parent.id)
     expect(entries).toEqual([

@@ -88,4 +88,18 @@ describe('package payload constraints', () => {
       'lib/types/**/*.d.ts',
     ])
   })
+
+  it('includes a child Loader plugin that has its own runtime bundle', () => {
+    expect(expectedDshPackageFiles({
+      name: '@deepseek-ai/dsh-tool-example',
+      exports: {
+        './child': { default: './lib/child.js' },
+      },
+    })).toEqual([
+      'lib/index.js',
+      'lib/invariant.js',
+      'lib/child.js',
+      'lib/types/**/*.d.ts',
+    ])
+  })
 })

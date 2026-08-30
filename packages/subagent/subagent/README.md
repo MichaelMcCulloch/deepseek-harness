@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-subagent` is the service behind child-agent delegation: an agent hands a task to a named child, collects the finished result, and — for continuable children — keeps sending follow-up work across turns. Multiple providers coexist under one contract, so a single composition can offer in-process children, out-of-process ACP or SDK children, and real Codex or Claude Code children side by side. Children come in two shapes: one-shot runs that settle with a single result, and continuable children whose durable session accepts later messages and can be interrupted. The same service answers discovery questions — which children exist, their mode, activity, and lineage — without loading or resuming them. Mount it with at least one provider backend and a delegation tool; the backends and the model-facing tools live in sibling packages.
+`dsh-subagent` is the service behind child-agent delegation: an agent hands a task to a named child, collects the finished result, and — for continuable children — sends later work, redirects active work, or stops a turn across restarts. Multiple providers coexist under one contract, so a single composition can offer in-process children, out-of-process ACP or SDK children, and real Codex or Claude Code children side by side. Children come in two shapes: one-shot runs that settle with a single result, and continuable children whose durable session accepts later messages and owner-scoped lifecycle control. The same service answers discovery questions — which children exist, their mode, activity, and lineage — without loading or resuming them. Mount it with at least one provider backend and a delegation tool; the backends and the model-facing tools live in sibling packages.
 
 ## Table of Contents
 
@@ -44,11 +44,11 @@ An agent that calls the tool gets the child's final answer as the tool result. M
 
 ### One-shot and continuable children
 
-One-shot children run once and settle with a single result, plus an optional structured output and a safe diagnostic on failure. A start request may override the child Agent's provider, model, reasoning effort, and output-token limit through `agentOptions`; every requested option requires the provider's matching capability. Continuable children keep a durable session and accept later messages in order: the caller receives a stable child id, sends follow-ups, and can interrupt the current turn without destroying the child. The tool row's `backgroundMode` picks the shape (`one-shot` by default, or `continuable` on providers that support it).
+One-shot children run once and settle with a single result, plus an optional structured output and a safe diagnostic on failure. A start request may override the child Agent's provider, model, reasoning effort, and output-token limit through `agentOptions`; every requested option requires the provider's matching capability. Continuable children keep a durable session and accept later messages in order: the caller receives a stable child id, sends FIFO follow-ups, redirects current work, or interrupts the current turn without destroying the child. Creation can pin an absolute `cwd`, deterministic child and message ids, durable owner metadata, and a generic settlement-delivery policy. The tool row's `backgroundMode` picks the shape (`one-shot` by default, or `continuable` on providers that support it).
 
-### Following up, interrupting, and discovering
+### Following up, redirecting, interrupting, and discovering
 
-Continuable children answer follow-up messages as their next turns, and the parent can interrupt a running turn or list its children at any time. Discovery covers both shapes: the service lists direct children and the full descendant tree — mode, activity, and lineage — reading live session state and optional persistence, without loading any child.
+Continuable children answer follow-up messages as their next turns. Redirect cancels active work with the inbox preserved and places one replacement turn before queued ordinary turns. The parent can also interrupt a running turn or list its children at any time. Discovery covers both shapes: the service lists direct children and the full descendant tree — mode, activity, and lineage — reading live session state and optional persistence, without loading any child.
 
 ### Failure and recovery
 
@@ -76,7 +76,8 @@ This section explains how the service is built and where the observable behavior
 | File | Role |
 |---|---|
 | [`src/index.ts`](src/index.ts) | Service entry: provider registry, start and continuation API, lifecycle events |
-| [`src/continuation.ts`](src/continuation.ts) | Continuable children: identity reservation, Activation residency, follow-up, interrupt, settlement |
+| [`src/continuation.ts`](src/continuation.ts) | Continuable children: identity reservation, Activation residency, follow-up, redirect, interrupt, settlement |
+| [`src/owner-controller.ts`](src/owner-controller.ts) | Authorized stop, redirect, and settlement hooks for durable owner namespaces |
 | [`src/types.ts`](src/types.ts) | Public request, result, and provider contracts |
 | [`src/descriptor.ts`](src/descriptor.ts) | Versioned `subagent/descriptor` session-event vocabulary |
 | [`src/child-agent.ts`](src/child-agent.ts) | Child composition, delegated policy, depth helpers |
@@ -90,14 +91,14 @@ A request is validated against the provider's advertised capabilities, a durable
 
 ### Continuable flow
 
-The manager reserves a child identity, resolves the durable descriptor, creates (or cold-resumes) the child Agent, installs it in an Activation, and submits the prompt. Later messages become FIFO turns through the child's own inbox; an absent Activation cold-resumes from the persisted session. When a resident Activation settles, the manager tells the child's direct parent in the parent's own turn stream.
+The manager reserves a child identity, resolves the durable descriptor, creates (or cold-resumes) the child Agent at its stored absolute `cwd`, installs it in an Activation, and submits the prompt. Later follow-ups become FIFO turns through the child's own inbox; redirect instead cancels and replaces active work. An absent Activation cold-resumes from the persisted session. Generic settlement delivery is `adaptive`, `quiet`, or `none`. An optional owner controller receives already-authorized stop and redirect requests and captured terminal facts; authorization stays in this service.
 
 ### Ownership and invariants
 
 - **Publication is the boundary** — before it the provider owns the setup and must roll back on failure; after it the caller owns the run and must dispose it.
 - **Registration is effect-scoped** — removing a provider blocks new starts but never revokes accepted runs.
 - **Continuation authority is exact identity** — follow-ups require the exact live direct parent; reports require the exact live child.
-- **The descriptor is log-only** — a session event absent from model history and retained across compaction; a continuable descriptor records the resolved child provider, model, and reasoning effort explicitly for cold resume.
+- **The descriptor is log-only** — a session event absent from model history and retained across compaction; a continuable descriptor records the resolved child provider, model, reasoning effort, settlement delivery, and optional owner binding explicitly for cold resume. The Session header records its absolute `cwd`.
 
 </details>
 
@@ -124,11 +125,11 @@ Read these pages when the package-level contract is not enough. They move from t
 
 #### What the model sees
 
-One user-role parent message opening with the outcome — `Background subagent <child-id> finished and will do no further work unless you send it more.`, or the matching line for a child that was stopped, ran out of room, declined, or failed — followed by `Its closing message:` and the child's final assistant content, or `It left no closing message.` when it produced none. This is the service's only direct parent-side contribution; delegation schemas, parent continuation and discovery, and the child-scoped `report` belong to `dsh-tool-subagent`, `dsh-tool-subagent-control`, and `dsh-tool-subagent-report`.
+With `settlementDelivery: adaptive` or `quiet`, one user-role parent message opens with the outcome — `Background subagent <child-id> finished and will do no further work unless you send it more.`, or the matching line for a child that was stopped, ran out of room, declined, or failed — followed by `Its closing message:` and the child's final assistant content, or `It left no closing message.` when it produced none. `quiet` never wakes or steers the parent. `none` creates no generic settlement message, so an owner can publish its own durable notice. Delegation schemas, parent continuation and discovery, and the child-scoped `report` belong to `dsh-tool-subagent`, `dsh-tool-subagent-control`, and `dsh-tool-subagent-report`.
 
 #### Token effect
 
-One notice per settled Activation in the parent's request, sized by the child's final message. A child that both reports and settles costs the parent both.
+At most one notice per settled Activation in the parent's request, sized by the child's final message. `none` adds no generic notice. A child that both reports and receives generic settlement delivery costs the parent both.
 
 #### KV Cache effect
 
@@ -162,12 +163,13 @@ Prefix-stable within a child: the statement never changes during the child's lif
 These limits define when the seam is a poor fit or needs special operational care. They are current package constraints, not a general delegation comparison or a task backlog.
 
 - **ACP children remain one-shot and are not trace-enumerable** — an ACP run has no local child session in the parent's session corpus, and remote providers need an Activation ownership contract before they can support continuable children.
-- **No host-user continuation** — `followup()` requires the exact live direct parent; only `interrupt()` accepts a durable human parent address.
-- **Continuation messages never steer** — parent-to-child follow-ups enqueue later turns; they never redirect the child's current turn.
+- **Host-user delivery still needs a live parent** — prompt and steer requests carry a durable address, but authorization resolves the exact live direct parent before admission.
+- **Follow-up and redirect are distinct** — parent-to-child follow-ups enqueue later turns; only redirect cancels and replaces current work.
 - **Wake gap during cancellation convergence** — a follow-up accepted after an interrupt signal but before the driver becomes idle stays queued until another waking send.
 - **Process-local residency** — the Activation inbox and ownership graph do not coordinate two harness processes; concurrent access to one persistence store needs a durable mailbox and cross-process lease protocol.
 - **No replay of accepted-but-unlogged messages** — a crash can lose an accepted prompt that never reached the child's session log; the lost message is not replayed automatically.
 - **No durable report mailbox** — reports require a live direct parent and provide acceptance identity rather than exactly-once delivery.
+- **Owner controllers are process-local** — durable owner metadata survives resume, but stop, redirect, or settlement fails loud while the named controller is not mounted.
 - **Lifecycle events are observe-only** — a run-affecting `subagent/end` continuation or decision API waits for a concrete consumer.
 
 <a id="dev-note"></a>

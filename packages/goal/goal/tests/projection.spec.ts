@@ -42,6 +42,7 @@ function liveAgent(ctx: Context, session: Session): Agent {
     send: () => {},
     followup: () => {},
     steer: () => ({ outcome: Promise.resolve({ status: 'rejected' as const }) }),
+    redirect: () => {},
     inject(input: UserMessage) {
       inbox.append('next-step', input)
     },

@@ -115,6 +115,49 @@ describe('dsh-tool-subagent-control', () => {
     expect(schemas[0]!.description).toContain('next turn')
   })
 
+  it('registers steer_agent with replacement semantics', async () => {
+    const { ctx } = await setup([])
+    const schemas = ctx.tools.schemas().filter(schema => schema.name === 'steer_agent')
+    expect(schemas).toHaveLength(1)
+    const props = (schemas[0]!.parameters as { properties?: Record<string, unknown> }).properties ?? {}
+    expect(Object.keys(props).sort()).toEqual(['agent_id', 'message'])
+    expect(schemas[0]!.description).toContain('replace')
+    expect(schemas[0]!.description).toContain('before queued ordinary turns')
+  })
+
+  it('interrupts and places steer_agent replacement work before queued turns', async () => {
+    const releaseFirst = Promise.withResolvers<undefined>()
+    const adapter = new GatedAdapter([
+      { chunks: textResponse('discarded'), gate: releaseFirst.promise },
+      { chunks: textResponse('replacement answer') },
+      { chunks: textResponse('queued answer') },
+    ])
+    const { ctx, parent } = await setupWith(adapter)
+    const started = await ctx.subagents.startContinuable({
+      provider: 'spawn',
+      label: 'long work',
+      request: { prompt: [{ type: 'text', text: 'long work' }], parent },
+      signal: testToolSignal,
+    })
+    await vi.waitFor(() => { expect(adapter.requests).toHaveLength(1) })
+    await callTool(ctx, 'send_message', { subagent_id: started.childId, message: 'queued work' }, parent)
+
+    const result = await callTool(ctx, 'steer_agent', {
+      agent_id: started.childId,
+      message: 'replacement work',
+    }, parent)
+    expect(result.isError).toBe(false)
+    expect(text(result)).toBe(`replacement work accepted for subagent ${started.childId}`)
+
+    releaseFirst.resolve(undefined)
+    await waitNoActivation(ctx, started.childId)
+    const loaded = await ctx.sessionPersistence.load(started.childId)
+    const prompts = loaded.events.flatMap(event => event.type === 'user/message' && event.data.source.kind !== 'plugin'
+      ? event.data.content.flatMap(block => block.type === 'text' ? [block.text] : [])
+      : [])
+    expect(prompts).toEqual(['long work', 'replacement work', 'queued work'])
+  })
+
   it('cold-resumes a settled child and reports the queued next turn', async () => {
     const { ctx, parent } = await setup([textResponse('first answer'), textResponse('second answer')])
     const started = await ctx.subagents.startContinuable({
@@ -212,9 +255,11 @@ describe('dsh-tool-subagent-control', () => {
     await ctx.plugin(SubagentRuntime)
     const fiber = await ctx.plugin(tool)
     expect(ctx.tools.schemas().some(schema => schema.name === 'send_message')).toBe(true)
+    expect(ctx.tools.schemas().some(schema => schema.name === 'steer_agent')).toBe(true)
     expect(ctx.tools.schemas().some(schema => schema.name === 'interrupt_agent')).toBe(true)
     await fiber.dispose()
     expect(ctx.tools.schemas().some(schema => schema.name === 'send_message')).toBe(false)
+    expect(ctx.tools.schemas().some(schema => schema.name === 'steer_agent')).toBe(false)
     expect(ctx.tools.schemas().some(schema => schema.name === 'interrupt_agent')).toBe(false)
   })
 

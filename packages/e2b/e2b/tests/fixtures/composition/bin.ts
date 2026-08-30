@@ -26,6 +26,7 @@ const owner: Agent = {
   send() {},
   followup() {},
   steer() {},
+  redirect() {},
   inject() {},
   cancel() {},
   runMaintenance: task => task(new AbortController().signal),

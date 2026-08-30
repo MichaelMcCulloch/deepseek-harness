@@ -167,6 +167,10 @@ interface ToolRestriction {
 }
 ```
 
+## Durable command acceptance
+
+A tool can transfer asynchronous work to another durable owner instead of awaiting that work. The transfer point must be explicit: the tool first commits the command to durable state, then returns an acceptance value that names its revision and operation identity. Its result text must say that the command was accepted, not that work completed. A separate wait or observation tool reports later settlement, and the system prompt must forbid status polling when a cancellable wait exists. The native DAG tools use this form for Git and continuable-child effects; their generic presentation exposes no file locations because accepted intent is not a completed file operation.
+
 ## Execution: extensible waterfalls plus monotonic policy
 
 `ctx.tools.execute()` accepts a caller-owned `ToolExecutionInput` with a required readonly `signal`, materializes its parsed JSON arguments once into a pipeline-owned `ToolExecution`, and runs that call through `tools/pre-execute` (the reorderable allow/deny/ask waterfall) → registered monotonic guards → `tools/execute` (around-dispatch wrappers) → `tools/post-execute` (inspect/replace the result) → optional definition-owned `finalizeContent` → `tools/result` (the immutable authoritative outcome). Only the `tools/execute` view may replace the required signal. The outcome is a `ToolExecutionResult`.

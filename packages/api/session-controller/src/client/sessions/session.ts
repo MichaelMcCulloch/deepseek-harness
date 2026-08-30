@@ -254,7 +254,7 @@ export class Session implements SessionFace {
             },
           }
         } else {
-          const routed = toSessionResult(await this.remote.subagents.prompt({
+          const request = {
             requestId: randomUUID() as SessionRequestId,
             parentSessionId: this.address.parentSessionId,
             childSessionId: this.address.childSessionId,
@@ -263,7 +263,10 @@ export class Session implements SessionFace {
               ? [{ type: 'text' as const, text: part.text }]
               : []),
             clientTimeZone: resolvedClientTimeZone(),
-          }, signal))
+          }
+          const routed = toSessionResult(await (mode === 'steer'
+            ? this.remote.subagents.steer(request, signal)
+            : this.remote.subagents.prompt(request, signal)))
           result = routed.ok ? { ok: true, value: { accepted: true } } : routed
         }
       }

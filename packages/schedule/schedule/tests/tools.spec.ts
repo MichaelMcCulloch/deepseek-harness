@@ -38,6 +38,7 @@ function stubAgent(ctx: Context, id: string): Agent {
     whenIdle: () => Promise.resolve(),
     followup(_message: UserMessage) {},
     steer(_message: UserMessage) {},
+    redirect() {},
     inject(_message: UserMessage) {},
   }
 }

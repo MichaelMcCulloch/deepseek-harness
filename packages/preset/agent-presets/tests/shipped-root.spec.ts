@@ -95,7 +95,7 @@ describe('the shipped preset root', () => {
     expect(minimal?.path.startsWith(SYSTEM_ROOT)).toBe(true)
   })
 
-  it('enables web_fetch in each tool-bearing Web app preset', async () => {
+  it('mounts Web fetch and native DAG tools in each tool-bearing Web app preset', async () => {
     for (const id of ['cordis', 'ptc', 'standard']) {
       const source = await readFile(join(SHIPPED_PRESET_ROOT, id, 'agent.cordis.yml'), 'utf8')
       const entries: unknown = yaml.load(source, { schema: entryListSchema })
@@ -107,6 +107,10 @@ describe('the shipped preset root', () => {
         throw new TypeError(`${id} preset must configure tool-web.fetch`)
       }
       expect(toolWeb.config.fetch, id).toBe(true)
+      expect(entries).toContainEqual(expect.objectContaining({
+        id: 'tool-dag',
+        name: '@deepseek-ai/dsh-tool-dag',
+      }))
     }
   })
 })

@@ -134,6 +134,13 @@ export class ReactLoopAgent implements Agent {
     this.send(input, 'next-step', true)
   }
 
+  redirect(input: UserMessage, cause: AgentCancelCause): void {
+    const active = this.phase.kind !== 'idle'
+    if (active) this.cancel(cause, { keepInbox: true })
+    this.inbox.splice('next-turn', 0, 0, [input])
+    this.wakeDriver(active)
+  }
+
   inject(input: UserMessage): void {
     this.send(input, 'next-step', false)
   }

@@ -1,5 +1,5 @@
 ---
-description: "全局 send_message、interrupt_agent 与 list_agents 工具，供用户与维护者组合或排查可继续子级的控制。"
+description: "全局 send_message、steer_agent、interrupt_agent 与 list_agents 工具，供用户与维护者组合或排查可继续子级的控制。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-tool-subagent-control` 为可继续子级添加全局控制工具：`send_message` 投递一条成为子级下一轮次的后续消息，`interrupt_agent` 停止子级当前轮次但保留其队列与后代，`list_agents`（来自可单独加载的 `list-agents` 插件）按持久化 id 与标签列出可继续子级。这些工具是全局的，因此任意数量的委派工具都不会产生重复。这些工具只覆盖父到子方向；子到父方向属于独立安装的 `dsh-tool-subagent-report`。是否加载这些工具不会决定委派工具是否启动可继续工作。
+`dsh-tool-subagent-control` 为可继续子级添加全局控制工具：`send_message` 投递一条成为子级下一轮次的 follow-up 消息，`steer_agent` 中断并替换当前工作，`interrupt_agent` 停止子级当前轮次但保留其队列与后代，`list_agents`（来自可单独加载的 `list-agents` 插件）按持久 id 与标签列出可继续子级。这些工具是全局的，因此任意数量的委派工具都不会产生重复。这些工具只覆盖 parent-to-child 方向；child-to-parent 方向属于独立安装的 `dsh-tool-subagent-report`。是否加载这些工具不会决定委派工具是否启动可继续工作。
 
 ## 目录
 
@@ -25,11 +25,11 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-在模型需要对可继续子级发消息、中断或列出的任何组合中挂载本包。根插件只需要 subagent 服务；列表工具是独立插件，部署方可以省略。
+在模型需要对可继续子级发消息、steer、中断或列出的任何组合中挂载本包。根插件只需要 subagent 服务；列表工具是独立插件，部署方可以省略。
 
 ### 最小配置
 
-先加载 subagent 服务、一个后端、委派工具与本包。加上独立的列表插件即可公开全部三个工具：
+先加载 subagent 服务、一个后端、委派工具与本包。加上独立列表插件即可公开全部四个工具：
 
 ```yaml
 - name: '@deepseek-ai/dsh-subagent'
@@ -42,11 +42,15 @@ kind: "package-reference"
 - name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
 ```
 
-本包不接收任何配置：根插件提供 `send_message` 与 `interrupt_agent`，列表插件提供 `list_agents`。
+本包不接收任何配置：根插件提供 `send_message`、`steer_agent` 与 `interrupt_agent`，列表插件提供 `list_agents`。
 
 ### send_message
 
 发送一条消息，使之成为子级的下一 FIFO 轮次：正在工作的子级会先完成其当前轮次，因此消息无法重定向已经进行的工作。调用只返回接受结果（被接受消息的稳定 `messageId`），绝不返回子级的回复——通过其 id 查看子级 transcript（文本记录）才是它完成了哪些工作的真源。失败——未授权或未知子级、缺少描述符而无法恢复的子级，或准入被拒——会明确说明消息未送达。
+
+### steer_agent
+
+在保留 pending inbox 的情况下中断子级活跃轮次，在已排队普通轮次前插入一个替换普通轮次，并唤醒子级。调用返回已接受替换消息的 `messageId`，不返回其结果。对于 DAG-owned 子级，已授权请求先经过 DAG stop-and-steer 状态 transition；通用子级直接使用 continuation manager。
 
 ### interrupt_agent
 
@@ -68,7 +72,7 @@ kind: "package-reference"
 
 ### 设计理念
 
-`ctx.subagents.followup()`、`interrupt()` 与列表投影之上的轻量适配器；工具不执行任何生命周期路由。驻留、冷恢复与中断授权归服务所有，工具把确切在线的调用 agent（`exec.agent`）作为服务对照目标已记录 lineage 校验的权限凭据传入。
+`ctx.subagents.followup()`、`redirect()`、`interrupt()` 与列表 projection 之上的轻量 adapter；工具不执行任何生命周期路由。驻留、冷恢复、owner 委派与授权归服务所有，工具把确切在线调用 agent（`exec.agent`）作为服务对照目标已记录 lineage 校验的权限凭据传入。
 
 ### 投递与信号所有权
 
@@ -82,7 +86,7 @@ kind: "package-reference"
 
 | 文件 | 职责 |
 |---|---|
-| [`src/index.ts`](src/index.ts) | `send_message` 与 `interrupt_agent` 注册 |
+| [`src/index.ts`](src/index.ts) | `send_message`、`steer_agent` 与 `interrupt_agent` 注册 |
 | [`src/list-agents.ts`](src/list-agents.ts) | `list_agents` 注册：作用域、状态细化、投影 |
 | [`src/invariant.ts`](src/invariant.ts) | 不变式伴生插件 |
 
@@ -98,7 +102,7 @@ kind: "package-reference"
 - [Subagent 子系统](../../../docs/subsystems/subagent.zh.md)——可继续子级、Activation、inbox、中断与后续消息权限。
 - [dsh-tool-subagent](../tool-subagent/README.zh.md)——启动可继续子级的委派工具。
 - [dsh-tool-subagent-report](../tool-subagent-report/README.zh.md)——子到父的上报通道。
-- [生成工具目录](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-subagent-control)——三个工具的 schema。
+- [生成工具目录](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-subagent-control)——四个工具的 schema。
 
 -----
 
@@ -109,7 +113,7 @@ kind: "package-reference"
 
 #### 模型看到什么
 
-已生成的 [schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-subagent-control)：`send_message` 接受 `subagent_id` 与 `message`；`interrupt_agent` 接受 `agent_id`；`list_agents` 接受可选的 `scope` 枚举。
+已生成的 [schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-subagent-control)：`send_message` 与 `steer_agent` 接受 `subagent_id` 与 `message`；`interrupt_agent` 接受 `agent_id`；`list_agents` 接受可选 `scope` enum。
 
 #### Token 影响
 
@@ -169,7 +173,7 @@ kind: "package-reference"
 这些限制说明控制工具无法观察或引导什么；它们是当前包约束。
 
 - **已排队的消息没有独立结果**——接受时只返回其 inbox `messageId`；子级的工作会落入持久化子级会话，绝不会通过本工具收集。获得 `report` 的子级可以单独发回选定内容，但该消息不是本次调用的结果。
-- **不对当前轮次进行 steering（中途引导）**——每条消息都会开启后续 FIFO 轮次，因此在子级工作时发送的消息只会在其当前轮次结束后运行，无法将其重定向。
+- **Send 与 steer 有意不同**——`send_message` 总是开启较后 FIFO 轮次；只有 `steer_agent` 中断并替换当前工作。
 - **列表是快照，而非投递承诺**——它可能与发布、dispose（资源释放）或后续消息发生竞态，另一个进程也可能激活当前进程报告为 `ready` 的子级；跨进程准确性需要共享租约。`interrupt_agent` 自己执行权威的在线 lineage 检查，因此过期的发现结果不会授予权限。
 - **没有分页或删除**——系统返回完整且稳定排序的集合；只要子级会话仍在持久化存储中，它就会继续出现在列表中，服务级上限或删除操作留待后续产品决策。
 

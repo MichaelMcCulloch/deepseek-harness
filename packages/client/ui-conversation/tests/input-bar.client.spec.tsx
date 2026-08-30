@@ -824,7 +824,7 @@ describe('running and lock semantics', () => {
     expect(stop).not.toHaveBeenCalled()
   })
 
-  it('keeps both running subagent Enter gestures on Queue transport', () => {
+  it('routes running subagent Enter gestures through queue and steer transports', () => {
     const subagent = {
       address: {
         parentSessionId: 'parent' as SessionId,
@@ -833,13 +833,13 @@ describe('running and lock semantics', () => {
       },
       parentAvailable: true,
     }
-    const plain = bench({ running: true, busyEnter: 'steer', draft: 'plain', subagent })
+    const plain = bench({ running: true, draft: 'plain', subagent })
     fireEvent.keyDown(plain.textarea, { key: 'Enter' })
     expect(plain.sink).toHaveBeenCalledWith('plain', [], 'queue', expect.any(AbortSignal))
 
     const accelerated = bench({ running: true, draft: 'accelerated', subagent })
     fireEvent.keyDown(accelerated.textarea, { key: 'Enter', metaKey: true })
-    expect(accelerated.sink).toHaveBeenCalledWith('accelerated', [], 'queue', expect.any(AbortSignal))
+    expect(accelerated.sink).toHaveBeenCalledWith('accelerated', [], 'steer', expect.any(AbortSignal))
   })
 
   it('disabled (session removed) locks the textarea and chrome', () => {

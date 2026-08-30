@@ -13,6 +13,7 @@ import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import type { JsonValue } from '@deepseek-ai/dsh-session'
 import type { ObjectJsonSchema, ToolRestriction } from '@deepseek-ai/dsh-tools'
 import type { SubagentDescriptorData } from './descriptor.ts'
 
@@ -197,6 +198,21 @@ export interface ContinuableCreateSpec {
    * `CreateAgentOptions.seed`: contiguous from seq 0, lossless JSON, balanced.
    */
   readonly seed?: readonly SessionEvent[]
+}
+
+/** Generic parent-notice policy applied when one continuable activation settles. */
+export type SubagentSettlementDelivery = 'adaptive' | 'quiet' | 'none'
+
+/**
+ * Durable attribution that lets one capability own a continuable child. The
+ * controller name selects an effect-scoped host controller; `metadata` is an
+ * immutable JSON value interpreted only by that controller.
+ */
+export interface SubagentOwnerBinding {
+  /** Registered owner-controller name. */
+  readonly controller: string
+  /** Controller-private durable JSON metadata. */
+  readonly metadata: JsonValue
 }
 
 /**

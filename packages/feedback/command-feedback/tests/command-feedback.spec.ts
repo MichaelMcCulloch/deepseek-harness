@@ -55,6 +55,7 @@ function stubAgent(ctx: Context, id: string): { agent: Agent; session: Session }
     send: () => {},
     followup: () => {},
     steer: () => {},
+    redirect: () => {},
     inject: () => {},
     cancel() { status = 'idle' },
     runMaintenance: task => task(new AbortController().signal),

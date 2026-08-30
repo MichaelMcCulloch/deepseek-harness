@@ -29,6 +29,7 @@ try {
     send: () => {},
     followup: () => {},
     steer: () => {},
+    redirect: () => {},
     inject: () => { throw new Error('dsh-badge snapshot must receive the catalog at the step boundary') },
     cancel: () => {},
     runMaintenance: job => job(new AbortController().signal),

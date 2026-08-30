@@ -41,6 +41,7 @@ function stubAgentForSession(session: Session): StubAgent {
     send: () => {},
     followup: () => {},
     steer: () => {},
+    redirect: () => {},
     inject(input) { inbox.append('next-step', input) },
     cancel() {},
     runMaintenance: task => task(new AbortController().signal),

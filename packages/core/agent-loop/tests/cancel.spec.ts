@@ -55,6 +55,38 @@ function userTexts(agent: Agent): string[] {
 }
 
 describe('Agent.cancel()', () => {
+  it('redirect cancels active work and runs its replacement before queued turns', async () => {
+    const adapter = new MockAdapter([
+      'hang',
+      textResponse('replacement reply'),
+      textResponse('first queued reply'),
+      textResponse('second queued reply'),
+    ])
+    const ctx = await harness(adapter)
+    const agent = ctx.agentLoop.create(SessionId('redirect-order'), { provider: 'mock', model: 'mock' })
+
+    send(agent, 'active')
+    await new Promise(resolve => setTimeout(resolve, 30))
+    send(agent, 'first queued')
+    send(agent, 'second queued')
+    agent.redirect(createUserMessage({
+      content: [{ type: 'text', text: 'replacement' }],
+      source: { kind: 'user' },
+    }), { kind: 'user' })
+
+    await agent.whenIdle()
+
+    expect(userTexts(agent)).toEqual(['active', 'replacement', 'first queued', 'second queued'])
+    expect(agent.inbox.hasPending).toBe(false)
+    expect(agent.session.events.filter(event => event.type === 'turn/end').map(event =>
+      event.type === 'turn/end' ? event.data.reason : null)).toEqual([
+      { kind: 'aborted', reason: { kind: 'user' } },
+      { kind: 'completed' },
+      { kind: 'completed' },
+      { kind: 'completed' },
+    ])
+  })
+
   it('cancel() on an idle agent with nothing queued is a no-op; the next prompt runs (F2 leak guard)', async () => {
     const adapter = new MockAdapter([textResponse('reply')])
     const ctx = await harness(adapter)

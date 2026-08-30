@@ -137,6 +137,16 @@
         "tests/**/*.tsx"
       ]
     },
+    "packages/client/ui-dag": {
+      "entry": [
+        "tests/**/*.spec.tsx"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "src/**/*.tsx",
+        "tests/**/*.tsx"
+      ]
+    },
     "packages/client/ui-directory-picker-browse": {
       "entry": [
         "tests/**/*.spec.tsx"

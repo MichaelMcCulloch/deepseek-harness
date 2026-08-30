@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-使用 `dsh-agent`，你可以创建或恢复 agent、发送后续提示词、中途引导（steering）当前步骤、注入面向模型（model-facing）的上下文、取消活动，并等待 agent 进入空闲——这一切都通过每个插件面向编程的 `Agent` 句柄与跟踪运行中 agent 的实时注册表（`ctx.agents`）完成。该包还携带进程本地发起方作用域，把异步工作归因于启动它的 agent，并声明插件用来观察或拦截进行中工作的 `agent/*` 事件词汇。它不依赖循环：具体的创建与驱动位于 `dsh-agent-loop`，它在此注册工厂，因此驱动器保持可替换。构建 UI、钩子、编排器或涉及实时 agent 的扩展插件时请选择本包；接口本身不运行任何模型调用。
+使用 `dsh-agent`，你可以创建或恢复 agent、发送后续提示词、中途引导当前步骤、中断并替换活跃工作、注入面向模型的上下文、取消活动，并等待 agent 进入空闲——这一切都通过每个插件面向编程的 `Agent` 句柄与跟踪运行中 agent 的实时注册表（`ctx.agents`）完成。该包还携带进程本地发起方作用域，把异步工作归因于启动它的 agent，并声明插件用来观察或拦截进行中工作的 `agent/*` 事件词汇。它不依赖循环：具体的创建与驱动位于 `dsh-agent-loop`，它在此注册工厂，因此驱动器保持可替换。构建 UI、钩子、编排器或涉及实时 agent 的扩展插件时请选择本包；接口本身不运行任何模型调用。
 
 ## 目录
 
@@ -44,7 +44,7 @@ await handle.dispose()   // stops the loop, unregisters, removes the session, un
 
 ### 驱动 agent 的对话
 
-句柄的方法把带标识的 user 角色消息路由进 agent 的收件箱。`followup()` 排队一条普通的下一个轮次提示词并唤醒驱动器；`steer()` 提交下一步输入并唤醒它；`inject()` 添加面向模型的上下文但不唤醒驱动器，因此它落在下一个被接纳的步骤中。`cancel(cause)` 中止当前活动，并在未设置 `keepInbox` 时清除待处理工作；`whenIdle()` 在整个 agent 达到完全停稳后兑现。
+句柄的方法把带标识的 user 角色消息路由进 agent 的 inbox。`followup()` 排队一条普通的下一个轮次提示词并唤醒驱动器；`steer()` 提交非中断式 next-step 输入并唤醒它；`redirect()` 在保留待处理 inbox 项的情况下取消活跃工作，在已排队普通轮次前放置一个替换普通轮次，并唤醒驱动器；`inject()` 添加面向模型的上下文但不唤醒驱动器，因此它落在下一个被接纳的步骤中。`cancel(cause)` 中止当前活动，并在未设置 `keepInbox` 时清除待处理工作；`whenIdle()` 在整个 agent 达到完全停稳后兑现。
 
 ```text
 handle.agent.followup({
@@ -129,11 +129,11 @@ await handle.agent.whenIdle()
 <a id="model-experience"></a>
 ## 模型体验
 
-### 用户、steering 与注入消息
+### 用户、steering、替换与注入消息
 
 #### 模型看到什么
 
-`followup`、`steer` 与 `inject` 以带标识的 user 角色消息馈送所属会话；被接纳的内容成为模型在后续步骤中读取的派生历史的一部分。`agent/pre-step` 与其他已声明事件让插件能够拒绝拟进入的步骤或添加持久请求材料；此接口本身不贡献固定文案。
+`followup`、`steer`、`redirect` 与 `inject` 以带标识的 user 角色消息馈送所属会话；被接纳的内容成为模型在后续步骤中读取的派生历史的一部分。redirect 还会在其替换消息被 claim 前记录活跃工作的 cancellation。`agent/pre-step` 与其他已声明事件让插件能够拒绝拟进入的步骤或添加持久请求材料；此接口本身不贡献固定文案。
 
 #### Token 影响
 
@@ -141,7 +141,7 @@ await handle.agent.whenIdle()
 
 #### KV Cache 影响
 
-被接纳历史与 steering 只追加；被阻止的提交不发送请求。会话前缀在循环实例内保持稳定，而新建或恢复的实例可能建立不同前缀。
+被接纳历史与 steering 只追加；redirect 结束活跃轮次，并在 cancellation convergence 后追加其替换消息。被阻止的提交不发送请求。会话前缀在循环实例内保持稳定，而新建或恢复的实例可能建立不同前缀。
 
 ### Agent 作用域的请求组合
 
@@ -167,7 +167,7 @@ await handle.agent.whenIdle()
 - **发起方作用域只存在于进程内**：worker、子进程、HTTP、持久队列和重启必须显式传递所需身份。
 - **环境身份可能比存活状态更久**：消费方在生命周期敏感工作前，仍要检查 `agent.status`、取消状态和所属能力约定。
 - **`agent/session-start` 不能为启动设置门禁**：它仍是同步且不可 veto 的通知；必须在发布前完成的异步组合属于工厂的 `setup(agentCtx)` 事务。
-- **`cancel()` 默认清空收件箱**：它会中止正在处理的轮次以及排队和 steering 工作；`cancel(cause, { keepInbox: true })` 只中止轮次并保留待处理项，且不存在让轮次继续运行、只中止步骤的操作。
+- **`cancel()` 默认清空 inbox**：它会中止正在处理的轮次以及排队和 steering 工作；`cancel(cause, { keepInbox: true })` 只中止活跃工作并保留待处理项。`redirect()` 总是使用保留形式并添加一个替换普通轮次；不存在让轮次继续运行、只中止步骤的操作。
 - **每条附加 `UserMessage` 恰好携带一个 `MessageSource`**：多个插件合并到一条消息上的贡献会归入同一来源，因此该消息无法列出多个生产者。
 
 <a id="dev-note"></a>

@@ -26,6 +26,11 @@ const CONTROL_ID_SCHEMAS = {
     childSessionId: SESSION_ID_SCHEMA,
     mode: z.literal('continuable'),
   }),
+  'subagent.steer': z.object({
+    parentSessionId: SESSION_ID_SCHEMA,
+    childSessionId: SESSION_ID_SCHEMA,
+    mode: z.literal('continuable'),
+  }),
   'subagent.interrupt': z.object({
     parentSessionId: SESSION_ID_SCHEMA,
     childSessionId: SESSION_ID_SCHEMA,

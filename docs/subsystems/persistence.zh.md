@@ -93,6 +93,8 @@ interface SessionHeader {
 
 后端用 `SessionFormatUnsupportedError` 拒绝无法可靠解读的日志，它与 `SessionPersistenceCorruptionError` 区分，因为数据没有损坏。header 的 `version` 比 `SESSION_FORMAT_VERSION` 新时，消息说明方向（"由更新的 harness 写入，请升级 harness 后打开"）；比它旧时说明本构建没有升级路径。经过 legacy 形状归一化后，本构建生成集合（`KNOWN_SESSION_EVENT_TYPES`，由 `gen-persistence-catalog` 生成）之外的事件类型也会拒绝重建，因为静默跳过该事件可能改变日志其余部分的解读方式。后端为每个会话保留独立文件时，消息附上原始日志路径，被拒绝的文本仍然可读。JSONL 后端直接从原始 header 行拒绝外来版本，先于校验本格式版本的 header 字段和解码任何事件行，因此结构完全不同的未来格式仍会报告升级方向，绝不会报"损坏"；SQLite 则先由自己的 `SCHEMA_VERSION` pragma 把关整个文件的结构。设计理由与推迟建设的升级器链见[事件词汇表显式拒绝 Agent Note](../../.agents/notes/implemented/simplification/2026-08-25-fail-closed-session-event-vocabulary.zh.md)。
 
+`dag/state` 是该事件 vocabulary 的一个已知类型化成员。其领域 payload 包含完整的版本 1 调度器快照，但添加该成员不改变 JSONL header 或 event envelope。因此 `SESSION_FORMAT_VERSION` 保持 `0`；不知道 `dag/state` 的构建通过事件 vocabulary 检查拒绝它，而不是错误读取或跳过它。[DAG 子系统](dag.zh.md)拥有 payload 版本与 replay 规则。
+
 ## `CreateSessionOptions`：seed 与元数据
 
 通过 store 创建 `Session` 时会接收 `seed`（初始回放或 fork 历史）与 `meta`（store 整合进 `SessionHeader` 的存储层字段）。store 填充 `version`/`id` 并为 `createdAt` 提供默认值；调用方可以提供已校验的绝对 `cwd`、`parentSession` 谱系、`seedLength` 种子边界、可选的粗粒度 `origin`、`delegationDepth`、用于组装该 agent（智能体）的 `agentPreset` 以及已有的 `createdAt`。`origin: 'subagent'` 让产品导航能够隐藏重复的 child 行；它不证明描述符有效，也不证明 child 可以恢复。

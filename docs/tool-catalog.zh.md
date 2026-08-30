@@ -28,6 +28,7 @@
 | `@deepseek-ai/dsh-tool-bash-persistent` | `bash` | `ctx.tools`、`ctx.terminals`、`an owning Agent at execution time` | `tool/call`、`PTY shell state`、`tool/result` | - | 一个按所有者隔离的持久 bash 工具；部署组合提供 PTY 后端，并可覆盖面向模型的环境描述。 |
 | `@deepseek-ai/dsh-tool-pwsh-persistent` | `pwsh` | `ctx.tools`、`ctx.terminals`、`an owning Agent at execution time` | `tool/call`、`PTY shell state`、`tool/result` | - | 一个按所有者隔离的持久 pwsh 工具，持久 bash 工具的 Windows 对应物；部署组合提供 pwsh 方言的 PTY 后端，并可覆盖面向模型的环境描述。 |
 | `@deepseek-ai/dsh-tool-str-replace-editor` | `str_replace_editor` | `ctx.tools`、`ctx.fs` | `tool/call`、`fs/observed after view presence/absence, edit absence, or successful mutation`、`tool/result` | - | 基于文件系统 seam 的独立查看／创建／唯一字面量替换／按行插入工具；可与任何 shell 或终端接口组合。 |
+| `@deepseek-ai/dsh-tool-dag` | `dag_dispatch`、`dag_node_block`、`dag_node_complete`、`dag_node_inspect`、`dag_node_redispatch`、`dag_node_reset`、`dag_node_resume`、`dag_node_steer`、`dag_node_stop`、`dag_status`、`dag_wait`、`dag_write` | `ctx.tools`、`ctx.dag`、`ctx.systemPrompt`、`an owning dispatcher or DAG child Agent` | `tool/call`、`dag/state for mutations`、`tool/result` | - | 调度器获得十个图控制工具。owner-bound DAG 子级只获得 dag_status、dag_node_complete 与 dag_node_block。本目录合并两组作用域 schema；实际子级组合会移除全部调度器控制。 |
 | `@deepseek-ai/dsh-tool-fs` | `edit`、`read`、`read_image`、`write` | `ctx.tools`、`ctx.fs`、`ctx.systemPrompt`、`ctx.attachments (image-tool registration)`、`ctx.llm + an image-capable route (image-tool execution)` | `tool/call`、`fs/write-intent or fs/edit-intent for mutations`、`fs/observed after read presence/absence or successful file operation`、`durable attachment (read_image)`、`tool/result` | - | 先读后写／编辑策略由 `@deepseek-ai/dsh-fs-observation-policy` 添加；它是一个 `fs/*` 事件门禁插件，不会改变 schema。加载这些工具的部署按预期也应加载该插件。没有 `ctx.attachments` 时图片工具不会注册；其 schema 与路由无关，执行时除非确切路由的模型声明图片输入，否则拒绝。 |
 | `@deepseek-ai/dsh-tool-fs-search` | `glob`、`grep` | `ctx.tools`、`ctx.subprocess`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn 随包提供的 ripgrep 二进制文件（`@vscode/ripgrep`），并作为普通前台调用运行，绝不作为后台任务；无需在宿主机安装 `rg`，也不经过 shell 层。本目录使用 `sampleOverCapGlobResults: true`；部署必须显式选择该行为。结果超过上限时，会通过可选的 ctx.spillStore 后端保存完整的格式化列表；在共置部署中，如果后端公开本地路径，返回的定位信息可供后续读取／搜索。 |
 | `@deepseek-ai/dsh-tool-terminal` | `terminal_close`、`terminal_list`、`terminal_open`、`terminal_read`、`terminal_send`、`terminal_signal` | `ctx.tools`、`ctx.terminals`、`ctx.systemPrompt`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | 这 6 个终端工具需要选择启用，用于补充一次性 bash／文件系统工具。`terminal_send(run_in_background: true)` 会注册到 `ctx.jobs`；schema 不包含 TUI、具名按键序列、BEL、调整尺寸、自动启动和跨 agent 共享。 |
@@ -38,7 +39,7 @@
 | `@deepseek-ai/dsh-tool-skill` | `skill` | `ctx.tools`、`ctx.agents`、`ctx.skills` | `tool/call`、`tool/result`、`user/message replacement catalogs via agent.inject()` | - | - |
 | `@deepseek-ai/dsh-tool-session-query` | `session_event_read`、`session_event_search`、`session_event_trace`、`session_search`、`session_trace` | `ctx.tools`、`ctx.systemPrompt`、`ctx.sessionQuery`、`a calling Agent for workspace authority` | `tool/call`、`tool/result` | - | 这 5 个只读工具会隐藏提供方游标，并根据不可变的调用 agent 会话为每个结果授权。该包需要选择启用；需要强制截止时间或限制行内输出的组合还会挂载通用超时或 spill 策略。 |
 | `@deepseek-ai/dsh-tool-subagent` | `list_subagent_models`、`subagent` | `ctx.tools`、`ctx.subagents`、`ctx.systemPrompt`、`用于模型发现和所选路由校验的 ctx.llm` | `tool/call`、`tool/result`、`child session events through the chosen provider` | `subagent`、`subagent_fork` | 注册的委派工具名称取决于加载时 `toolName` 配置（默认为 `subagent`）；上述默认 schema 关闭模型选择，而发现 schema 则展示为已启用 Session 中可用的固定配套工具。Web preset 会在每个新顶层 Session 创建时读取插件页偏好，并为其子 Session 保留该决定；`subagent_fork` 始终使用固定路由。每个实例通过 `modelSelectionSettings`、`backgroundMode` 与 `enableRunInBackground` 独立控制是否读取模型选择设置及其后台行为。 |
-| `@deepseek-ai/dsh-tool-subagent-control` | `interrupt_agent`、`list_agents`、`send_message` | `ctx.tools`、`ctx.subagents`、`ctx.agents and ctx.sessionProjections (list_agents only)` | `tool/call`、`tool/result`、`child session events through ctx.subagents` | - | 这些是控制可继续后台 subagent 的全局命名工具：绑定提供方的 `tool-subagent` 实例注册不同的委派工具；本包注册一次 `send_message` 和 `interrupt_agent`，另由 `list_agents` 通过单独加载的 `/list-agents` 插件提供，其目录行使用 sessionProjections 和实时 Agent 注册表。 |
+| `@deepseek-ai/dsh-tool-subagent-control` | `interrupt_agent`、`list_agents`、`send_message`、`steer_agent` | `ctx.tools`、`ctx.subagents`、`ctx.agents and ctx.sessionProjections (list_agents only)` | `tool/call`、`tool/result`、`child session events through ctx.subagents` | - | 这些是控制可续行后台 subagent 的全局命名工具：绑定 provider 的 `tool-subagent` 实例注册不同的委派工具；本包注册一次 `send_message`、`steer_agent` 与 `interrupt_agent`，另由单独加载的 `/list-agents` 插件提供 `list_agents`。`send_message` 添加较后的 FIFO 轮次；`steer_agent` 取消并替换当前工作。 |
 | `@deepseek-ai/dsh-tool-subagent-report` | `report` | `ctx.subagents`、`ctx.systemPrompt`、`a live continuable in-process child Agent` | `tool/call`、`tool/result`、`a user-role message in the direct parent session` | - | 按可继续的进程内子级注册，而非全局注册，因此该 schema 仅在这种子级内部可见，并且不受其全局 `toolFilter` 影响。同一份贡献还会安装子级作用域的 `tool:report` 系统提示词 section，本目录不渲染该 section。面向父级的 `send_message` 工具单独安装。 |
 | `@deepseek-ai/dsh-tool-jobs` | `job_kill`、`job_list`、`job_output` | `ctx.tools`、`ctx.jobs`、`ctx.systemPrompt` | `tool/call`、`tool/result`、`user/message via agent.inject() for background completion notices` | - | 与任务种类无关的后台任务控制器：后台 bash 命令、PTY 发送和 subagent 都通过相同的 3 个工具读取、列出和终止。加载该插件会挂接控制器，从而启用生产方的 `ctx.jobs.start()`。 |
 | `@deepseek-ai/dsh-experimental-tool-agent-team` | `followup_task`、`interrupt_agent`、`list_agents`、`send_message`、`spawn_teammate`、`team_task_create`、`team_task_get`、`team_task_list`、`team_task_update`、`wait_agent` | `ctx.tools`、`ctx.systemPrompt`、`ctx.agentTeams`、`an exact live Team member Agent` | `tool/call`、`team/member`、`team/message/queued`、`team/message/delivered`、`team/task`、`tool/result` | - | 这 10 个工具限定于隐式 Team Lead 与持久 teammate 作用域。随产品发布的 dsh-base bundle 默认禁用该包；文档中的 Agent Teams profile patch 会启用它，并禁用旧 continuable child 的同名控制工具。 |
@@ -666,6 +667,350 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 来源：[`packages/fs/tool-str-replace-editor/src/index.ts`](../packages/fs/tool-str-replace-editor/src/index.ts)
 
 基于文件系统 seam 的独立查看／创建／唯一字面量替换／按行插入工具；可与任何 shell 或终端接口组合。
+
+<a id="deepseek-aidsh-tool-dag"></a>
+
+## `@deepseek-ai/dsh-tool-dag`
+
+### `dag_dispatch`
+
+启动互不重复且依赖已就绪的 pending 节点。响应不等待 Git 或子级创建完成。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "node_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "if_revision": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "node_ids"
+  ]
+}
+```
+
+来源：[`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_node_block`
+
+工作无法继续时，用明确原因暂停本 DAG 节点。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "reason"
+  ]
+}
+```
+
+来源：[`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_node_complete`
+
+报告已提交且干净的工作，以执行本地 Git 验证。本调用只接受命令；只有验证成功后节点才会完成。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "summary": {
+      "type": "string"
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {}
+    }
+  },
+  "required": [
+    "summary"
+  ]
+}
+```
+
+来源：[`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_node_inspect`
+
+检查一个节点，包括其持久子级与本地 Git 执行事实。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "node_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "node_id"
+  ]
+}
+```
+
+来源：[`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_node_redispatch`
+
+把一个 failed 节点重新设为 pending，供后续 dag_dispatch 调用使用。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "node_id": {
+      "type": "string"
+    },
+    "if_revision": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "node_id"
+  ]
+}
+```
+
+来源：[`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_node_reset`
+
+把 tracked worktree 状态 reset 到冻结 base、精确 commit 或本地 refs/heads ref。untracked 文件会保留。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "node_id": {
+      "type": "string"
+    },
+    "target": {
+      "type": "string"
+    },
+    "if_revision": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "node_id",
+    "target"
+  ]
+}
+```
+
+来源：[`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_node_resume`
+
+用新指令恢复一个 blocked 或 interrupted 节点。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "node_id": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    },
+    "if_revision": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "node_id",
+    "message"
+  ]
+}
+```
+
+来源：[`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_node_steer`
+
+中断并替换活跃节点工作。已暂停节点会通过 starting 返回。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "node_id": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    },
+    "if_revision": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "node_id",
+    "message"
+  ]
+}
+```
+
+来源：[`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_node_stop`
+
+先提交 interrupted 状态，再取消节点子级。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "node_id": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "if_revision": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "node_id"
+  ]
+}
+```
+
+来源：[`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_status`
+
+读取当前 DAG 面板。工作运行时使用 dag_wait，不要重复调用 status。
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+来源：[`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_wait`
+
+等待较后的可操作 DAG 通知被注入。dispatch 后使用本工具，不要轮询状态。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "after_revision": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "after_revision"
+  ]
+}
+```
+
+来源：[`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_write`
+
+声明或修改完整依赖图。每次调用都发送全部节点。既有节点必须重复其不可变字段与精确 live status。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "brief": {
+            "type": "string",
+            "description": "Must contain VALIDATION: and ACCEPTANCE: sections."
+          },
+          "deps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "starting",
+              "in_progress",
+              "completed",
+              "blocked",
+              "failed",
+              "interrupted"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "task",
+              "integration"
+            ]
+          },
+          "policy": {
+            "type": "string",
+            "enum": [
+              "delegate",
+              "ours",
+              "theirs"
+            ]
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "content",
+          "brief",
+          "deps",
+          "status"
+        ]
+      }
+    },
+    "if_revision": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "nodes"
+  ]
+}
+```
+
+来源：[`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+调度器获得十个图控制工具。owner-bound DAG 子级只获得 dag_status、dag_node_complete 与 dag_node_block。本目录合并两组作用域 schema；实际子级组合会移除全部调度器控制。
 
 <a id="deepseek-aidsh-tool-fs"></a>
 
@@ -1670,7 +2015,33 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 
 来源：[`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts)
 
-这些是控制可继续后台 subagent 的全局命名工具：绑定提供方的 `tool-subagent` 实例注册不同的委派工具；本包注册一次 `send_message` 和 `interrupt_agent`，另由 `list_agents` 通过单独加载的 `/list-agents` 插件提供，其目录行使用 sessionProjections 和实时 Agent 注册表。
+### `steer_agent`
+
+中断后台 subagent 的当前轮次，并用新指令替换它。待处理 inbox 消息继续排队，但该替换轮次先于已排队的普通轮次运行。子级保留其对话与持久会话。本调用只返回被接受的 message id，不等待子级回答。失败表示替换内容**未**投递。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "agent_id": {
+      "type": "string",
+      "description": "The continuable subagent id whose current work must be replaced."
+    },
+    "message": {
+      "type": "string",
+      "description": "Replacement instructions for the subagent."
+    }
+  },
+  "required": [
+    "agent_id",
+    "message"
+  ]
+}
+```
+
+来源：[`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts)
+
+这些是控制可续行后台 subagent 的全局命名工具：绑定 provider 的 `tool-subagent` 实例注册不同的委派工具；本包注册一次 `send_message`、`steer_agent` 与 `interrupt_agent`，另由单独加载的 `/list-agents` 插件提供 `list_agents`。`send_message` 添加较后的 FIFO 轮次；`steer_agent` 取消并替换当前工作。
 
 <a id="deepseek-aidsh-tool-subagent-report"></a>
 

@@ -1,5 +1,5 @@
 /**
- * The globally named `send_message` and `interrupt_agent` tools: thin
+ * The globally named `send_message`, `steer_agent`, and `interrupt_agent` tools: thin
  * model-facing adapters over `ctx.subagents.followup()` and
  * `ctx.subagents.interrupt()`. They perform no lifecycle routing of their own —
  * residency, cold resume, and interrupt authorization belong to the subagent
@@ -115,6 +115,55 @@ export function apply(ctx: Context): void {
       // recorded lineage; the tool adds no authority of its own.
       ctx.subagents.interrupt(SessionId(args.agent_id), { kind: 'ancestor', agent: caller })
       return Promise.resolve({ accepted: true })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'steer_agent',
+    description:
+      'Interrupt a background subagent\'s current turn and replace it with new instructions. Pending inbox '
+      + 'messages remain queued, but this replacement runs before queued ordinary turns. The child keeps its '
+      + 'conversation and durable session. This call returns only the accepted message id; it does not wait for '
+      + 'the child\'s answer. A failure means the replacement was NOT delivered.',
+    parameters: {
+      agent_id: {
+        type: 'string',
+        required: true,
+        description: 'The continuable subagent id whose current work must be replaced.',
+      },
+      message: {
+        type: 'string',
+        required: true,
+        description: 'Replacement instructions for the subagent.',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          messageId: { type: 'string', required: true },
+        },
+      },
+      render: (args, _value) => [{
+        type: 'text',
+        text: `replacement work accepted for subagent ${args.agent_id}`,
+      }],
+    },
+    async execute(args, exec) {
+      const caller = exec.agent
+      if (!caller) throw new Error('steer_agent requires a calling agent (exec.agent was undefined)')
+      const messageId = await ctx.subagents.redirect(
+        caller,
+        SessionId(args.agent_id),
+        [{ type: 'text', text: args.message }],
+        {
+          source: { kind: 'coordinator', form: 'relay', senderSessionId: caller.id },
+          signal: exec.signal,
+          cause: { kind: 'parent' },
+        },
+      )
+      return { messageId }
     },
   }))
 }

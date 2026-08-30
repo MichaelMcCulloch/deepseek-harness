@@ -47,6 +47,8 @@ import * as ToolBashPersistent from '@deepseek-ai/dsh-tool-bash-persistent'
 import * as ToolPwshPersistent from '@deepseek-ai/dsh-tool-pwsh-persistent'
 import CordisHostRunner from '@deepseek-ai/dsh-cordis-host-runner'
 import * as ToolCordis from '@deepseek-ai/dsh-tool-cordis'
+import type DagService from '@deepseek-ai/dsh-dag'
+import * as ToolDag from '@deepseek-ai/dsh-tool-dag'
 import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
 import * as ToolFsSearch from '@deepseek-ai/dsh-tool-fs-search'
 import * as ToolStrReplaceEditor from '@deepseek-ai/dsh-tool-str-replace-editor'
@@ -313,6 +315,21 @@ const TOOL_PACKAGES: ToolPackage[] = [
       'Standalone view/create/unique literal replace/line insert tool over the filesystem seam; it composes with any shell or terminal API.',
   },
   {
+    pkg: '@deepseek-ai/dsh-tool-dag',
+    dir: 'tool-dag',
+    source: 'packages/dag/tool-dag/src/index.ts',
+    requires: ['ctx.tools', 'ctx.dag', 'ctx.systemPrompt', 'an owning dispatcher or DAG child Agent'],
+    writes: ['tool/call', 'dag/state for mutations', 'tool/result'],
+    async mount(ctx) {
+      ctx.provide('dag', {} as DagService)
+      await ctx.plugin(ToolDag)
+      ctx.tools.register(ToolDag.childCompleteTool(ctx))
+      ctx.tools.register(ToolDag.childBlockTool(ctx))
+    },
+    note:
+      'Dispatchers receive ten graph controls. Owner-bound DAG children receive only dag_status, dag_node_complete, and dag_node_block. The catalog combines both scoped schema sets; actual child composition removes every dispatcher control.',
+  },
+  {
     pkg: '@deepseek-ai/dsh-tool-fs',
     dir: 'tool-fs',
     source: 'packages/fs/tool-fs/src/index.ts',
@@ -481,6 +498,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       interrupt_agent: 'packages/subagent/tool-subagent-control/src/index.ts',
       list_agents: 'packages/subagent/tool-subagent-control/src/list-agents.ts',
       send_message: 'packages/subagent/tool-subagent-control/src/index.ts',
+      steer_agent: 'packages/subagent/tool-subagent-control/src/index.ts',
     },
     requires: ['ctx.tools', 'ctx.subagents', 'ctx.agents and ctx.sessionProjections (list_agents only)'],
     writes: ['tool/call', 'tool/result', 'child session events through ctx.subagents'],
@@ -494,7 +512,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       await ctx.plugin(ToolSubagentListAgents)
     },
     note:
-      'The globally named control tools over continuable background subagents: provider-bound `tool-subagent` instances register distinct delegation tools, while this package registers `send_message` and `interrupt_agent` once, plus `list_agents` from its separately loaded `/list-agents` plugin (whose catalog rows use the sessionProjections and live Agent registries).',
+      'The globally named control tools over continuable background subagents: provider-bound `tool-subagent` instances register distinct delegation tools, while this package registers `send_message`, `steer_agent`, and `interrupt_agent` once, plus `list_agents` from its separately loaded `/list-agents` plugin. `send_message` adds a later FIFO turn; `steer_agent` cancels and replaces current work.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-subagent-report',

@@ -131,9 +131,9 @@ persisted Session
        -> zero or more owned child Activations
 ```
 
-`SubagentRuntime.startContinuable()` 会预留稳定的子 agent id，对版本化的 `subagent/descriptor` payload 建立快照，向指定提供方索取其分离的 `ContinuableCreateSpec`，通过私有的 activation-owner 作用域创建子 Agent，建立任何可继续父级的所有权，并提交初始提示词。当收件箱（inbox）准入产出消息 id 时，它以 `{ childId, messageId }` resolve——无需等待轮次开始，也无需等待消息进入会话日志。在该准入之前的任何失败都会以两个 id 都不返回的方式 reject，并 dispose（资源释放）任何已创建的 handle，回滚 Activation 与父级所有权。
+`SubagentRuntime.startContinuable()` 会预留或接受调用方预留的稳定子 agent id 与初始消息 id，对版本化的 `subagent/descriptor` payload 建立快照，向指定提供方索取其分离的 `ContinuableCreateSpec`，通过私有 activation-owner 作用域创建子 Agent，建立任何可继续父级的所有权，并提交初始提示词。可选 `cwd` 必须为绝对路径；它保存在子会话 metadata 中，并在冷恢复时复用。可选持久 owner metadata 与通用 settlement-delivery policy 保存在 descriptor 中。当 inbox 准入产出消息 id 时，该调用以 `{ childId, messageId }` resolve——无需等待轮次开始，也无需等待消息进入会话日志。在该准入之前的任何失败都会以两个 id 都不返回的方式 reject，并 dispose 任何已创建的 handle，回滚 Activation 与父级所有权。
 
-`SubagentRuntime.followup()` 是唯一的继续执行消息操作，其路由仅取决于 Activation 的驻留状态：
+`SubagentRuntime.followup()` 准入一个较后的 FIFO 轮次，其路由仅取决于 Activation 的驻留状态：
 
 | Activation 状态 | `followup` |
 |---|---|
@@ -143,13 +143,13 @@ persisted Session
 
 `running` 表示 Agent 拥有活跃的准入或轮次，或正在唤醒收件箱工作；`waiting` 表示它已完全停稳，但仍拥有至少一个尚未完成 dispose 的子 Activation；`settled` 表示已完全停稳且其拥有的每个子级都已 dispose，此时管理器会 dispose [`AgentHandle`](core.zh.md#creation-and-ownership) 并移除该 Activation。管理器根据 Agent 的完全停稳状态与其拥有的子级集合推导这些内部条件，而非维护第二套执行状态机。
 
-Agent 收件箱是唯一的队列。每条继续执行消息都会成为一个 `Agent.followup()` FIFO 轮次，因此已接受的消息共享同一个可观测顺序，且后续消息无法改变已在进行中的轮次。投递成功会返回被接受的 `MessageId`；既有的 `agent/inbox/inserted`、`agent/inbox/claimed` 与 `agent/inbox/discarded` 事件仍是消息生命周期的观测点，继续执行层不定义任何 subagent 专属的投递路由。
+Agent inbox 是唯一队列。每个 follow-up 都成为一个 `Agent.followup()` FIFO 轮次。`SubagentRuntime.redirect()` 则调用 `Agent.redirect()`：它在保留 inbox 的情况下取消活跃工作，在已排队普通轮次之前插入一个替换普通轮次，并唤醒 Agent。两种操作都返回被接受的 `MessageId`；可选调用方指定 id 支持幂等恢复。既有的 `agent/inbox/inserted`、`agent/inbox/claimed` 与 `agent/inbox/discarded` 事件仍是消息生命周期的观测点，继续执行层不定义 subagent 专属队列。
 
 后续操作的权限来自确切的在线 Agent 工具上下文。已认证的 Agent 必须是持久化子 agent 在 `SessionHeader.parentSession` 中记录的直接父级。`MessageSource` 与 `senderSessionId` 记录谁提供了已准入的消息，但不授予任何权限；可选的面向模型工具使用 `CoordinatorMessageSource`。
 
-对于这两种操作，调用方 signal 仅在收件箱接受之前掌管查找、物化与准入。此后管理器独立掌管该 Activation：之后的调用方取消既不会取消已接受的轮次，也不会 dispose 子 agent，并且该 seam 不对外暴露任何 steering（中途引导）操作。
+对于 start、follow-up 与 redirect，调用方 signal 仅在 inbox 接受之前掌管查找、物化与准入。此后管理器独立掌管该 Activation：之后的调用方取消既不会取消已接受的轮次，也不会 dispose 子 agent。`send_message` 使用 follow-up，仍是较后排队轮次；`steer_agent` 使用 redirect，替换当前工作。
 
-`SubagentRuntime.interrupt(targetSessionId, authority)` 是唯一的公开停止操作：它同步完成鉴权，对在线目标发出 `Agent.cancel(cause, { keepInbox: true })`，然后不等待完全停稳即返回。Activation、其尚未领取的待处理 inbox 工作与已发布的后代均不受影响；已被领取进入中断轮次的工作不会重新入队。被中断的 driver 进入 idle 后，一次唤醒发送会恢复被暂停的 FIFO 队列。不存在的目标——未知、一次性或已结算——以及未绑定管理器的组合是被接受的 no-op。对在线目标，错误的 parent 地址或不在其在线祖先链中的调用方会以 `UNAUTHORIZED` 拒绝；陈旧的 ancestor 对象和指向自身的 ancestor 请求会在查找目标前拒绝。
+`SubagentRuntime.interrupt(targetSessionId, authority)` 是公开 stop 操作：它同步完成鉴权，并在不等待完全停稳的情况下返回。普通子级接收 `Agent.cancel(cause, { keepInbox: true })`。owner-bound 子级把已授权请求委派给其已注册 owner controller；该 controller 可以先提交 owner 状态，再调用相同 cancel closure。Activation、其尚未领取的待处理 inbox 工作与已发布的后代均不受影响；已被领取进入中断轮次的工作不会重新入队。被中断的 driver 进入 idle 后，一次唤醒发送会恢复被暂停的 FIFO 队列。不存在的目标——未知、一次性或已结算——以及未绑定管理器的组合是被接受的 no-op。对在线目标，错误的 parent 地址或不在其在线祖先链中的调用方会以 `UNAUTHORIZED` 拒绝；陈旧的 ancestor 对象和指向自身的 ancestor 请求会在查找目标前拒绝。
 
 ```ts type-equiv
 /**
@@ -182,6 +182,8 @@ interface CoordinatorMessageSource {
 interface SubagentFollowupOptions {
   /** Durable attribution retained on the delivered message; it grants no authority. */
   readonly source: MessageSource
+  /** Optional stable inbox identity used for idempotent recovery. */
+  readonly messageId?: MessageId
   /** Caller cancellation, owning the operation only until inbox acceptance. */
   readonly signal: AbortSignal
 }
@@ -198,6 +200,8 @@ interface ContinuableStart {
 ```
 
 可选的可继续 child 设置贡献可以在 child 基础组合完成后、Activation 发布前安装限定在作用域内的能力。该注册表按顺序执行且具有事务性：设置失败或被撤销时会回滚未发布的 Activation；child 作用域 dispose 时会释放所有安装；新注册项在下一个 Activation 生效；移除注册项时则会立即撤销每个驻留中的安装。
+
+可选 `SubagentOwnerBinding` 在 descriptor 中保存 controller 名称与不可变 JSON metadata。effect-scoped owner-controller registry 把授权保留在本服务中：授权后，stop 同步委派，redirect 可以等待 owner 的持久化屏障；Activation settlement 在通用 parent notice 投递前报告已捕获终态事实。移除 controller 会拒绝新的 owner 操作；既有 descriptor 保留其持久 binding，并在 controller 不可用时明确失败。setup registry 接收相同 binding，因此 owner 可以在新建与冷恢复 Activation 上安装 child-scoped 工具与提示词段。
 
 `SubagentRuntime.reportFrom()` 通过该扩展点实现报告，无需新增第二条队列或承载结果的 child 包装层。调用由确切的在线 child Agent 授权，调用方不能指定接收方。管理器从 child 的持久化 `parentSession` 中推导唯一接收方，要求该 parent Agent 必须在线，将选中内容封装为一条 `subagent-report` 用户消息，并返回该消息的稳定 `MessageId`。静默投递使用 `Agent.inject()`，不会唤醒 parent；next-step 投递使用 `Agent.steer()`，会唤醒空闲 parent，或加入运行中 parent 最近的 step 边界。两种模式都不会结束 child 轮次，最终回答也不会隐式报告。
 
@@ -217,7 +221,7 @@ interface SubagentReportMessageSource {
 type SubagentReportDelivery = 'quiet' | 'next-step'
 ```
 
-上报是 child 自己的选择，因此管理器还保有一份属于自己的记账：当驻留 Activation 结算时，它会向该 child 持久化的直接 parent 投递一条通知，说明该 epoch 如何结束，并携带其最终 assistant 内容。对每个调用方拿到过 id 的 child，这条投递都是无条件的；它发生在会让 parent 被判定为已结算的所有权释放之前，并通过与上报相同的唤醒准入记账到达驻留 parent。若 parent 自身所在的谱系已在拆卸中，这条通知会以不唤醒的方式送达，因为唤醒一个静息 Agent 是开启一个轮次，而不是排队等待工作。其来源信息使用一个独立的 kind，因此 transcript（文本记录）绝不会把运行时的记账呈现为 child 自己写下的内容。
+上报是 child 自己的选择，因此驻留 Activation settle 时，管理器可以保有一份独立记账。`adaptive` 是通用默认值：它根据 parent 状态保留当前 waking 或 quiet 选择。`quiet` 总是注入通用通知，不唤醒或 steer parent。`none` 不创建通用 settlement 通知；DAG 调度器等 owner 会改为发布自己的持久通知。通用投递发生在会让 parent 被判定为 settled 的所有权释放之前，并携带 child 的最终 assistant 内容。其来源信息使用独立 kind，因此 transcript 绝不会把运行时记账呈现为 child 自己写下的内容。
 
 ```ts type-equiv
 /**
@@ -288,7 +292,7 @@ interface ContinuableCreateSpec {
 }
 ```
 
-描述符（[descriptor.ts](../../packages/subagent/subagent/src/descriptor.ts) 中的 `SubagentDescriptorData`）是每个由会话支撑的 subagent 所使用、按模式判别的持久化身份。两种模式都携带提供方名称。`one-shot` 描述符可以携带调用方拥有的可选显示 `label`；`continuable` 描述符要求以委派 `description` 作为持久化创建标签，并另外对已解析的子 agent `agentOptions.provider`／`model`／`reasoningEffort` 与可选的 `persona`／`toolFilter` 建立快照，用于冷恢复。它绝不会对可合并扩展的 `AgentOptions` 对象建立快照，因此无关的扩展值不会破坏继续执行，后续新增组合配置输入则是一次有意的版本更改。描述符省略 `subagentDepth`（冷恢复以持久化 header 中的 `delegationDepth` 作为单调下界）和 `outputSchema`（单次运行或 Activation 的结果约定，而非持久化身份）。
+描述符（[descriptor.ts](../../packages/subagent/subagent/src/descriptor.ts) 中的 `SubagentDescriptorData`）是每个由会话支撑的 subagent 所使用、按模式判别的持久化身份。两种模式都携带提供方名称。`one-shot` 描述符可以携带调用方拥有的可选显示 `label`；`continuable` 描述符要求以委派 `description` 作为持久化创建标签，并另外对已解析的子 agent `agentOptions.provider`／`model`／`reasoningEffort`、可选 `persona`／`toolFilter`、通用 settlement delivery 与可选 owner binding 建立快照，用于冷恢复。绝对 `cwd` 属于子会话 metadata，而不属于 descriptor。描述符绝不会对可合并扩展的 `AgentOptions` 对象建立快照，因此无关的扩展值不会破坏继续执行，后续新增组合配置输入则是一次有意的版本更改。描述符省略 `subagentDepth`（冷恢复以持久化 header 中的 `delegationDepth` 作为单调下界）和 `outputSchema`（单次运行或 Activation 的结果约定，而非持久化身份）。
 
 本地一次性提供方会在子 agent 的初始轮次内、首次请求前追加描述符。继续执行管理器会在任何提供方提供的谱系之后、初始提示词获准之前追加描述符；`header.seedLength` 仍是 fork 谱系边界：恢复时的描述符权威读取子 agent 自身的后缀，而供列表使用的身份投影以 last-wins 折叠 `subagent/descriptor`，子 agent 自己的描述符会覆盖 fork seed 中祖先的描述符。该事件只进入日志：不含 `surfaceOp`，绝不进入模型历史，并由仅追加日志跨压缩保留。格式错误的当前版本描述符属于损坏；本运行时无法对不受支持的版本进行分类。
 
@@ -553,6 +557,20 @@ async startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart>
 async followup( parent: Agent, childId: SessionId, content: ContentBlock[], options: SubagentFollowupOptions, ): Promise<MessageId>
 
 /**
+ * Interrupt one continuable child's active turn and place replacement
+ * content before its queued ordinary turns. An absent child cold-resumes and
+ * accepts the replacement as its next turn. Owner-bound children delegate
+ * the authorized state transition to their registered controller before the
+ * Agent operation runs.
+ * @param parent - exact live direct parent authorizing delivery.
+ * @param childId - durable child session id.
+ * @param content - replacement user-role content.
+ * @param options - source, optional stable message id, cancellation, and interrupt cause.
+ * @returns the accepted inbox message identity.
+ */
+async redirect( parent: Agent, childId: SessionId, content: ContentBlock[], options: SubagentRedirectOptions, ): Promise<MessageId>
+
+/**
  * Interrupt one live continuable child's current turn under a human parent
  * address or an exact live ancestor Agent. Fire-and-return: the cancel
  * signal is issued before this returns, but the target may keep running
@@ -591,6 +609,16 @@ async reportFrom( child: Agent, content: ContentBlock[], options: SubagentReport
  * @returns the exact Cordis effect disposer.
  */
 registerContinuableSetup(contribution: ContinuableSetupContribution): () => void
+
+/**
+ * Register one durable owner namespace. The returned disposer revokes new
+ * owner operations immediately; existing children retain their binding and
+ * fail loud until the same controller name is registered again.
+ * @param name - non-empty durable controller name.
+ * @param controller - owner hooks; redirect admission can be asynchronous.
+ * @returns the exact Cordis effect disposer.
+ */
+registerOwnerController(name: string, controller: SubagentOwnerController): () => void
 
 /**
  * Close continuable admission below exact live parent Agents, stop only their
@@ -682,6 +710,16 @@ listDescendants(rootSessionId: SessionId, signal?: AbortSignal): Promise<Subagen
  *   `internal`.
  */
 @Remote('prompt') async prompt(request: SubagentPromptRequest, signal: AbortSignal): Promise<SubagentPromptReceipt>
+
+/**
+ * Interrupt one browser-addressed continuable child and accept a replacement
+ * ordinary turn before its queued turns. The exact live direct parent remains
+ * the authority credential.
+ * @param request - durable address, request identity, content, and optional browser zone.
+ * @param signal - carrier cancellation through inbox acceptance.
+ * @returns the accepted replacement message identity.
+ */
+@Remote('steer') async steer(request: SubagentSteerRequest, signal: AbortSignal): Promise<SubagentSteerReceipt>
 
 /**
  * Remote face of {@link interrupt} under one durable parent address. No

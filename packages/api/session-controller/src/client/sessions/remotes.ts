@@ -10,6 +10,7 @@ import type { ClientRemote } from '@deepseek-ai/dsh-api-gateway/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {
   SubagentCatalog, SubagentInterruptReceipt, SubagentPromptReceipt, SubagentPromptRequest,
+  SubagentSteerReceipt, SubagentSteerRequest,
 } from '@deepseek-ai/dsh-subagent/client'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { SessionRemote } from '../transport.ts'
@@ -31,6 +32,10 @@ export interface SessionSubagentsRemote {
     request: SubagentPromptRequest,
     signal?: AbortSignal,
   ): Promise<RemoteResult<SubagentPromptReceipt>>
+  steer(
+    request: SubagentSteerRequest,
+    signal?: AbortSignal,
+  ): Promise<RemoteResult<SubagentSteerReceipt>>
   interruptByParent(
     childSessionId: SessionId,
     parentSessionId: SessionId,

@@ -352,6 +352,7 @@ describe('subagent descriptors', () => {
       agentReasoningEffort: ReasoningEffortId('high'),
       persona: 'reviewer',
       toolFilter: { allow: ['read'], deny: ['bash'] },
+      settlementDelivery: 'adaptive' as const,
     }
     expect(snapshotSubagentDescriptor({
       mode: 'continuable',
@@ -371,6 +372,7 @@ describe('subagent descriptors', () => {
         provider: 'spawn',
         label: 'l',
         toolFilter: { allow: ['read'] },
+        settlementDelivery: 'adaptive',
       }),
     ])).toMatchObject({ toolFilter: { allow: ['read'] } })
     expect(foldSubagentDescriptor([
@@ -380,6 +382,7 @@ describe('subagent descriptors', () => {
         provider: 'spawn',
         label: 'l',
         toolFilter: { deny: ['bash'] },
+        settlementDelivery: 'adaptive',
       }),
     ])).toMatchObject({ toolFilter: { deny: ['bash'] } })
     expect(foldSubagentDescriptor([

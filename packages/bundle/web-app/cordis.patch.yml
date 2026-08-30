@@ -261,6 +261,10 @@
     - id: ui-goal
       name: '@deepseek-ai/dsh-client-ui-goal'
 
+    # Read-only DAG projection dock between Goal and Queue.
+    - id: ui-dag
+      name: '@deepseek-ai/dsh-client-ui-dag'
+
     # Per-message feedback: Like/Dislike plus an optional note in the
     # assistant-message action strip, over the messageFeedback Remote.
     - id: ui-message-feedback
@@ -419,6 +423,9 @@
   disabled: true
 
 - id: tool-todo
+  disabled: true
+
+- id: tool-dag
   disabled: true
 
 - id: tool-web

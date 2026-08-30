@@ -1,0 +1,7 @@
+version: 1
+scenario: dag-tool-transcript
+profile: headless
+composition: default
+recording: authored
+header:
+  class: default

@@ -698,7 +698,7 @@ describe('subagent ownership fence', () => {
         seq: 0,
         time: 1,
         data: { version: 2, mode: 'continuable', provider: 'spawn', label: 'ancestor' },
-      }],
+      } as unknown as SessionEvent],
       meta: { cwd: '/proj', parentSession: sid('session-source'), seedLength: 1 },
     })
     const followup = vi.fn()

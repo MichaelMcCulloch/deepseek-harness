@@ -237,7 +237,7 @@ describe('paging', () => {
 })
 
 describe('prompt and cancel errors', () => {
-  it('routes an addressed child through non-activating history, continuation prompt, and interrupt only', async () => {
+  it('routes an addressed child through continuation prompt, steer, and interrupt operations', async () => {
     const api = new FakeApiClient()
     const session = new Session(SID, fakeRemote(api), {
       address: { parentSessionId: PARENT, childSessionId: SID, mode: 'continuable' },
@@ -245,9 +245,11 @@ describe('prompt and cancel errors', () => {
     })
     await session.open()
     const prompted = await session.prompt([{ type: 'text', text: '继续' }], 'queue')
+    const steered = await session.prompt([{ type: 'text', text: '现在改做' }], 'steer')
     const cancelled = await session.cancel()
 
     expect(prompted).toEqual({ ok: true, value: { accepted: true } })
+    expect(steered).toEqual({ ok: true, value: { accepted: true } })
     expect(cancelled).toEqual({ ok: true, value: { accepted: true } })
     expect(api.callsOf('session.follow')).toEqual([
       {
@@ -264,6 +266,15 @@ describe('prompt and cancel errors', () => {
         parentSessionId: PARENT, childSessionId: SID,
         mode: 'continuable',
         content: [{ type: 'text', text: '继续' }],
+        clientTimeZone: new Intl.DateTimeFormat().resolvedOptions().timeZone,
+      },
+    ])
+    expect(api.callsOf('subagents.steer')).toEqual([
+      {
+        requestId: expect.any(String) as unknown as string,
+        parentSessionId: PARENT, childSessionId: SID,
+        mode: 'continuable',
+        content: [{ type: 'text', text: '现在改做' }],
         clientTimeZone: new Intl.DateTimeFormat().resolvedOptions().timeZone,
       },
     ])

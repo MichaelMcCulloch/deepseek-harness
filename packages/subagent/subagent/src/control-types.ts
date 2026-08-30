@@ -114,6 +114,14 @@ export interface SubagentPromptReceipt {
   readonly messageId: MessageId
 }
 
+/** One human redirect addressed to a continuable direct child. */
+export type SubagentSteerRequest = SubagentPromptRequest
+
+/** Inbox identity returned once the continuation accepts one redirect. */
+export interface SubagentSteerReceipt {
+  readonly messageId: MessageId
+}
+
 /** Uniform acknowledgement that one interrupt request was admitted. */
 export interface SubagentInterruptReceipt {
   readonly accepted: true

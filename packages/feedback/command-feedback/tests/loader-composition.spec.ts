@@ -41,6 +41,7 @@ function agent(ctx: Context): Agent {
     send: () => {},
     followup: () => {},
     steer: () => {},
+    redirect: () => {},
     inject: () => {},
     cancel() { status = 'idle' },
     runMaintenance: task => task(new AbortController().signal),

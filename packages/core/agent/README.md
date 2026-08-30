@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-With `dsh-agent` you can create or resume an agent, send a follow-up prompt, steer the current step, inject model-facing context, cancel an activity, and wait until the agent is idle — all through the `Agent` handle every plugin programs against and the live registry (`ctx.agents`) that tracks running agents. The package also carries the process-local initiator scope, which attributes asynchronous work to the agent that started it, and declares the `agent/*` event vocabulary plugins use to observe or intercept work in flight. It has zero loop dependency: concrete creation and driving live in `dsh-agent-loop`, which registers its factory here, so the driver stays swappable. Choose this package when you build UI, hooks, orchestrators, or extension plugins that touch live agents; the interface itself runs no model calls.
+With `dsh-agent` you can create or resume an agent, send a follow-up prompt, steer the current step, interrupt and replace active work, inject model-facing context, cancel an activity, and wait until the agent is idle — all through the `Agent` handle every plugin programs against and the live registry (`ctx.agents`) that tracks running agents. The package also carries the process-local initiator scope, which attributes asynchronous work to the agent that started it, and declares the `agent/*` event vocabulary plugins use to observe or intercept work in flight. It has zero loop dependency: concrete creation and driving live in `dsh-agent-loop`, which registers its factory here, so the driver stays swappable. Choose this package when you build UI, hooks, orchestrators, or extension plugins that touch live agents; the interface itself runs no model calls.
 
 ## Table of Contents
 
@@ -44,7 +44,7 @@ await handle.dispose()   // stops the loop, unregisters, removes the session, un
 
 ### Drive an agent's conversation
 
-The handle's methods route identified user-role messages into the agent's inbox. `followup()` queues an ordinary next-turn prompt and wakes the driver; `steer()` submits next-step input and wakes it; `inject()` adds model-facing context without waking the driver, so it lands in the next admitted step. `cancel(cause)` aborts the active activity and, unless `keepInbox` is set, clears pending work; `whenIdle()` resolves after the whole agent reaches quiescence.
+The handle's methods route identified user-role messages into the agent's inbox. `followup()` queues an ordinary next-turn prompt and wakes the driver; `steer()` submits non-interrupting next-step input and wakes it; `redirect()` cancels active work with pending inbox items preserved, places one replacement ordinary turn before queued ordinary turns, and wakes the driver; `inject()` adds model-facing context without waking the driver, so it lands in the next admitted step. `cancel(cause)` aborts the active activity and, unless `keepInbox` is set, clears pending work; `whenIdle()` resolves after the whole agent reaches quiescence.
 
 ```text
 handle.agent.followup({
@@ -129,11 +129,11 @@ The package-level contract is enough for most consumers; read these when you nee
 <a id="model-experience"></a>
 ## Model Experience
 
-### User, steering, and injected messages
+### User, steering, replacement, and injected messages
 
 #### What the model sees
 
-`followup`, `steer`, and `inject` feed the owning session as identified user-role messages; accepted content becomes part of the derived history the model reads on later steps. `agent/pre-step` and the other declared events let plugins reject a proposed step or add durable request material; this interface contributes no fixed prose itself.
+`followup`, `steer`, `redirect`, and `inject` feed the owning session as identified user-role messages; accepted content becomes part of the derived history the model reads on later steps. Redirect also records the cancellation of active work before its replacement is claimed. `agent/pre-step` and the other declared events let plugins reject a proposed step or add durable request material; this interface contributes no fixed prose itself.
 
 #### Token effect
 
@@ -141,7 +141,7 @@ Accepted content becomes retained history or a repeated session prefix; blocked 
 
 #### KV Cache effect
 
-Accepted history and steering are append-only; a blocked submission sends no request. A session prefix remains stable within its loop instance, while a new or resumed instance may establish a different prefix.
+Accepted history and steering are append-only; redirect ends the active turn and appends its replacement after cancellation convergence. A blocked submission sends no request. A session prefix remains stable within its loop instance, while a new or resumed instance may establish a different prefix.
 
 ### Agent-scoped request composition
 
@@ -167,7 +167,7 @@ These limits define when this package needs special care. They are current packa
 - **Initiator scope is process-local** — workers, child processes, HTTP, durable queues, and restarts must materialize any required identity explicitly.
 - **Ambient identity may outlive liveness** — consumers still check `agent.status`, cancellation, and the owning capability contract before lifecycle-sensitive work.
 - **`agent/session-start` cannot gate startup** — it remains a synchronous, veto-less notification; async composition that must finish before publication belongs in the factory's `setup(agentCtx)` transaction instead.
-- **`cancel()` clears the inbox by default** — it aborts the in-flight turn plus queued and steering work; `cancel(cause, { keepInbox: true })` aborts only the turn and preserves pending items, and there is no step-only abort that keeps the turn running.
+- **`cancel()` clears the inbox by default** — it aborts the in-flight turn plus queued and steering work; `cancel(cause, { keepInbox: true })` aborts only the active work and preserves pending items. `redirect()` always uses the preserving form and adds one replacement ordinary turn; there is no step-only abort that keeps the turn running.
 - **Each additional `UserMessage` carries exactly one `MessageSource`** — contributions from several plugins merged onto one message collapse under one source, so the message cannot name several producers.
 
 <a id="dev-note"></a>

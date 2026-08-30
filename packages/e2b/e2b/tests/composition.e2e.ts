@@ -91,6 +91,7 @@ describe.skipIf(!process.env.E2B_API_KEY)('E2B live Loader composition', () => {
         send() {},
         followup() {},
         steer() {},
+        redirect() {},
         inject() {},
         cancel() {},
         runMaintenance: task => task(new AbortController().signal),

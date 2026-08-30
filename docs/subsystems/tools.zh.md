@@ -167,6 +167,10 @@ interface ToolRestriction {
 }
 ```
 
+## 持久命令 acceptance
+
+工具可以把异步工作转移给另一个持久 owner，而不等待该工作。转移点必须明确：工具先把命令提交到持久状态，再返回包含其 revision 与 operation identity 的 acceptance 值。结果文本必须说明命令已接受，不能说明工作已完成。独立 wait 或 observation 工具报告后续 settlement；存在可取消 wait 时，system prompt 必须禁止状态轮询。原生 DAG 工具对 Git 与可续行子级 effect 使用此形式；其通用 presentation 不暴露文件位置，因为已接受意图不是已完成文件操作。
+
 ## 执行：可扩展的 waterfall（瀑布式事件）加单调策略
 
 `ctx.tools.execute()` 接受由调用方拥有且包含必需 readonly `signal` 的 `ToolExecutionInput`，将其解析后的 JSON 参数一次性物化为流水线拥有的 `ToolExecution`，然后让调用依次经过 `tools/pre-execute`（可重排的 allow/deny/ask waterfall）→ 已注册的单调 guard → `tools/execute`（环绕分派包装层）→ `tools/post-execute`（检查/替换结果）→ 可选且由定义拥有的 `finalizeContent` → `tools/result`（不可变的权威结果）。只有 `tools/execute` 视图可以替换必需的 signal。最终产出为 `ToolExecutionResult`。

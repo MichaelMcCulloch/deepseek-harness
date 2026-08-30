@@ -3459,6 +3459,12 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
             messageId: `fixture-message-${(request as { childSessionId: SessionId }).childSessionId}`,
           },
         })
+        case 'subagents/steer': return Promise.resolve({
+          ok: true,
+          value: {
+            messageId: `fixture-steer-${(request as { childSessionId: SessionId }).childSessionId}`,
+          },
+        })
         case 'subagents/interruptByParent': return Promise.resolve({ ok: true, value: { accepted: true } })
         case 'credentials/describe': return Promise.resolve(credentialRemotes.describe(args.refs ?? []))
         case 'credentials/set': return Promise.resolve(credentialRemotes.set(args.ref as string))

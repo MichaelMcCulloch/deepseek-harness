@@ -11,8 +11,8 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import * as SubagentFork from '@deepseek-ai/dsh-subagent-fork-in-process'
-import type { GenerateOptions, MessageId, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { ToolCallId, createUserMessage, LlmAdapter, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
+import { MessageId, ToolCallId, createUserMessage, freezeMessage, LlmAdapter, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import { MockAdapter, maxTokensResponse, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
@@ -21,6 +21,7 @@ import SubagentRuntime, {
   SUBAGENT_DESCRIPTOR_VERSION,
 } from '../src/index.ts'
 import type { SubagentRunEndInfo, SubagentRunInfo } from '../src/index.ts'
+import type { SubagentOwnerController } from '../src/index.ts'
 import * as SubagentInvariant from '../src/invariant.ts'
 import { TestSessionQuery } from './test-session-query.ts'
 
@@ -239,6 +240,33 @@ describe('SubagentRuntime.startContinuable', () => {
     expect(ctx.agents.get(reservedId)).toBeUndefined()
   })
 
+  it('stores an absolute child cwd and reuses it on cold resume', async () => {
+    const { ctx, parent } = await setup([textResponse('first'), textResponse('second')])
+    parkParent(ctx, parent)
+    const cwd = mkdtempSync(join(tmpdir(), 'dsh-subagent-cwd-'))
+    cleanups.push(async () => { rmSync(cwd, { recursive: true, force: true }) })
+    const observed: string[] = []
+    ctx.on('agent/created', ({ agent }) => {
+      if (agent !== parent) observed.push(agent.session.header.cwd ?? '')
+    })
+
+    const started = await ctx.subagents.startContinuable({ ...startSpec(parent), cwd })
+    await waitNoActivation(ctx, started.childId)
+    await followup(ctx, parent, started.childId, message('resume in place'))
+    await waitNoActivation(ctx, started.childId)
+
+    expect(observed).toEqual([cwd, cwd])
+    const persisted = await ctx.sessionPersistence.load(started.childId)
+    expect(persisted.meta.cwd).toBe(cwd)
+  })
+
+  it('rejects a relative child cwd before it creates a child', async () => {
+    const { ctx, parent } = await setup([])
+    await expect(ctx.subagents.startContinuable({ ...startSpec(parent), cwd: 'relative/path' }))
+      .rejects.toMatchObject({ code: 'INVALID_CWD' })
+    expect(ctx.agents.list()).toEqual([parent])
+  })
+
   it('rejects without ids when the provider has no prepareContinuable capability', async () => {
     const { ctx, parent } = await setup([])
     const start = vi.fn(async () => { throw new Error('must not dispatch') })
@@ -280,6 +308,7 @@ describe('SubagentRuntime.startContinuable', () => {
       label: 'child task',
       agentProvider: 'mock',
       agentModel: 'mock',
+      settlementDelivery: 'adaptive',
     })
     // Model-hidden: the descriptor never carries surface metadata.
     expect('surfaceOp' in descriptor).toBe(false)
@@ -408,6 +437,7 @@ describe('SubagentRuntime.startContinuable', () => {
       mode: 'continuable',
       provider: 'spawn',
       label: 'child task',
+      settlementDelivery: 'adaptive',
     })
     await drainManager(ctx)
   })
@@ -443,6 +473,7 @@ describe('SubagentRuntime.startContinuable', () => {
         provider: 'spawn',
         label: 'child task',
         toolFilter: { deny: ['noop'] },
+        settlementDelivery: 'adaptive',
       })
     await drainManager(ctx)
   })
@@ -739,6 +770,74 @@ describe('SubagentRuntime.followup residency routing', () => {
     await waitNoActivation(ctx, started.childId)
     const loaded = await ctx.sessionPersistence.load(started.childId)
     expect(hasUserText(loaded.events, 'raced')).toBe(true)
+  })
+})
+
+describe('SubagentRuntime.redirect', () => {
+  it('interrupts current work and runs the replacement before queued turns', async () => {
+    const releaseFirst = Promise.withResolvers<undefined>()
+    const adapter = new GatedAdapter([
+      { chunks: textResponse('discarded'), gate: releaseFirst.promise },
+      { chunks: textResponse('replacement answer') },
+      { chunks: textResponse('queued answer') },
+    ])
+    const { ctx, parent } = await setupWith(adapter)
+    parkParent(ctx, parent)
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await vi.waitFor(() => { expect(adapter.requests).toHaveLength(1) })
+    await followup(ctx, parent, started.childId, message('queued work'))
+
+    const redirectId = MessageId('stable-redirect-message')
+    await expect(ctx.subagents.redirect(parent, started.childId, message('replacement work'), {
+      source: { kind: 'coordinator', form: 'relay', senderSessionId: parent.id },
+      messageId: redirectId,
+      cause: { kind: 'parent' },
+      signal: testSignal,
+    })).resolves.toBe(redirectId)
+
+    releaseFirst.resolve(undefined)
+    await waitNoActivation(ctx, started.childId)
+    const loaded = await ctx.sessionPersistence.load(started.childId)
+    expect(userTexts(loaded.events)).toEqual(['child task', 'replacement work', 'queued work'])
+    expect(loaded.events.flatMap(event => event.type === 'turn/end' ? [event.data.reason.kind] : []))
+      .toEqual(['aborted', 'completed', 'completed'])
+  })
+
+  it('checks direct-parent authority before it redirects a live child', async () => {
+    const release = Promise.withResolvers<undefined>()
+    const adapter = new GatedAdapter([{ chunks: textResponse('done'), gate: release.promise }])
+    const { ctx, parent } = await setupWith(adapter)
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await vi.waitFor(() => { expect(adapter.requests).toHaveLength(1) })
+    const stranger = ctx.agentLoop.create(SessionId('redirect-stranger'), { provider: 'mock', model: 'mock' })
+
+    await expect(ctx.subagents.redirect(stranger, started.childId, message('replace it'), {
+      source: { kind: 'user' },
+      cause: { kind: 'parent' },
+      signal: testSignal,
+    })).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+
+    release.resolve(undefined)
+    await waitNoActivation(ctx, started.childId)
+  })
+
+  it('does not run an already-claimed stable message twice after cold resume', async () => {
+    const adapter = new MockAdapter([textResponse('first'), textResponse('stable answer')])
+    const { ctx, parent } = await setupWith(adapter)
+    parkParent(ctx, parent)
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await waitNoActivation(ctx, started.childId)
+    const messageId = MessageId('stable-recovery-message')
+    const options = { source: { kind: 'user' as const }, messageId, signal: testSignal }
+
+    await ctx.subagents.followup(parent, started.childId, message('stable work'), options)
+    await waitNoActivation(ctx, started.childId)
+    await ctx.subagents.followup(parent, started.childId, message('stable work'), options)
+    await waitNoActivation(ctx, started.childId)
+
+    expect(adapter.requests.filter(request => request.sessionId === started.childId)).toHaveLength(2)
+    const loaded = await ctx.sessionPersistence.load(started.childId)
+    expect(userTexts(loaded.events)).toEqual(['child task', 'stable work'])
   })
 })
 
@@ -1738,6 +1837,115 @@ describe('continuable report delivery', () => {
 })
 
 describe('continuable settlement delivery', () => {
+  it('injects quiet settlement without waking an idle parent', async () => {
+    const { ctx, parent, adapter } = await setup([textResponse('quiet answer')])
+    const started = await ctx.subagents.startContinuable({
+      ...startSpec(parent),
+      settlementDelivery: 'quiet',
+    })
+    await waitNoActivation(ctx, started.childId)
+
+    expect(parent.status).toBe('idle')
+    expect(adapter.requests.filter(request => request.sessionId === parent.id)).toEqual([])
+    expect(settlementNotices(parent)).toHaveLength(1)
+    expect(parent.inbox.nextStep).toHaveLength(1)
+  })
+
+  it('suppresses generic settlement delivery under the none policy', async () => {
+    const { ctx, parent } = await setup([textResponse('owned answer')])
+    const started = await ctx.subagents.startContinuable({
+      ...startSpec(parent),
+      settlementDelivery: 'none',
+    })
+    await waitNoActivation(ctx, started.childId)
+
+    expect(settlementNotices(parent)).toEqual([])
+  })
+
+  it('delegates authorized redirect, stop, and settlement to the durable owner', async () => {
+    const releaseFirst = Promise.withResolvers<undefined>()
+    const releaseReplacement = Promise.withResolvers<undefined>()
+    const adapter = new GatedAdapter([
+      { chunks: textResponse('discarded'), gate: releaseFirst.promise },
+      { chunks: textResponse('stopped'), gate: releaseReplacement.promise },
+    ])
+    const { ctx, parent } = await setupWith(adapter)
+    const callbacks: string[] = []
+    let terminalMessageId: MessageId | undefined
+    let setupOwner: unknown
+    const ownerRedirectId = MessageId('owner-rewritten-steer-message')
+    const controller: SubagentOwnerController = {
+      stop(request) {
+        callbacks.push('stop')
+        request.stop()
+      },
+      redirect(request) {
+        callbacks.push('redirect')
+        request.redirect(freezeMessage({
+          id: ownerRedirectId,
+          role: 'user',
+          content: [...request.message.content],
+          source: request.message.source,
+        }))
+      },
+      turnSettled(settlement) {
+        callbacks.push('turn-settled')
+        terminalMessageId = settlement.messageId
+      },
+      settled(settlement) {
+        callbacks.push('settled')
+        terminalMessageId = settlement.messageId
+      },
+    }
+    ctx.subagents.registerOwnerController('test-owner', controller)
+    ctx.subagents.registerContinuableSetup((_childCtx, owner) => {
+      setupOwner = owner
+      return () => {}
+    })
+    const owner = { controller: 'test-owner', metadata: { dispatcher: parent.id, node: 'a' } } as const
+    const started = await ctx.subagents.startContinuable({
+      ...startSpec(parent),
+      owner,
+      settlementDelivery: 'none',
+      messageId: MessageId('owner-start-message'),
+    })
+    await vi.waitFor(() => { expect(adapter.requests).toHaveLength(1) })
+    expect(setupOwner).toEqual(owner)
+
+    const stranger = ctx.agentLoop.create(SessionId('owner-stranger'), { provider: 'mock', model: 'mock' })
+    await expect(ctx.subagents.redirect(stranger, started.childId, message('unauthorized'), {
+      source: { kind: 'user' }, cause: { kind: 'parent' }, signal: testSignal,
+    })).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+    expect(callbacks).toEqual([])
+
+    const steerMessageId = MessageId('owner-steer-message')
+    const acceptedRedirectId = await ctx.subagents.redirect(parent, started.childId, message('replacement'), {
+      source: { kind: 'coordinator', form: 'relay', senderSessionId: parent.id },
+      messageId: steerMessageId,
+      cause: { kind: 'parent' },
+      signal: testSignal,
+    })
+    expect(acceptedRedirectId).toBe(ownerRedirectId)
+    expect(callbacks).toEqual(['redirect'])
+    releaseFirst.resolve(undefined)
+    await vi.waitFor(() => { expect(adapter.requests).toHaveLength(2) })
+    await vi.waitFor(() => { expect(callbacks).toEqual(['redirect', 'turn-settled']) })
+
+    ctx.subagents.interrupt(started.childId, { kind: 'user', parentSessionId: parent.id })
+    expect(callbacks).toEqual(['redirect', 'turn-settled', 'stop'])
+    releaseReplacement.resolve(undefined)
+    await waitNoActivation(ctx, started.childId)
+    await vi.waitFor(() => {
+      expect(callbacks).toEqual(['redirect', 'turn-settled', 'stop', 'turn-settled'])
+    })
+    expect(terminalMessageId).toBe(ownerRedirectId)
+    expect(settlementNotices(parent)).toEqual([])
+
+    const persisted = await ctx.sessionPersistence.load(started.childId)
+    expect(persisted.events.find(event => event.type === 'subagent/descriptor')?.data)
+      .toMatchObject({ owner, settlementDelivery: 'none' })
+  })
+
   it('tells the parent what the child finished with, without being asked', async () => {
     const { ctx, parent } = await setup([textResponse('the answer'), textResponse('parent ack')])
     const started = await ctx.subagents.startContinuable(startSpec(parent))
@@ -2273,7 +2481,7 @@ describe('continuable lifecycle observation', () => {
 })
 
 describe('continuable public API', () => {
-  it('exposes no host authority, residency query, cancellation, steering, or report operation', async () => {
+  it('exposes no host authority, residency query, cancellation, or report operation', async () => {
     const { ctx } = await setup([])
     const subagents: Record<string, unknown> = ctx.subagents as unknown as Record<string, unknown>
     for (const absent of [
@@ -2282,7 +2490,6 @@ describe('continuable public API', () => {
       'kill',
       'report',
       'resume',
-      'steer',
       'steerContinuable',
       'userAuthority',
     ]) {

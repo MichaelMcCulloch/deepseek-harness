@@ -57,6 +57,8 @@ Remote 方法可以同步返回或返回 Promise。若需要协作式取消，Ho
 
 Client 使用普通对象上的具体函数，不使用 JavaScript Proxy。直接调用与作用域调用分别出现在 `ctx.remote.<namespace>` 和 `agentCtx.remote.<namespace>`。每个 namespace 都是注册为 `remote.<namespace>` 的可追踪 Cordis 子服务；Client assembly 通过 `ctx.remote.$mount()` 挂载贡献，最后一个方法撤回后该 namespace 随即卸载。依赖声明归实际调用方所有：只有读取 `ctx.remote.<namespace>` 或 `agentCtx.remote.<namespace>` 的业务包才在自己的 `inject` 中同时声明 `remote` 与 `remote.<namespace>`；只负责挂载 contribution 的 assembly，以及不调用该 namespace 的上层运行时，不代业务包声明 namespace 依赖。当一个 `@Remote` 方法恰好有一个 lookup 参数、且同名 `TypertContextMap` 使用相同 wire identity 时，生成的作用域签名会省略该 identity 参数。`@RemoteScope` 只生成作用域调用接口。
 
+subagent 控制 namespace 说明了两个相似 unary 方法为何必须保持不同。`subagent.prompt` 准入一个较后的 FIFO 轮次；`subagent.steer` 中断活跃子级工作，并在已排队普通轮次前准入其替换轮次。两者都返回已接受 inbox message id；Remote response 不表示子级轮次已完成。`subagent.interruptByParent` 与两种 delivery 方法都把授权与 owner 委派保留在 Host 服务中，不在 wire 上暴露 owner metadata。
+
 ```ts ignore-check
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { AgentContext } from '@deepseek-ai/dsh-api-session-controller/client'

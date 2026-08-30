@@ -15,15 +15,17 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { AgentSetupCommit } from '@deepseek-ai/dsh-agent'
 import { errorChain } from '@deepseek-ai/dsh-llm'
 import { SubagentError } from './error.ts'
+import type { SubagentOwnerBinding } from './types.ts'
 
 /**
  * One deployment capability installed into a continuable child's unpublished
  * creation context. It composes synchronously before publication and returns
  * the disposer for exactly that installation.
  * @param childCtx - the child's unpublished scoped context.
+ * @param owner - durable owner binding, when this child is owner-controlled.
  * @returns the disposer revoking this installation.
  */
-export type ContinuableSetupContribution = (childCtx: Context) => () => void
+export type ContinuableSetupContribution = (childCtx: Context, owner: SubagentOwnerBinding | undefined) => () => void
 
 /** One contribution's live registration. */
 interface Registration {
@@ -85,9 +87,10 @@ export class SubagentActivationSetupRegistry {
   /**
    * Install every live contribution into one unpublished child context.
    * @param childCtx - the child's unpublished scoped context.
+   * @param owner - durable child owner binding, when present.
    * @returns the provisioning commit consumed at Agent publication.
    */
-  apply(childCtx: Context): AgentSetupCommit {
+  apply(childCtx: Context, owner?: SubagentOwnerBinding): AgentSetupCommit {
     const state: TransactionState = { installations: [], invalidated: false }
     try {
       for (const registration of [...this.registrations]) {
@@ -97,7 +100,7 @@ export class SubagentActivationSetupRegistry {
         const installation: Installation = {
           registration,
           childCtx,
-          dispose: registration.contribution(childCtx),
+          dispose: registration.contribution(childCtx, owner),
           released: false,
           transaction: state,
         }

@@ -273,7 +273,7 @@ export function InputBar({
         keyboard.submit(g.resolveSubmitMode(
           g.running,
           accelerated ? 'accelerated' : 'enter',
-          g.subagent === null,
+          g.subagent === null || g.subagent.address.mode === 'continuable',
         ))
       },
       intakeFiles: (files) => { gate.current.intakeImages(files) },
