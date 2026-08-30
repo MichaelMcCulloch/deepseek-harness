@@ -11,6 +11,7 @@ import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { DagBoard, DagDock } from '../src/client/DagDock.tsx'
 import { apply, inject } from '../src/client/index.ts'
 import { en, zh } from '../src/client/locales.ts'
+import { apply as applyHost } from '../src/index.ts'
 
 afterEach(cleanup)
 
@@ -59,6 +60,11 @@ async function bench() {
 }
 
 describe('read-only DAG dock', () => {
+  it('keeps the host half empty', () => {
+    expect(applyHost).toBeTypeOf('function')
+    applyHost()
+  })
+
   it('hides before the first projection and shows counts in topological order', () => {
     const t = makeTranslate(en)
     const empty = render(<DagBoard dag={null} t={t} />)

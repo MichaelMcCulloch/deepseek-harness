@@ -21,6 +21,9 @@ interface GitResult {
   readonly exitCode: number
 }
 
+/** Non-empty argument vector for one Git operation. */
+type GitArgs = readonly [string, ...string[]]
+
 /** Frozen root facts for one dispatch wave. */
 export interface DagRootProbe {
   readonly branch: string
@@ -264,17 +267,17 @@ export class DagGit {
   }
 
   /** Run one exact argument array and require exit code zero. */
-  private async run(cwd: string, args: readonly string[], signal: AbortSignal): Promise<GitResult> {
+  private async run(cwd: string, args: GitArgs, signal: AbortSignal): Promise<GitResult> {
     const result = await this.execute(cwd, args, signal)
     if (result.exitCode !== 0) {
       const detail = [result.stderr.trim(), result.stdout.trim()].filter(Boolean).join('\n') || `exit ${String(result.exitCode)}`
-      throw new DagGitError(`git ${args[0] ?? ''} failed: ${detail}`, args)
+      throw new DagGitError(`git ${args[0]} failed: ${detail}`, args)
     }
     return result
   }
 
   /** Run one exact argument array and preserve a normal non-zero exit for probes. */
-  private async execute(cwd: string, args: readonly string[], signal: AbortSignal): Promise<GitResult> {
+  private async execute(cwd: string, args: GitArgs, signal: AbortSignal): Promise<GitResult> {
     signal.throwIfAborted()
     const executable = await (this.executable ??= this.ctx.subprocess.resolveExecutable(this.config.gitExecutable))
     signal.throwIfAborted()
@@ -294,15 +297,15 @@ export class DagGit {
     const outcome = await handle.done
     const stdout = handle.collected.stdout?.readFrom(0)
     const stderr = handle.collected.stderr?.readFrom(0)
-    if (stdout?.lossy === true || stderr?.lossy === true) throw new DagGitError(`git ${args[0] ?? ''} exceeded the output limit`, args)
+    if (stdout?.lossy === true || stderr?.lossy === true) throw new DagGitError(`git ${args[0]} exceeded the output limit`, args)
     signal.throwIfAborted()
-    if (deadline.aborted) throw new DagGitError(`git ${args[0] ?? ''} exceeded the ${this.config.commandDeadlineMs}ms deadline`, args)
-    if (outcome.exitCode === null) throw new DagGitError(`git ${args[0] ?? ''} terminated by ${outcome.signal ?? 'an unknown signal'}`, args)
+    if (deadline.aborted) throw new DagGitError(`git ${args[0]} exceeded the ${this.config.commandDeadlineMs}ms deadline`, args)
+    if (outcome.exitCode === null) throw new DagGitError(`git ${args[0]} terminated by ${outcome.signal ?? 'an unknown signal'}`, args)
     return { stdout: stdout?.text ?? '', stderr: stderr?.text ?? '', exitCode: outcome.exitCode }
   }
 
   /** Run one probe and map a non-zero exit to absence. */
-  private async tryRun(cwd: string, args: readonly string[], signal: AbortSignal): Promise<GitResult | undefined> {
+  private async tryRun(cwd: string, args: GitArgs, signal: AbortSignal): Promise<GitResult | undefined> {
     const result = await this.execute(cwd, args, signal)
     return result.exitCode === 0 ? result : undefined
   }
@@ -314,7 +317,7 @@ function records(value: string): string[] {
 }
 
 /** Select the exact deterministic local merge policy. */
-function mergeArgs(kind: DagNodeSnapshot['kind'], policy: DagNodeSnapshot['policy'], commit: string): readonly string[] {
+function mergeArgs(kind: DagNodeSnapshot['kind'], policy: DagNodeSnapshot['policy'], commit: string): GitArgs {
   if (kind !== 'integration' || policy === 'delegate') return ['merge', '--no-edit', commit]
   if (policy === 'ours') return ['merge', '--no-edit', '-s', 'ours', commit]
   return ['merge', '--no-edit', '-X', 'theirs', commit]

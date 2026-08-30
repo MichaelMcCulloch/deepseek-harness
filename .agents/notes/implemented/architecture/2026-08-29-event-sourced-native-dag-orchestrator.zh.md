@@ -36,9 +36,9 @@ session-start reconciliation 检查 accepted 和 running 命令，并在重试�
 
 ### Subagent 服务保留授权
 
-可续行子级创建接受绝对 `cwd`、持久 JSON owner metadata 与 `settlementDelivery: adaptive | quiet | none`。通用子级保留既有 continuation lock 与 adaptive settlement 行为。DAG 子级使用其 worktree 作为 `cwd`，携带版本化 DAG owner 记录，并选择 `none`，因为图通知由调度器状态拥有。
+可续行子级创建接受绝对 `cwd`、持久 JSON owner metadata 与 `settlementDelivery: adaptive | quiet | none`。通用子级保留[可继续生命周期](../feature/2026-07-28-continuable-subagent-conversations.zh.md)和 [adaptive settlement 行为](../feature/2026-08-06-manager-owned-subagent-settlement-delivery.zh.md)。DAG 子级使用其 worktree 作为 `cwd`，携带版本化 DAG owner 记录，并选择 `none`，因为图通知由调度器状态拥有。
 
-effect-scoped owner-controller registry 保留在 subagent 服务中。服务授权控制请求后，DAG-owned 子级的 stop、redirect 与子级轮次 settlement 委派给 `DagService`。`Agent.redirect` 取消活跃轮次并保留 inbox 状态，把一个替换普通轮次放在已排队普通轮次之前，然后唤醒 agent。`Agent.steer` 仍是非中断式 next-step 操作。Web Stop、`interrupt_agent` 与 `dag_node_stop` 到达同一个 DAG stop transition；Web steering、`steer_agent` 与 `dag_node_steer` 到达同一个 DAG steer transition。
+effect-scoped owner-controller registry 保留在 subagent 服务中。服务应用[通用控制授权](../feature/2026-08-06-continuable-subagent-interrupt.zh.md)后，DAG-owned 子级的 stop、redirect 与子级轮次 settlement 委派给 `DagService`。`Agent.redirect` 取消活跃轮次并保留 inbox 状态，把一个替换普通轮次放在已排队普通轮次之前，然后唤醒 agent。`Agent.steer` 仍是非中断式 next-step 操作。Web Stop、`interrupt_agent` 与 `dag_node_stop` 到达同一个 DAG stop transition；Web steering、`steer_agent` 与 `dag_node_steer` 到达同一个 DAG steer transition。
 
 调度器接收完整安全面板与十个命令工具。受 owner 约束的子级只接收其拓扑、依赖状态、执行事实，以及 complete 或 block 工具。变更工具返回 command acceptance、revision 与 operation id，不等待 effect。调度器提示词要求使用 `dag_wait`，而不是轮询状态。只读 Web dock 在第一次声明后显示计数与拓扑行，不暴露绝对 worktree 路径。
 

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
-import { DagGit } from '../src/git.ts'
+import { DagGit, dagWorktreeRoot } from '../src/git.ts'
 import type { DagNodeSnapshot } from '../src/types.ts'
 import { DagNodeId } from '../src/ids.ts'
 
@@ -95,6 +95,13 @@ describe('local DAG Git effects', () => {
     await rm(join(root, 'untracked.txt'))
     run(root, 'checkout', '--detach')
     await expect(git.probeRoot(root, signal)).rejects.toThrow(/symbolic local root branch/)
+  })
+
+  it('rejects a root that has no commit', async () => {
+    const empty = join(temporary, 'empty-root')
+    await mkdir(empty, { recursive: true })
+    run(empty, 'init', '-b', 'main')
+    await expect(git.probeRoot(empty, signal)).rejects.toThrow(/valid local HEAD/)
   })
 
   it('creates a local worktree, validates a new clean commit, and preserves untracked files on reset', async () => {
@@ -275,6 +282,57 @@ describe('local DAG Git effects', () => {
       .rejects.toThrow(/not based on frozen wave commit.*reset it first/)
   })
 
+  it('reconciles existing branches and rejects invalid reused worktree paths', async () => {
+    const base = run(root, 'rev-parse', 'HEAD')
+    const branch = 'dsh/dag/session/g1/reconcile'
+    run(root, 'branch', branch, base)
+    const worktree = join(home, 'dag', 'worktrees', 'v1', 'session', 'g1', 'reconcile')
+    await expect(git.prepare(root, snapshot('reconcile'), branch, worktree, base, [], signal))
+      .resolves.toMatchObject({ branch, worktree })
+
+    await writeFile(join(worktree, 'dirty.txt'), 'dirty\n')
+    await expect(git.prepare(root, snapshot('reconcile'), branch, worktree, base, [], signal))
+      .rejects.toThrow(/explicit reset/)
+    await rm(join(worktree, 'dirty.txt'))
+    await expect(git.prepare(root, snapshot('reconcile'), `${branch}-wrong`, worktree, base, [], signal))
+      .rejects.toThrow(/does not match/)
+
+    const ordinary = join(temporary, 'ordinary-directory')
+    await mkdir(ordinary)
+    await expect(git.prepare(root, snapshot('ordinary'), `${branch}-ordinary`, ordinary, base, [], signal))
+      .rejects.toThrow(/not a registered Git worktree root/)
+
+    const nested = join(worktree, 'nested')
+    await mkdir(nested)
+    await expect(git.prepare(root, snapshot('nested'), `${branch}-nested`, nested, base, [], signal))
+      .rejects.toThrow(/not a registered Git worktree root/)
+
+    const regularFile = join(temporary, 'worktree-file')
+    await writeFile(regularFile, 'not a directory\n')
+    await expect(git.prepare(root, snapshot('file'), `${branch}-file`, regularFile, base, [], signal)).rejects.toThrow()
+    await expect(git.prepare(root, snapshot('long'), `${branch}-long`, join(home, 'x'.repeat(300)), base, [], signal))
+      .rejects.toMatchObject({ code: 'ENAMETOOLONG' })
+  })
+
+  it('does not reinterpret a task merge conflict as delegated integration work', async () => {
+    await writeFile(join(root, 'conflict.txt'), 'base\n')
+    run(root, 'add', 'conflict.txt')
+    run(root, 'commit', '-m', 'task conflict base')
+    const base = run(root, 'rev-parse', 'HEAD')
+    const first = await dependency('task-conflict-first', { 'conflict.txt': 'first\n' })
+    const second = await dependency('task-conflict-second', { 'conflict.txt': 'second\n' })
+    const worktree = join(home, 'dag', 'worktrees', 'v1', 'session', 'g1', 'task-conflict')
+    await expect(git.prepare(
+      root,
+      snapshot('task-conflict', { files: [], deps: [DagNodeId('first'), DagNodeId('second')] }),
+      'dsh/dag/session/g1/task-conflict',
+      worktree,
+      base,
+      [first, second],
+      signal,
+    )).rejects.toThrow(/CONFLICT/)
+  })
+
   it('verifies durable preparation before retry while preserving later child work', async () => {
     const base = run(root, 'rev-parse', 'HEAD')
     const dependencyCommit = await dependency('retry-evidence-dep', { 'dependency.txt': 'dependency\n' })
@@ -298,6 +356,57 @@ describe('local DAG Git effects', () => {
     await expect(git.verifyPrepared(root, durable, signal)).resolves.toBeUndefined()
     run(worktree, 'reset', '--hard', base)
     await expect(git.verifyPrepared(root, durable, signal)).rejects.toThrow(/does not retain prepared commit/)
+  })
+
+  it('rejects each invalid durable preparation fact before retry', async () => {
+    const base = run(root, 'rev-parse', 'HEAD')
+    await expect(git.verifyPrepared(root, snapshot('missing-facts'), signal)).rejects.toThrow(/lacks durable prepared/)
+
+    const completeFacts = (id: string, worktree: string, branch: string, preparedHead = base): DagNodeSnapshot =>
+      snapshot(id, { worktree, branch, frozenWaveBase: base, preparedHead })
+    await expect(git.verifyPrepared(root, completeFacts('missing', join(temporary, 'missing'), 'missing'), signal))
+      .rejects.toThrow(/is missing/)
+    const regularFile = join(temporary, 'prepared-file')
+    await writeFile(regularFile, 'file\n')
+    await expect(git.verifyPrepared(root, completeFacts('file', regularFile, 'file'), signal)).rejects.toThrow(/is missing/)
+    await mkdir(home, { recursive: true })
+    await expect(git.verifyPrepared(root, completeFacts('long', join(home, 'y'.repeat(300)), 'long'), signal))
+      .rejects.toMatchObject({ code: 'ENAMETOOLONG' })
+
+    const ordinary = join(temporary, 'prepared-ordinary')
+    await mkdir(ordinary)
+    await expect(git.verifyPrepared(root, completeFacts('ordinary', ordinary, 'ordinary'), signal))
+      .rejects.toThrow(/not a registered Git worktree root/)
+
+    const validPath = join(home, 'dag', 'worktrees', 'v1', 'session', 'g1', 'verify-valid')
+    const validBranch = 'dsh/dag/session/g1/verify-valid'
+    const prepared = await git.prepare(root, snapshot('verify-valid'), validBranch, validPath, base, [], signal)
+    const nested = join(validPath, 'nested')
+    await mkdir(nested)
+    await expect(git.verifyPrepared(root, completeFacts('nested', nested, validBranch, prepared.head), signal))
+      .rejects.toThrow(/not a registered Git worktree root/)
+
+    const other = join(temporary, 'verify-other')
+    await mkdir(other)
+    run(other, 'init', '-b', 'main')
+    run(other, 'config', 'user.email', 'dag@example.invalid')
+    run(other, 'config', 'user.name', 'DAG Test')
+    await writeFile(join(other, 'other.txt'), 'other\n')
+    run(other, 'add', 'other.txt')
+    run(other, 'commit', '-m', 'other')
+    await expect(git.verifyPrepared(root, completeFacts('other', other, 'main', run(other, 'rev-parse', 'HEAD')), signal))
+      .rejects.toThrow(/different repository/)
+
+    await expect(git.verifyPrepared(root, { ...completeFacts('branch', validPath, 'wrong', prepared.head) }, signal))
+      .rejects.toThrow(/branch.*does not match/)
+    await expect(git.verifyPrepared(root, completeFacts('short', validPath, validBranch, prepared.head.slice(0, 12)), signal))
+      .rejects.toThrow(/does not resolve exactly/)
+
+    const unrelated = await dependency('unrelated-wave', { 'unrelated.txt': 'unrelated\n' })
+    await expect(git.verifyPrepared(root, {
+      ...completeFacts('wave', validPath, validBranch, prepared.head),
+      frozenWaveBase: unrelated,
+    }, signal)).rejects.toThrow(/does not descend from the frozen wave base/)
   })
 
   it('merges an exact dependency fan-in and checks only child-owned commits', async () => {
@@ -344,6 +453,88 @@ describe('local DAG Git effects', () => {
     )).rejects.toThrow(/owns files changed by dependency/)
     expect(run(worktree, 'rev-parse', 'HEAD')).toBe(base)
     expect(() => run(worktree, 'rev-parse', '--verify', 'MERGE_HEAD')).toThrow()
+  })
+
+  it('distinguishes integration preparation from a task completion commit', async () => {
+    const base = run(root, 'rev-parse', 'HEAD')
+    const dependencyCommit = await dependency('completion-preparation', { 'dependency.txt': 'dependency\n' })
+
+    const taskPath = join(home, 'dag', 'worktrees', 'v1', 'session', 'g1', 'prepared-task')
+    const task = snapshot('prepared-task', {
+      deps: [DagNodeId('dependency')],
+      dependencyCommits: [dependencyCommit],
+    })
+    const preparedTask = await git.prepare(
+      root, task, 'dsh/dag/session/g1/prepared-task', taskPath, base, [dependencyCommit], signal,
+    )
+    await expect(git.validateCompletion({
+      ...task,
+      branch: preparedTask.branch,
+      worktree: taskPath,
+      frozenWaveBase: base,
+      preparedHead: preparedTask.head,
+    }, signal)).rejects.toThrow(/commit after dependency preparation/)
+
+    const integrationPath = join(home, 'dag', 'worktrees', 'v1', 'session', 'g1', 'prepared-integration')
+    const integration = snapshot('prepared-integration', {
+      kind: 'integration',
+      files: [],
+      deps: [DagNodeId('dependency')],
+      dependencyCommits: [dependencyCommit],
+    })
+    const preparedIntegration = await git.prepare(
+      root, integration, 'dsh/dag/session/g1/prepared-integration', integrationPath, base, [dependencyCommit], signal,
+    )
+    await expect(git.validateCompletion({
+      ...integration,
+      branch: preparedIntegration.branch,
+      worktree: integrationPath,
+      frozenWaveBase: base,
+      preparedHead: preparedIntegration.head,
+    }, signal)).resolves.toBe(preparedIntegration.head)
+
+    const unrestrictedPath = join(home, 'dag', 'worktrees', 'v1', 'session', 'g1', 'unrestricted-task')
+    const unrestricted = snapshot('unrestricted-task', { files: [] })
+    const preparedUnrestricted = await git.prepare(
+      root, unrestricted, 'dsh/dag/session/g1/unrestricted-task', unrestrictedPath, base, [], signal,
+    )
+    await writeFile(join(unrestrictedPath, 'outside.txt'), 'allowed\n')
+    run(unrestrictedPath, 'add', 'outside.txt')
+    run(unrestrictedPath, 'commit', '-m', 'unrestricted completion')
+    const unrestrictedHead = run(unrestrictedPath, 'rev-parse', 'HEAD')
+    await expect(git.validateCompletion({
+      ...unrestricted,
+      branch: preparedUnrestricted.branch,
+      worktree: unrestrictedPath,
+      frozenWaveBase: base,
+      preparedHead: preparedUnrestricted.head,
+    }, signal)).resolves.toBe(unrestrictedHead)
+    await expect(git.reset(snapshot('missing-reset'), base, signal)).rejects.toThrow(/no worktree to reset/)
+    await expect(git.reset({
+      ...unrestricted,
+      status: 'failed',
+      branch: preparedUnrestricted.branch,
+      worktree: unrestrictedPath,
+      frozenWaveBase: base,
+      preparedHead: preparedUnrestricted.head,
+    }, unrestrictedHead, signal)).resolves.toMatchObject({ targetCommit: unrestrictedHead })
+  })
+
+  it('rejects missing and wrong-branch completion facts', async () => {
+    await expect(git.validateCompletion(snapshot('missing-completion'), signal)).rejects.toThrow(/lacks frozen local Git/)
+    const base = run(root, 'rev-parse', 'HEAD')
+    const worktree = join(home, 'dag', 'worktrees', 'v1', 'session', 'g1', 'wrong-completion-branch')
+    const prepared = await git.prepare(
+      root, snapshot('wrong-completion-branch'), 'dsh/dag/session/g1/wrong-completion-branch', worktree, base, [], signal,
+    )
+    await expect(git.validateCompletion(snapshot('wrong-completion-branch', {
+      branch: 'wrong', worktree, frozenWaveBase: base, preparedHead: prepared.head,
+    }), signal)).rejects.toThrow(/completion is on/)
+
+    run(worktree, 'checkout', '--detach')
+    await expect(git.validateCompletion(snapshot('detached-completion', {
+      branch: prepared.branch, worktree, frozenWaveBase: base, preparedHead: prepared.head,
+    }), signal)).rejects.toThrow(/git symbolic-ref failed: exit 1/)
   })
 
   it.each([
@@ -482,5 +673,9 @@ describe('local DAG Git effects', () => {
     const reason = new Error('cancel Git')
     controller.abort(reason)
     await expect(git.probeRoot(root, controller.signal)).rejects.toBe(reason)
+  })
+
+  it('builds the versioned local worktree root', () => {
+    expect(dagWorktreeRoot('/dsh', 'session-hash', 3)).toBe(join('/dsh', 'dag', 'worktrees', 'v1', 'session-hash', 'g3'))
   })
 })

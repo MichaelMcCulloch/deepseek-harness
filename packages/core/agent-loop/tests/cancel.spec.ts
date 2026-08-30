@@ -55,6 +55,23 @@ function userTexts(agent: Agent): string[] {
 }
 
 describe('Agent.cancel()', () => {
+  it('redirects an idle agent without an active turn to cancel', async () => {
+    const adapter = new MockAdapter([textResponse('replacement reply')])
+    const ctx = await harness(adapter)
+    const agent = ctx.agentLoop.create(SessionId('idle-redirect'), { provider: 'mock', model: 'mock' })
+
+    agent.redirect(createUserMessage({
+      content: [{ type: 'text', text: 'replacement' }],
+      source: { kind: 'user' },
+    }), { kind: 'user' })
+    await agent.whenIdle()
+
+    expect(userTexts(agent)).toEqual(['replacement'])
+    expect(adapter.requests).toHaveLength(1)
+    expect(agent.session.events.findLast(event => event.type === 'turn/end')?.data.reason)
+      .toEqual({ kind: 'completed' })
+  })
+
   it('redirect cancels active work and runs its replacement before queued turns', async () => {
     const adapter = new MockAdapter([
       'hang',

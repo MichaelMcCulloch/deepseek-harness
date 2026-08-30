@@ -323,8 +323,8 @@ const TOOL_PACKAGES: ToolPackage[] = [
     async mount(ctx) {
       ctx.provide('dag', {} as DagService)
       await ctx.plugin(ToolDag)
-      ctx.tools.register(ToolDag.childCompleteTool(ctx))
-      ctx.tools.register(ToolDag.childBlockTool(ctx))
+      ctx.tools.register(ToolDag.childCompleteTool(ctx.dag))
+      ctx.tools.register(ToolDag.childBlockTool(ctx.dag))
     },
     note:
       'Dispatchers receive ten graph controls. Owner-bound DAG children receive only dag_status, dag_node_complete, and dag_node_block. The catalog combines both scoped schema sets; actual child composition removes every dispatcher control.',

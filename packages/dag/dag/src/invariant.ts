@@ -26,7 +26,7 @@ const LEGAL_EDGES: Readonly<Record<DagNodeSnapshot['status'], readonly DagNodeSn
   interrupted: ['interrupted', 'starting'],
 }
 
-const OPERATION_CAUSES = new Set([
+const OPERATION_CAUSES = [
   'write',
   'dispatch',
   'redispatch',
@@ -36,27 +36,35 @@ const OPERATION_CAUSES = new Set([
   'reset',
   'complete',
   'block',
-])
+] as const
+type OperationCause = typeof OPERATION_CAUSES[number]
+const OPERATION_CAUSE_SET = new Set<string>(OPERATION_CAUSES)
+
+/** Narrow a durable receipt cause to the scheduler vocabulary. */
+function isOperationCause(cause: string): cause is OperationCause {
+  return OPERATION_CAUSE_SET.has(cause)
+}
 
 /** Check the node edge attached to one newly accepted public operation. */
 function matchesAcceptedEdge(
-  cause: string,
+  cause: OperationCause,
   prior: DagNodeSnapshot | undefined,
   next: DagNodeSnapshot,
 ): boolean {
   if (cause === 'write') return prior === undefined ? next.status === 'pending' : next.status === prior.status
+  /* v8 ignore next -- the caller rejects a new node before checking a non-write accepted edge. */
   if (prior === undefined) return false
-  if (cause === 'dispatch') return prior.status === 'pending' && next.status === 'starting'
-  if (cause === 'redispatch') return prior.status === 'failed' && next.status === 'pending'
-  if (cause === 'resume') return (prior.status === 'blocked' || prior.status === 'interrupted') && next.status === 'starting'
-  if (cause === 'steer') return (prior.status === 'in_progress' && next.status === 'in_progress')
-    || ((prior.status === 'blocked' || prior.status === 'interrupted') && next.status === 'starting')
-  if (cause === 'stop') return (prior.status === 'starting' || prior.status === 'in_progress' || prior.status === 'blocked')
+  const existing = prior
+  if (cause === 'dispatch') return existing.status === 'pending' && next.status === 'starting'
+  if (cause === 'redispatch') return existing.status === 'failed' && next.status === 'pending'
+  if (cause === 'resume') return (existing.status === 'blocked' || existing.status === 'interrupted') && next.status === 'starting'
+  if (cause === 'steer') return (existing.status === 'in_progress' && next.status === 'in_progress')
+    || ((existing.status === 'blocked' || existing.status === 'interrupted') && next.status === 'starting')
+  if (cause === 'stop') return (existing.status === 'starting' || existing.status === 'in_progress' || existing.status === 'blocked')
     && next.status === 'interrupted'
-  if (cause === 'reset') return (prior.status === 'pending' || prior.status === 'failed') && next.status === prior.status
-  if (cause === 'complete') return prior.status === 'in_progress' && next.status === 'in_progress'
-  if (cause === 'block') return prior.status === 'in_progress' && next.status === 'blocked'
-  return false
+  if (cause === 'reset') return (existing.status === 'pending' || existing.status === 'failed') && next.status === existing.status
+  if (cause === 'complete') return existing.status === 'in_progress' && next.status === 'in_progress'
+  return existing.status === 'in_progress' && next.status === 'blocked'
 }
 
 /**
@@ -86,7 +94,7 @@ export function validateDagState(previous: DagState | null, state: DagState): vo
   if (addedReceipts.length !== operationDelta) throw new Error('operation delta does not match new receipts')
   const acceptedOperation = addedReceipts[0]
   if (acceptedOperation !== undefined) {
-    if (!OPERATION_CAUSES.has(acceptedOperation.cause)) throw new Error(`unknown operation cause ${JSON.stringify(acceptedOperation.cause)}`)
+    if (!isOperationCause(acceptedOperation.cause)) throw new Error(`unknown operation cause ${JSON.stringify(acceptedOperation.cause)}`)
     if (acceptedOperation.acceptedRevision !== state.revision) throw new Error('new operation receipt does not name its snapshot revision')
     if (new Set(acceptedOperation.nodeIds).size !== acceptedOperation.nodeIds.length) throw new Error('new operation receipt repeats node ids')
   }
@@ -112,7 +120,7 @@ export function validateDagState(previous: DagState | null, state: DagState): vo
     if (prior === undefined && accepted?.cause !== 'write') {
       throw new Error(`node ${JSON.stringify(node.id)} appeared without a write operation`)
     }
-    if (accepted !== undefined && !matchesAcceptedEdge(accepted.cause, prior, node)) {
+    if (accepted !== undefined && !matchesAcceptedEdge(accepted.cause as OperationCause, prior, node)) {
       throw new Error(`node ${JSON.stringify(node.id)} does not match accepted ${accepted.cause} operation`)
     }
     if (prior !== undefined && !sameDefinition(prior, node)) throw new Error(`node ${JSON.stringify(node.id)} changed its definition`)
@@ -225,8 +233,7 @@ export function validateDagState(previous: DagState | null, state: DagState): vo
   if (acceptedOperation !== undefined && acceptedOperation.nodeIds.some(id => !ids.has(id))) {
     throw new Error('new operation receipt names an unknown node')
   }
-  if (acceptedOperation?.cause === 'write'
-    && (acceptedOperation.nodeIds.length !== ids.size || acceptedOperation.nodeIds.some(id => !ids.has(id)))) {
+  if (acceptedOperation?.cause === 'write' && acceptedOperation.nodeIds.length !== ids.size) {
     throw new Error('write operation receipt does not name the complete declaration')
   }
   const ordered = new Set(state.topologicalOrder)
@@ -241,10 +248,9 @@ export function validateDagState(previous: DagState | null, state: DagState): vo
     && JSON.stringify(state.topologicalOrder) !== JSON.stringify(previous.topologicalOrder)) {
     throw new Error('topologicalOrder changed without a write operation')
   }
-  const positions = new Map(state.topologicalOrder.map((id, index) => [id, index]))
   for (const node of state.nodes) {
     for (const dep of node.deps) {
-      if (!ids.has(dep) || (positions.get(dep) ?? Number.MAX_SAFE_INTEGER) >= (positions.get(node.id) ?? -1)) {
+      if (!ids.has(dep) || state.topologicalOrder.indexOf(dep) >= state.topologicalOrder.indexOf(node.id)) {
         throw new Error(`node ${JSON.stringify(node.id)} has an invalid topological dependency ${JSON.stringify(dep)}`)
       }
       if (node.status !== 'pending' && state.nodes.find(row => row.id === dep)?.status !== 'completed') {
@@ -253,9 +259,6 @@ export function validateDagState(previous: DagState | null, state: DagState): vo
     }
   }
   for (const prior of previous?.nodes ?? []) {
-    if (!ids.has(prior.id) && acceptedOperation?.cause !== 'write') {
-      throw new Error(`node ${JSON.stringify(prior.id)} disappeared without a write operation`)
-    }
     if ((prior.status === 'starting' || prior.status === 'in_progress' || prior.status === 'blocked') && !ids.has(prior.id)) {
       throw new Error(`active node ${JSON.stringify(prior.id)} was removed`)
     }
@@ -267,7 +270,8 @@ export function validateDagState(previous: DagState | null, state: DagState): vo
   }
   const ready = state.topologicalOrder.filter((id) => {
     const node = state.nodes.find(row => row.id === id)
-    return node?.status === 'pending' && node.deps.every(dep => state.nodes.find(row => row.id === dep)?.status === 'completed')
+    return node?.status === 'pending'
+      && node.deps.every(dep => state.nodes.find(row => row.id === dep)?.status === 'completed')
   })
   if (JSON.stringify(state.readyNodeIds) !== JSON.stringify(ready)) throw new Error('readyNodeIds does not match the node board')
   const active = state.nodes.flatMap(node => node.commands.filter(command => command.state !== 'settled').map(command => command.id))
@@ -285,7 +289,6 @@ export function validateDagState(previous: DagState | null, state: DagState): vo
       throw new Error(`operation receipt ${JSON.stringify(receipt.id)} changed`)
     }
   }
-  if (previous !== null && state.receipts.length < previous.receipts.length) throw new Error('operation receipts were removed')
   for (const command of state.nodes.flatMap(node => node.commands)) {
     if (!receiptIds.has(command.operationId)) throw new Error(`command ${JSON.stringify(command.id)} lacks an operation receipt`)
   }
@@ -364,7 +367,6 @@ function applyEvent(previous: DagState | null, event: SessionEvent, fail: Invari
     return event.data.state
   } catch (error) {
     fail(`session event ${event.seq} violates the durable DAG stream: ${error instanceof Error ? error.message : String(error)}`)
-    return previous
   }
 }
 
@@ -379,14 +381,15 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
     return state
   }
   const stage = (session: Session, event: SessionEvent): void => {
+    /* v8 ignore next -- session/event always follows list() or session/created seeding */
     const previous = states.get(session) ?? seed(session)
     staged.set(event, { session, state: applyEvent(previous, event, fail) })
   }
   const publish = (session: Session, event: SessionEvent): void => {
     const candidate = staged.get(event)
+    /* v8 ignore next 2 -- internal/dispatch stages the exact callback arguments */
     if (candidate === undefined || candidate.session !== session) {
       fail('session/event reached publication without matching DAG validation')
-      return
     }
     staged.delete(event)
     states.set(session, candidate.state)

@@ -594,7 +594,10 @@ Requires: `agents` · `subagents` · `subprocess` · `sessions`
 
 ```ts config-catalog
 /** Deployment choices for the local DAG runtime. */
-export interface Config {
+export interface Config extends DagRuntimeConfig {}
+
+/** Deployment choices accepted by the local DAG runtime. */
+export interface DagRuntimeConfig {
   /** Optional DSH home. A blank value uses normal DSH_HOME resolution. */
   readonly dshHome?: string
   /** Git executable name or absolute path. */
@@ -610,7 +613,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/dag/dag/src/index.ts:88`](../packages/dag/dag/src/index.ts)
+Source: [`packages/dag/dag/src/index.ts:103`](../packages/dag/dag/src/index.ts)
 
 <a id="deepseek-aidsh-e2b"></a>
 

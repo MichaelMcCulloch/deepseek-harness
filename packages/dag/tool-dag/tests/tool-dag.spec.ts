@@ -2,14 +2,17 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { DagService } from '@deepseek-ai/dsh-dag'
-import { DagNodeId, DagOperationId } from '@deepseek-ai/dsh-dag'
+import { DagNodeId, DagOperationId, DagWaveId } from '@deepseek-ai/dsh-dag'
 import type { DagNodeSnapshot, DagProjection } from '@deepseek-ai/dsh-dag'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import type { ContinuableSetupContribution, SubagentRuntime } from '@deepseek-ai/dsh-subagent'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+import * as childTool from '../src/child.ts'
 import * as tool from '../src/index.ts'
-import { childBlockTool, childCompleteTool, childStatusTool, DISPATCHER_TOOLS } from '../src/index.ts'
+import { DISPATCHER_TOOLS } from '../src/index.ts'
 
 const contexts: Context[] = []
 
@@ -27,7 +30,10 @@ function projection(): DagProjection {
     }],
     counts: { pending: 0, starting: 0, in_progress: 1, completed: 0, blocked: 0, failed: 0, interrupted: 0 },
     readyNodeIds: [],
-    openWaves: [],
+    openWaves: [{
+      id: DagWaveId('wave-1'), nodeIds: [DagNodeId('a')], rootBranch: 'main', rootHead: '1'.repeat(40),
+      status: 'open', pendingNodeIds: [DagNodeId('a')], completedNodeIds: [], failedNodeIds: [],
+    }],
   }
 }
 
@@ -36,11 +42,26 @@ function inspected(): DagNodeSnapshot {
     id: DagNodeId('a'), content: 'Implement a', brief: 'VALIDATION: test.\nACCEPTANCE: commit.', deps: [], kind: 'task',
     policy: 'delegate', files: ['src/a.ts'], status: 'in_progress', generation: 1, bindingGeneration: 1,
     childSessionId: SessionId('child-a'), branch: 'dsh/dag/test/g1/a', worktree: '/tmp/dag/a', frozenWaveBase: '1'.repeat(40),
-    preparedHead: '1'.repeat(40), dependencyCommits: [], conflictedFiles: [], currentOperationId: DagOperationId('op-2'), commands: [],
+    waveId: DagWaveId('wave-1'), preparedHead: '1'.repeat(40), dependencyCommits: [], conflictedFiles: [],
+    currentOperationId: DagOperationId('op-2'), settlement: { kind: 'completed', summary: 'Done.', artifacts: [] },
+    completedCommit: '2'.repeat(40), commands: [],
   }
 }
 
-function fakeDag() {
+function sparseInspected(): DagNodeSnapshot {
+  return {
+    id: DagNodeId('sparse'), content: 'Sparse node', brief: 'VALIDATION: test.\nACCEPTANCE: commit.', deps: [],
+    kind: 'task', policy: 'delegate', files: [], status: 'pending', generation: 0, bindingGeneration: 0,
+    dependencyCommits: [], conflictedFiles: [], commands: [],
+  }
+}
+
+interface FakeDagOptions {
+  status?: DagProjection | null
+  inspected?: DagNodeSnapshot
+}
+
+function fakeDag(options: FakeDagOptions = {}) {
   const calls: { name: string; args: unknown[] }[] = []
   const accepted = { accepted: true as const, revision: 5, operationId: DagOperationId('op-5') }
   const record = (name: string, value: unknown) => (...args: unknown[]) => {
@@ -50,13 +71,16 @@ function fakeDag() {
   const service = {
     write: record('write', {
       ...accepted,
-      dropped: [{ id: DagNodeId('old'), childSessionId: SessionId('child-old'), branch: 'old-branch', worktree: '/tmp/old' }],
+      dropped: [
+        { id: DagNodeId('old'), childSessionId: SessionId('child-old'), branch: 'old-branch', worktree: '/tmp/old' },
+        { id: DagNodeId('unstarted') },
+      ],
       conflicts: [{ ids: [DagNodeId('a'), DagNodeId('b')], files: ['src/shared.ts'], reason: 'declared-files-overlap' }],
     }),
     dispatch: record('dispatch', accepted),
     wait: record('wait', Promise.resolve({ revision: 5, notices: [], state: projection() })),
-    status: record('status', projection()),
-    inspect: record('inspect', inspected()),
+    status: record('status', options.status === undefined ? projection() : options.status),
+    inspect: record('inspect', options.inspected ?? inspected()),
     redispatch: record('redispatch', accepted),
     resume: record('resume', accepted),
     steer: record('steer', accepted),
@@ -69,10 +93,10 @@ function fakeDag() {
   return { service: service as unknown as DagService, calls }
 }
 
-async function dispatcherBench() {
+async function dispatcherBench(options: FakeDagOptions = {}) {
   const ctx = new Context()
   contexts.push(ctx)
-  const dag = fakeDag()
+  const dag = fakeDag(options)
   ctx.provide('dag', dag.service)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
@@ -119,7 +143,10 @@ describe('native DAG tools', () => {
       accepted: true,
       revision: 5,
       operationId: 'op-5',
-      dropped: [{ id: 'old', childSessionId: 'child-old', branch: 'old-branch', worktree: '/tmp/old' }],
+      dropped: [
+        { id: 'old', childSessionId: 'child-old', branch: 'old-branch', worktree: '/tmp/old' },
+        { id: 'unstarted' },
+      ],
       conflicts: [{ ids: ['a', 'b'], files: ['src/shared.ts'], reason: 'declared-files-overlap' }],
     })
     expect(result.content.every(block => block.type === 'text')).toBe(true)
@@ -136,7 +163,83 @@ describe('native DAG tools', () => {
       worktree: '/tmp/dag/a',
       frozenWaveBase: '1111111111111111111111111111111111111111',
       bindingGeneration: 1,
+      waveId: 'wave-1',
+      completedCommit: '2222222222222222222222222222222222222222',
     })
+  })
+
+  it('omits unavailable dispatcher-only node execution facts', async () => {
+    const { ctx } = await dispatcherBench({ inspected: sparseInspected() })
+    const result = await execute(ctx, 'dag_node_inspect', { node_id: 'sparse' })
+    expect(result.isError).toBe(false)
+    if (result.isError) throw new Error('dag_node_inspect failed')
+    expect(JSON.parse((result.value as { text: string }).text)).toEqual({
+      id: 'sparse',
+      content: 'Sparse node',
+      brief: 'VALIDATION: test.\nACCEPTANCE: commit.',
+      deps: [],
+      kind: 'task',
+      policy: 'delegate',
+      files: [],
+      status: 'pending',
+      generation: 0,
+      bindingGeneration: 0,
+      dependencyCommits: [],
+      conflictedFiles: [],
+      commands: [],
+    })
+  })
+
+  it('routes dispatcher reads and mutations with their optional fields', async () => {
+    const { ctx, calls: dagCalls } = await dispatcherBench()
+    const invocations: [string, object][] = [
+      ['dag_write', { nodes: [], if_revision: 3 }],
+      ['dag_dispatch', { node_ids: ['a'], if_revision: 4 }],
+      ['dag_dispatch', { node_ids: ['a'] }],
+      ['dag_wait', { after_revision: 4 }],
+      ['dag_status', {}],
+      ['dag_node_redispatch', { node_id: 'a' }],
+      ['dag_node_resume', { node_id: 'a', message: 'Continue.', if_revision: 5 }],
+      ['dag_node_steer', { node_id: 'a', message: 'Use the new input.' }],
+      ['dag_node_stop', { node_id: 'a', reason: 'Stop now.', if_revision: 6 }],
+      ['dag_node_stop', { node_id: 'a' }],
+      ['dag_node_reset', { node_id: 'a', target: 'refs/heads/main' }],
+    ]
+    for (const [name, args] of invocations) {
+      const result = await execute(ctx, name, args)
+      expect(result.isError, name).toBe(false)
+    }
+
+    expect(dagCalls.map(call => call.name)).toEqual([
+      'write', 'dispatch', 'dispatch', 'wait', 'status', 'redispatch', 'resume', 'steer', 'stop', 'stop', 'reset',
+    ])
+    expect(dagCalls.filter(call => call.name === 'dispatch').map(call => call.args[2]))
+      .toEqual([{ if_revision: 4 }, {}])
+    expect(dagCalls.filter(call => call.name === 'stop').map(call => call.args.slice(2)))
+      .toEqual([['Stop now.', { if_revision: 6 }], [undefined, {}]])
+
+    const status = await execute(ctx, 'dag_status', {})
+    expect(status.isError).toBe(false)
+    if (status.isError) throw new Error('dag_status failed')
+    expect(JSON.parse((status.value as { text: string }).text)).toMatchObject({
+      nodes: [{ id: 'a', status: 'in_progress' }],
+      waves: [{ id: 'wave-1', status: 'open', pending: ['a'] }],
+    })
+  })
+
+  it('reports an undeclared board and rejects calls without an owning agent', async () => {
+    const { ctx } = await dispatcherBench({ status: null })
+    const status = await execute(ctx, 'dag_status', {})
+    expect(status).toMatchObject({ isError: false, value: { text: 'No DAG declaration.' } })
+
+    const withoutAgent = await ctx.tools.execute({
+      signal: new AbortController().signal,
+      callId: ToolCallId(`dag-call-${++calls}`),
+      name: 'dag_status',
+      arguments: {},
+    })
+    expect(withoutAgent.isError).toBe(true)
+    expect(withoutAgent.content).toEqual([{ type: 'text', text: 'Error: dag_status requires an owning agent' }])
   })
 
   it('unregisters tools and prompt text when its plugin fiber unloads', async () => {
@@ -148,32 +251,59 @@ describe('native DAG tools', () => {
 })
 
 describe('owner-bound child tools', () => {
-  it('gets status and reports completion or block through the child identity only', async () => {
+  it('uses the host DAG service when the child context does not inject it', async () => {
     const ctx = new Context()
     contexts.push(ctx)
     const dag = fakeDag()
+    let setup: ContinuableSetupContribution | undefined
+    const subagents = {
+      registerContinuableSetup(contribution: ContinuableSetupContribution) {
+        setup = contribution
+        return () => { setup = undefined }
+      },
+    } as unknown as SubagentRuntime
     ctx.provide('dag', dag.service)
+    ctx.provide('subagents', subagents)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime).await()
-    ctx.tools.register(childStatusTool(ctx))
-    ctx.tools.register(childCompleteTool(ctx))
-    ctx.tools.register(childBlockTool(ctx))
+    await ctx.plugin(childTool).await()
+    expect(setup).toBeDefined()
+
     const child = owner('child-a')
+    const childRoot = new Context()
+    contexts.push(childRoot)
+    const childFiber = childRoot.plugin(function childScope() {})
+    await childFiber.await()
+    const childCtx = childFiber.ctx.extend({
+      tools: {
+        restrict: () => () => {},
+        register: (definition: ToolDefinition) => ctx.tools.register(definition),
+      } as unknown as Context['tools'],
+      systemPrompt: ctx.systemPrompt,
+    })
+    expect(() => childCtx.dag).toThrow('cannot get property "dag" without inject')
+    setup?.(childCtx, undefined)()
+    const dispose = setup?.(childCtx, { controller: 'dag', metadata: { nodeId: 'a' } })
+    expect(dispose).toBeDefined()
 
     const status = await execute(ctx, 'dag_status', {}, child)
     const complete = await execute(ctx, 'dag_node_complete', {
       summary: 'Committed work.',
       artifacts: [{ kind: 'commit', value: 'abc123' }],
     }, child)
+    const completeWithoutArtifacts = await execute(ctx, 'dag_node_complete', { summary: 'Committed work.' }, child)
     const block = await execute(ctx, 'dag_node_block', { reason: 'Need a decision.' }, child)
 
     expect(status.isError).toBe(false)
     expect(complete.isError).toBe(false)
+    expect(completeWithoutArtifacts.isError).toBe(false)
     expect(block.isError).toBe(false)
     expect(complete).toMatchObject({ concludesTurn: true })
     expect(block).toMatchObject({ concludesTurn: true })
-    expect(dag.calls.map(call => call.name)).toEqual(['statusFrom', 'completeFrom', 'blockFrom'])
+    expect(dag.calls.map(call => call.name)).toEqual(['statusFrom', 'completeFrom', 'completeFrom', 'blockFrom'])
     expect(dag.calls.every(call => call.args[0] === child)).toBe(true)
+    expect(dag.calls[2]?.args[2]).toEqual([])
+    dispose?.()
   })
 
   it('has no dispatcher control tool in its scoped set', () => {

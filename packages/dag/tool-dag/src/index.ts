@@ -2,7 +2,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { DagNodeId } from '@deepseek-ai/dsh-dag'
-import type { DagCommandAccepted, DagProjection } from '@deepseek-ai/dsh-dag'
+import type { DagCommandAccepted, DagProjection, DagService } from '@deepseek-ai/dsh-dag'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolDefinition, ValueSchemaSpec } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-system-prompt'
@@ -241,10 +241,10 @@ function registerNodeCommand(
 
 /**
  * Build the scoped status tool for one DAG child.
- * @param ctx - Child Agent context.
+ * @param dag - Host DAG service that authorizes the child identity.
  * @returns Owner-bound status tool.
  */
-export function childStatusTool(ctx: Context): ToolDefinition {
+export function childStatusTool(dag: DagService): ToolDefinition {
   return defineTool({
     name: 'dag_status',
     description: 'Read graph topology, dependency status, and your node execution facts.',
@@ -252,17 +252,17 @@ export function childStatusTool(ctx: Context): ToolDefinition {
     output: textOutput('status'),
     execute(_args, exec) {
       const child = requireAgent(exec.agent, 'dag_status')
-      return Promise.resolve({ text: JSON.stringify(ctx.dag.statusFrom(child)) })
+      return Promise.resolve({ text: JSON.stringify(dag.statusFrom(child)) })
     },
   })
 }
 
 /**
  * Build the scoped completion-report tool.
- * @param ctx - Child Agent context.
+ * @param dag - Host DAG service that authorizes the child identity.
  * @returns Owner-bound completion tool.
  */
-export function childCompleteTool(ctx: Context): ToolDefinition {
+export function childCompleteTool(dag: DagService): ToolDefinition {
   return defineTool({
     name: 'dag_node_complete',
     description: 'Report committed clean work for local Git validation. This accepts the command; completion follows only after validation succeeds.',
@@ -273,7 +273,7 @@ export function childCompleteTool(ctx: Context): ToolDefinition {
     output: acceptedOutput('DAG completion validation accepted'),
     execute(args, exec) {
       exec.signal.throwIfAborted()
-      const accepted = ctx.dag.completeFrom(
+      const accepted = dag.completeFrom(
         requireAgent(exec.agent, 'dag_node_complete'),
         args.summary,
         args.artifacts ?? [],
@@ -286,10 +286,10 @@ export function childCompleteTool(ctx: Context): ToolDefinition {
 
 /**
  * Build the scoped blocked-report tool.
- * @param ctx - Child Agent context.
+ * @param dag - Host DAG service that authorizes the child identity.
  * @returns Owner-bound block tool.
  */
-export function childBlockTool(ctx: Context): ToolDefinition {
+export function childBlockTool(dag: DagService): ToolDefinition {
   return defineTool({
     name: 'dag_node_block',
     description: 'Suspend this DAG node with a clear reason when work cannot continue.',
@@ -297,7 +297,7 @@ export function childBlockTool(ctx: Context): ToolDefinition {
     output: acceptedOutput('DAG block accepted'),
     execute(args, exec) {
       exec.signal.throwIfAborted()
-      const accepted = ctx.dag.blockFrom(requireAgent(exec.agent, 'dag_node_block'), args.reason)
+      const accepted = dag.blockFrom(requireAgent(exec.agent, 'dag_node_block'), args.reason)
       exec.concludeTurn()
       return Promise.resolve(acceptance(accepted))
     },

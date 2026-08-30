@@ -596,7 +596,10 @@ export interface Config {
 
 ```ts config-catalog
 /** Deployment choices for the local DAG runtime. */
-export interface Config {
+export interface Config extends DagRuntimeConfig {}
+
+/** Deployment choices accepted by the local DAG runtime. */
+export interface DagRuntimeConfig {
   /** Optional DSH home. A blank value uses normal DSH_HOME resolution. */
   readonly dshHome?: string
   /** Git executable name or absolute path. */
@@ -612,7 +615,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/dag/dag/src/index.ts:86`](../packages/dag/dag/src/index.ts)
+来源：[`packages/dag/dag/src/index.ts:103`](../packages/dag/dag/src/index.ts)
 
 <a id="deepseek-aidsh-e2b"></a>
 

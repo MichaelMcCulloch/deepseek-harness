@@ -211,7 +211,13 @@ function notice(
   node?: DagNodeSnapshot,
   wave?: DagWaveSnapshot,
 ): DagNotice {
-  const discriminator = node === undefined ? `w${wave?.id ?? 'none'}` : `n${node.id}-g${node.generation}`
+  let discriminator: string
+  if (node !== undefined) discriminator = `n${node.id}-g${node.generation}`
+  else {
+    /* v8 ignore next -- each notice without a node is owned by a wave. */
+    if (wave === undefined) throw new DagStateError('DAG notice lacks an owner', 'dag-invalid-state')
+    discriminator = `w${wave.id}`
+  }
   return {
     id: DagNoticeId(`${state.noticeNamespace}-g${state.graphGeneration}-${discriminator}-${kind}`),
     kind,
@@ -277,12 +283,9 @@ function validResetTarget(target: string, frozenWaveBase: string | undefined): b
 function advisoryConflicts(nodes: readonly DagNodeDefinition[]): DagWriteResult['conflicts'] {
   const rows: DagWriteResult['conflicts'][number][] = []
   const contractPins = (brief: string): readonly string[] => [...brief.matchAll(/^\s*CONTRACT:\s*(.+)$/gim)]
-    .map(match => match[1]?.trim()).filter((value): value is string => value !== undefined && value.length > 0)
-  for (let left = 0; left < nodes.length; left++) {
-    for (let right = left + 1; right < nodes.length; right++) {
-      const a = nodes[left]
-      const b = nodes[right]
-      if (a === undefined || b === undefined) continue
+    .map(match => match[0].replace(/^\s*CONTRACT:\s*/iu, '').trim()).filter(value => value.length > 0)
+  for (const [left, a] of nodes.entries()) {
+    for (const b of nodes.slice(left + 1)) {
       const files = a.files.filter(value => b.files.includes(value))
       if (files.length > 0) rows.push({ ids: [a.id, b.id], files, reason: 'declared-files-overlap' })
       const pins = contractPins(a.brief).filter(value => contractPins(b.brief).includes(value))
@@ -297,7 +300,6 @@ function settleWaves(
   state: DagState,
   nodes: readonly DagNodeSnapshot[],
 ): { waves: readonly DagWaveSnapshot[]; notices: readonly DagNotice[] } {
-  const byId = new Map(nodes.map(node => [node.id, node]))
   let notices = state.notices
   const waves = state.waves.map((wave) => {
     if (wave.status !== 'open') return wave
@@ -305,7 +307,7 @@ function settleWaves(
     const completed = new Set(wave.completedNodeIds)
     const failed = new Set(wave.failedNodeIds)
     for (const id of wave.pendingNodeIds) {
-      const status = byId.get(id)?.status
+      const status = requireNode(nodes, id).status
       if (status === 'completed') completed.add(id)
       else if (status === 'failed' || status === 'interrupted') failed.add(id)
       else pending.add(id)

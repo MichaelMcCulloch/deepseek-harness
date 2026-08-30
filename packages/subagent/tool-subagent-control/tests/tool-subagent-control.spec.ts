@@ -248,6 +248,13 @@ describe('dsh-tool-subagent-control', () => {
     expect(text(result)).toContain('requires a calling agent')
   })
 
+  it('fails loud when steer_agent has no calling agent', async () => {
+    const { ctx } = await setup([])
+    const result = await callTool(ctx, 'steer_agent', { agent_id: 'x', message: 'y' })
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain('requires a calling agent')
+  })
+
   it('unregisters with its plugin fiber (HMR safety)', async () => {
     const ctx = new Context()
     await mountAgentLoopTestDependencies(ctx)

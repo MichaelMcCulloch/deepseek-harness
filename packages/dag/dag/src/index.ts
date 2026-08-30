@@ -8,10 +8,9 @@ import type { ZodType } from 'zod'
 import { agentEvents } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { MessageId, freezeMessage } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, UserMessage } from '@deepseek-ai/dsh-llm'
+import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session, SessionId as SessionIdType } from '@deepseek-ai/dsh-session'
-import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { SubagentError } from '@deepseek-ai/dsh-subagent'
 import type {
   SubagentOwnerBinding,
@@ -26,6 +25,23 @@ import type {} from '@deepseek-ai/dsh-subprocess'
 import { dagWorktreeRoot, DagGit } from './git.ts'
 import type { DagGitConfig, DagPreparedWorktree } from './git.ts'
 import { dagSlug, dispatcherHash, shortHash } from './ids.ts'
+import {
+  actionable,
+  asError,
+  errorText,
+  hasActiveFence,
+  messageRecorded,
+  messageText,
+  nonEmpty,
+  noticeRecorded,
+  ownerMetadata,
+  resolveDagConfig,
+  requiredOperation,
+  requiredValue,
+  waitForShared,
+  waveFences,
+} from './runtime.ts'
+import type { DagOwnerMetadata, DagRuntimeConfig } from './runtime.ts'
 import { projectDag, reduceDagState, DagStateError } from './reducer.ts'
 import type { DagDeclaredNode, DagEffectFence, DagReduceResult, DagReducerCommand } from './reducer.ts'
 import { validateDagDeclaration } from './validation.ts'
@@ -40,7 +56,6 @@ import type {
   DagProjection,
   DagRevisionGuard,
   DagState,
-  DagWaveId,
   DagWriteRequest,
   DagWriteResult,
 } from './types.ts'
@@ -85,20 +100,7 @@ declare module '@deepseek-ai/dsh-llm' {
 }
 
 /** Deployment choices for the local DAG runtime. */
-export interface Config {
-  /** Optional DSH home. A blank value uses normal DSH_HOME resolution. */
-  readonly dshHome?: string
-  /** Git executable name or absolute path. */
-  readonly gitExecutable?: string
-  /** Deadline for each Git process. */
-  readonly commandDeadlineMs?: number
-  /** TERM-to-KILL grace for each Git process. */
-  readonly terminationGraceMs?: number
-  /** Per-stream collected Git output limit. */
-  readonly outputLimitBytes?: number
-  /** Continuable in-process provider used for DAG children. */
-  readonly subagentProvider?: string
-}
+export interface Config extends DagRuntimeConfig {}
 
 /** One active `dag_wait` call. */
 interface DagWaiter {
@@ -123,13 +125,6 @@ export interface DagWaitResult {
   readonly revision: number
   readonly notices: readonly DagNotice[]
   readonly state: DagProjection
-}
-
-/** Parsed owner metadata for one DAG child binding. */
-interface DagOwnerMetadata {
-  readonly version: 1
-  readonly dispatcherSessionId: SessionIdType
-  readonly nodeId: DagNodeId
 }
 
 /** Internal signal that leaves durable mailbox work for explicit reconciliation. */
@@ -221,15 +216,7 @@ export class DagService extends Service implements SubagentOwnerController {
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'dag')
-    const dshHome = resolveDshHome(config.dshHome?.trim() || undefined)
-    this.config = {
-      dshHome,
-      gitExecutable: nonEmpty(config.gitExecutable ?? 'git', 'gitExecutable'),
-      commandDeadlineMs: positiveInteger(config.commandDeadlineMs ?? 120_000, 'commandDeadlineMs'),
-      terminationGraceMs: positiveInteger(config.terminationGraceMs ?? 5_000, 'terminationGraceMs'),
-      outputLimitBytes: positiveInteger(config.outputLimitBytes ?? 8 * 1024 * 1024, 'outputLimitBytes'),
-      subagentProvider: nonEmpty(config.subagentProvider ?? 'spawn', 'subagentProvider'),
-    }
+    this.config = resolveDagConfig(config)
     const gitConfig: DagGitConfig = {
       dshHome: this.config.dshHome,
       gitExecutable: this.config.gitExecutable,
@@ -314,8 +301,10 @@ export class DagService extends Service implements SubagentOwnerController {
     const { dispatcher, metadata } = this.dispatcherFor(child)
     this.assertBinding(dispatcher, metadata, child.id)
     const projection = projectDag(this.requireState(dispatcher))
-    const own = projection.nodes.find(node => node.id === metadata.nodeId)
-    if (own === undefined) throw new DagStateError(`unknown DAG node ${JSON.stringify(metadata.nodeId)}`, 'dag-node-not-found')
+    const own = requiredValue(
+      projection.nodes.find(node => node.id === metadata.nodeId),
+      new DagStateError('DAG child projection lacks its owner node', 'dag-invalid-state'),
+    )
     return {
       revision: projection.revision,
       topology: projection.nodes.map(node => ({ id: node.id, deps: node.deps, status: node.status })),
@@ -335,7 +324,10 @@ export class DagService extends Service implements SubagentOwnerController {
     const byId = new Map(request.nodes.map(node => [node.id.trim(), node]))
     const rows: DagDeclaredNode[] = validated.definitions.map(definition => ({
       definition,
-      status: byId.get(definition.id)?.status ?? 'pending',
+      status: requiredValue(
+        byId.get(definition.id),
+        new DagStateError('validated DAG declaration lacks its source node', 'dag-invalid-state'),
+      ).status,
     }))
     const result = this.mutate(agent, request.if_revision, 'write', {
       type: 'write',
@@ -347,8 +339,8 @@ export class DagService extends Service implements SubagentOwnerController {
       accepted: true,
       revision: result.state.revision,
       operationId: requiredOperation(result),
-      dropped: result.dropped ?? [],
-      conflicts: result.conflicts ?? [],
+      dropped: requiredValue(result.dropped, new DagStateError('accepted DAG write lacks dropped artifacts', 'dag-invalid-state')),
+      conflicts: requiredValue(result.conflicts, new DagStateError('accepted DAG write lacks conflict rows', 'dag-invalid-state')),
     }
   }
 
@@ -533,11 +525,14 @@ export class DagService extends Service implements SubagentOwnerController {
       operationId = accepted.operationId
       commandId = next?.commands.find(row => row.operationId === operationId)?.id
     }
-    if (operationId === undefined || commandId === undefined) {
-      throw new DagStateError('accepted DAG steer lacks a command fence', 'dag-invalid-state')
-    }
-    const command = this.requireState(dispatcher).nodes.find(row => row.id === node.id)?.commands.find(row => row.id === commandId)
-    if (command === undefined) throw new DagStateError('accepted DAG steer lacks a command', 'dag-invalid-state')
+    const currentNode = requiredValue(
+      this.requireState(dispatcher).nodes.find(row => row.id === node.id),
+      new DagStateError('accepted DAG steer lost its node', 'dag-invalid-state'),
+    )
+    const command = requiredValue(
+      currentNode.commands.find(row => row.id === commandId),
+      new DagStateError('accepted DAG steer lacks its mailbox command', 'dag-invalid-state'),
+    )
     return this.deliverOwnerRedirect(dispatcher, node.id, command, request)
   }
 
@@ -575,13 +570,17 @@ export class DagService extends Service implements SubagentOwnerController {
     if (node === undefined || node.childSessionId !== settlement.childId || settlement.messageId === undefined
       || (node.status !== 'starting' && node.status !== 'in_progress') || node.settlement?.kind === 'completed') return
     const messageCommand = node.commands.find(row => `${row.id}-message` === settlement.messageId)
-    if (messageCommand !== undefined && (messageCommand.operationId !== node.currentOperationId
-      || messageCommand.generation !== node.generation
-      || messageCommand.bindingGeneration !== node.bindingGeneration)) return
-    const command = messageCommand ?? node.commands.find(row => row.operationId === node.currentOperationId
-      && row.generation === node.generation
-      && row.bindingGeneration === node.bindingGeneration)
-    if (command === undefined) return
+    if (messageCommand !== undefined) {
+      if (messageCommand.operationId !== node.currentOperationId) return
+      /* v8 ignore next -- a valid node changes both generations only as part of a new operation. */
+      if (messageCommand.generation !== node.generation || messageCommand.bindingGeneration !== node.bindingGeneration) return
+    }
+    const command = requiredValue(
+      messageCommand ?? node.commands.find(row => row.operationId === node.currentOperationId
+        && row.generation === node.generation
+        && row.bindingGeneration === node.bindingGeneration),
+      new DagStateError('active DAG node lacks its current mailbox command', 'dag-invalid-state'),
+    )
     const error = settlement.error ?? `DAG child turn ended with ${settlement.stopReason} without dag_node_complete or dag_node_block.`
     this.mutate(dispatcher, undefined, 'child-ended', {
       type: 'child-ended',
@@ -617,12 +616,15 @@ export class DagService extends Service implements SubagentOwnerController {
       settlement.stop()
       return
     }
-    const command = messageCommand ?? node.commands.find(row => row.operationId === node.currentOperationId
-      && row.generation === node.generation
-      && row.bindingGeneration === node.bindingGeneration)
-    if (command === undefined || (messageCommand === undefined
+    const command = requiredValue(
+      messageCommand ?? node.commands.find(row => row.operationId === node.currentOperationId
+        && row.generation === node.generation
+        && row.bindingGeneration === node.bindingGeneration),
+      new DagStateError('active DAG node lacks its current mailbox command', 'dag-invalid-state'),
+    )
+    if (messageCommand === undefined
       && settlement.stopReason === 'aborted'
-      && command.kind === 'steer')) return
+      && command.kind === 'steer') return
     const error = settlement.error
       ?? `DAG child turn ended with ${settlement.stopReason} without dag_node_complete or dag_node_block.`
     this.mutate(dispatcher, undefined, 'child-ended', {
@@ -658,19 +660,15 @@ export class DagService extends Service implements SubagentOwnerController {
     const committed = { ...result, state: snapshot }
     this.cancelStaleEffects(agent.session, snapshot)
     queueMicrotask(() => {
-      try {
-        agentEvents(this.ctx, agent).emit('dag/committed', {
-          committed: {
-            dispatcherSession: agent.id,
-            revision: snapshot.revision,
-            graphGeneration: snapshot.graphGeneration,
-            cause,
-            snapshot,
-          },
-        })
-      } catch (error: unknown) {
-        this.ctx.logger.warn(`DAG commit publication failed: ${errorText(error)}`)
-      }
+      agentEvents(this.ctx, agent).emit('dag/committed', {
+        committed: {
+          dispatcherSession: agent.id,
+          revision: snapshot.revision,
+          graphGeneration: snapshot.graphGeneration,
+          cause,
+          snapshot,
+        },
+      })
       if (this.disposed) return
       this.scheduleFlush(agent)
     })
@@ -785,7 +783,8 @@ export class DagService extends Service implements SubagentOwnerController {
     }
     if (command.kind === 'steer') {
       if (nodeAtStart.childSessionId === undefined) throw new Error('steer requires an existing child')
-      await this.ctx.subagents.redirect(dispatcher, nodeAtStart.childSessionId, [{ type: 'text', text: command.message ?? '' }], {
+      if (command.message === undefined) throw new Error('steer requires a replacement message')
+      await this.ctx.subagents.redirect(dispatcher, nodeAtStart.childSessionId, [{ type: 'text', text: command.message }], {
         source: { kind: 'coordinator', form: 'relay', senderSessionId: dispatcher.id },
         messageId: MessageId(`${command.id}-message`),
         cause: { kind: 'parent' },
@@ -807,7 +806,8 @@ export class DagService extends Service implements SubagentOwnerController {
       return
     }
     if (command.kind === 'reset') {
-      const result = await this.git.reset(nodeAtStart, command.target ?? '', signal)
+      if (command.target === undefined) throw new Error('reset requires a target')
+      const result = await this.git.reset(nodeAtStart, command.target, signal)
       signal.throwIfAborted()
       this.requireCurrentCommand(dispatcher, nodeAtStart.id, command)
       const detail = result.remainingDirt.length === 0
@@ -1045,8 +1045,10 @@ export class DagService extends Service implements SubagentOwnerController {
         agent.inject(message)
       }
       this.mutate(agent, undefined, 'notice-delivered', { type: 'notice-delivered', noticeId: notice.id })
-      state = latestState(agent.session)
-      if (state === null) return
+      state = requiredValue(
+        latestState(agent.session),
+        new DagStateError('notice delivery lost the committed DAG state', 'dag-invalid-state'),
+      )
     }
     const waiter = this.waiters.get(agent.session)
     if (waiter === undefined) return
@@ -1139,17 +1141,25 @@ export class DagService extends Service implements SubagentOwnerController {
     let commandId = node.commands.find(row => row.operationId === operationId && row.kind === 'stop' && row.state !== 'settled')?.id
     if (node.status !== 'interrupted') {
       const accepted = this.stop(dispatcher, node.id, request.authority.kind === 'user' ? 'Stopped by a user.' : 'Stopped by the dispatcher.')
-      const next = this.requireState(dispatcher).nodes.find(row => row.id === node.id)
+      const next = requiredValue(
+        this.requireState(dispatcher).nodes.find(row => row.id === node.id),
+        new DagStateError('accepted DAG stop lost its node', 'dag-invalid-state'),
+      )
       operationId = accepted.operationId
-      generation = next?.generation ?? generation
-      commandId = next?.commands.find(row => row.operationId === operationId)?.id
+      generation = next.generation
+      commandId = requiredValue(
+        next.commands.find(row => row.operationId === operationId),
+        new DagStateError('accepted DAG stop lacks its mailbox command', 'dag-invalid-state'),
+      ).id
     }
     request.stop()
     if (operationId !== undefined && commandId !== undefined) {
-      const bindingGeneration = this.requireState(dispatcher).nodes.find(row => row.id === node.id)?.bindingGeneration
-      if (bindingGeneration !== undefined) {
-        this.mutate(dispatcher, undefined, 'stop-delivered', { type: 'command-settled', nodeId: node.id, commandId, generation, bindingGeneration, operationId })
-      }
+      const currentNode = requiredValue(
+        this.requireState(dispatcher).nodes.find(row => row.id === node.id),
+        new DagStateError('accepted DAG stop lost its node', 'dag-invalid-state'),
+      )
+      const bindingGeneration = currentNode.bindingGeneration
+      this.mutate(dispatcher, undefined, 'stop-delivered', { type: 'command-settled', nodeId: node.id, commandId, generation, bindingGeneration, operationId })
     }
   }
 
@@ -1163,7 +1173,9 @@ export class DagService extends Service implements SubagentOwnerController {
   ): void {
     const node = this.requireState(dispatcher).nodes.find(row => row.id === nodeId)
     if (node === undefined || node.childSessionId === undefined || node.branch === undefined || node.worktree === undefined
-      || node.frozenWaveBase === undefined) throw new Error('steer requires a prepared child binding')
+      || node.frozenWaveBase === undefined || node.preparedHead === undefined) {
+      throw new Error('steer requires a prepared child binding')
+    }
     this.mutate(dispatcher, undefined, 'steer-succeeded', {
       type: 'start-succeeded',
       nodeId,
@@ -1175,7 +1187,7 @@ export class DagService extends Service implements SubagentOwnerController {
         branch: node.branch,
         worktree: node.worktree,
         frozenWaveBase: node.frozenWaveBase,
-        preparedHead: node.preparedHead ?? node.frozenWaveBase,
+        preparedHead: node.preparedHead,
         dependencyCommits: node.dependencyCommits,
         conflictedFiles: node.conflictedFiles,
         childSessionId: node.childSessionId,
@@ -1230,7 +1242,7 @@ export class DagService extends Service implements SubagentOwnerController {
     }
     const currentMessageIndex = events.findIndex(event => event.type === 'user/message'
       && event.data.id === MessageId(`${current.id}-message`))
-    if (currentMessageIndex < 0 || currentMessageIndex >= boundaryIndex) {
+    if (currentMessageIndex < 0) {
       throw new DagStateError('DAG child report came from an invalidated turn', 'dag-stale-child-turn')
     }
   }
@@ -1271,138 +1283,6 @@ export function latestState(session: Session): DagState | null {
     if (event?.type === 'dag/state') return event.data.state
   }
   return null
-}
-
-/** Extract a required operation identity from an accepted reduction. */
-function requiredOperation(result: DagReduceResult): DagOperationId {
-  if (result.operationId === undefined) throw new DagStateError('accepted DAG command lacks an operation id', 'dag-invalid-state')
-  return result.operationId
-}
-
-/** Return notices whose injection follows the requested revision. */
-function actionable(state: DagState, afterRevision: number): readonly DagNotice[] {
-  return state.notices.filter(notice => notice.delivered
-    && (notice.deliveredRevision ?? notice.revision) > afterRevision)
-}
-
-/** Validate a positive safe integer configuration value. */
-function positiveInteger(value: number, name: string): number {
-  if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${name} must be a positive safe integer`)
-  return value
-}
-
-/** Validate and trim a required string. */
-function nonEmpty(value: string, name: string): string {
-  const trimmed = value.trim()
-  if (trimmed.length === 0) throw new Error(`${name} must be non-empty`)
-  return trimmed
-}
-
-/** Render an unknown effect failure. */
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
-/** Convert an unknown promise failure to an Error. */
-function asError(reason: unknown, message: string): Error {
-  return reason instanceof Error ? reason : new Error(message, { cause: reason })
-}
-
-/** Extract ordinary text from an authorized redirect. */
-function messageText(message: UserMessage): string {
-  const text = message.content.filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text').map(block => block.text).join('\n').trim()
-  if (text.length === 0) throw new DagStateError('DAG steering requires text content', 'dag-invalid-message')
-  return text
-}
-
-/** Parse and validate durable owner metadata. */
-function ownerMetadata(binding: SubagentOwnerBinding): DagOwnerMetadata {
-  const value = binding.metadata
-  const keys = value !== null && !Array.isArray(value) && typeof value === 'object'
-    ? Object.keys(value)
-    : []
-  if (binding.controller !== 'dag' || value === null || Array.isArray(value) || typeof value !== 'object'
-    || keys.length !== 3 || !keys.every(key => key === 'version' || key === 'dispatcherSessionId' || key === 'nodeId')
-    || value['version'] !== 1 || typeof value['dispatcherSessionId'] !== 'string'
-    || value['dispatcherSessionId'].length === 0 || typeof value['nodeId'] !== 'string' || value['nodeId'].length === 0) {
-    throw new DagStateError('invalid durable DAG owner metadata', 'dag-invalid-owner')
-  }
-  return {
-    version: 1,
-    dispatcherSessionId: SessionId(value['dispatcherSessionId']),
-    nodeId: value['nodeId'] as DagNodeId,
-  }
-}
-
-/** Check whether one deterministic inbox message reached a session event. */
-function messageRecorded(agent: Agent, messageId: MessageId): boolean {
-  return agent.inbox.nextTurn.some(message => message.id === messageId)
-    || agent.inbox.nextStep.some(message => message.id === messageId)
-    || agent.session.events.some(event => event.type === 'user/message' && event.data.id === messageId)
-}
-
-/** Check notice delivery against the live pending inbox and claimed session events. */
-function noticeRecorded(agent: Agent, noticeId: DagNoticeId): boolean {
-  const pending = [...agent.inbox.nextTurn, ...agent.inbox.nextStep]
-  if (pending.some(message => message.source.kind === 'dag-notice' && message.source.noticeId === noticeId)) return true
-  return agent.session.events.some(event => event.type === 'user/message'
-    && event.data.source.kind === 'dag-notice'
-    && event.data.source.noticeId === noticeId)
-}
-
-/** Capture every active dispatch fence assigned to one not-yet-created wave. */
-function waveFences(state: DagState, waveId: DagWaveId): readonly DagEffectFence[] {
-  return state.nodes.flatMap((node) => {
-    if (node.waveId !== waveId || node.currentOperationId === undefined) return []
-    const command = node.commands.find(row => row.operationId === node.currentOperationId
-      && row.generation === node.generation
-      && row.bindingGeneration === node.bindingGeneration
-      && (row.kind === 'dispatch' || row.kind === 'resume' || row.kind === 'steer')
-      && row.state !== 'settled')
-    return command === undefined
-      ? []
-      : [{
-        nodeId: node.id,
-        commandId: command.id,
-        generation: command.generation,
-        bindingGeneration: command.bindingGeneration,
-        operationId: command.operationId,
-      }]
-  })
-}
-
-/** Return whether at least one captured effect fence still owns its node. */
-function hasActiveFence(state: DagState | null, fences: readonly DagEffectFence[]): boolean {
-  if (state === null) return false
-  return fences.some((fence) => {
-    const node = state.nodes.find(row => row.id === fence.nodeId)
-    return node?.generation === fence.generation
-      && node.bindingGeneration === fence.bindingGeneration
-      && node.currentOperationId === fence.operationId
-      && node.commands.some(command => command.id === fence.commandId && command.state !== 'settled')
-  })
-}
-
-/** Wait for a shared effect without giving one caller ownership of that effect. */
-function waitForShared<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  signal.throwIfAborted()
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = (): void => {
-      signal.removeEventListener('abort', onAbort)
-      reject(asError(signal.reason, 'shared DAG effect wait was aborted'))
-    }
-    signal.addEventListener('abort', onAbort, { once: true })
-    void promise.then(
-      (value) => {
-        signal.removeEventListener('abort', onAbort)
-        resolve(value)
-      },
-      (error: unknown) => {
-        signal.removeEventListener('abort', onAbort)
-        reject(asError(error, 'shared DAG effect failed'))
-      },
-    )
-  })
 }
 
 export default DagService

@@ -18,8 +18,6 @@ export interface ValidatedDagDeclaration {
   readonly topologicalOrder: readonly NodeId[]
 }
 
-const BRIEF_SECTION = /^\s*(VALIDATION|ACCEPTANCE):\s*\S/im
-
 /** Validate one owned path as a normalized repository-relative path. */
 function filePath(value: string, nodeId: string): string {
   const trimmed = value.trim()
@@ -52,7 +50,7 @@ export function validateDagDeclaration(inputs: readonly DagNodeInput[]): Validat
     if (seen.has(idText)) throw new DagDeclarationError(`duplicate node id ${JSON.stringify(idText)}`)
     seen.add(idText)
     if (content.length === 0) throw new DagDeclarationError(`node ${JSON.stringify(idText)} content must be non-empty`)
-    if (!/^\s*VALIDATION:\s*\S/im.test(brief) || !/^\s*ACCEPTANCE:\s*\S/im.test(brief) || !BRIEF_SECTION.test(brief)) {
+    if (!/^\s*VALIDATION:\s*\S/im.test(brief) || !/^\s*ACCEPTANCE:\s*\S/im.test(brief)) {
       throw new DagDeclarationError(`node ${JSON.stringify(idText)} brief requires VALIDATION: and ACCEPTANCE: sections`)
     }
     const kind = input.kind ?? 'task'
@@ -91,12 +89,13 @@ export function validateDagDeclaration(inputs: readonly DagNodeInput[]): Validat
   }
   const queue = definitions.filter(node => node.deps.length === 0).map(node => node.id)
   const order: NodeId[] = []
-  for (let index = 0; index < queue.length; index++) {
-    const id = queue[index]
-    if (id === undefined) continue
+  for (const id of queue) {
     order.push(id)
     for (const dependent of dependents.get(id) ?? []) {
-      const next = (indegree.get(dependent) ?? 0) - 1
+      const degree = indegree.get(dependent)
+      /* v8 ignore next -- dependents contains only identifiers copied from canonical definitions. */
+      if (degree === undefined) throw new DagDeclarationError(`missing indegree for ${JSON.stringify(dependent)}`)
+      const next = degree - 1
       indegree.set(dependent, next)
       if (next === 0) queue.push(dependent)
     }

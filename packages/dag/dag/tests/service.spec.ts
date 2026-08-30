@@ -12,15 +12,15 @@ import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import SubagentRuntime, { SubagentError } from '@deepseek-ai/dsh-subagent'
 import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import { TestSessionQuery } from '../../../subagent/subagent/tests/test-session-query.ts'
 import DagService from '../src/index.ts'
-import { DagNodeId } from '../src/ids.ts'
+import { DagCommandId, DagNodeId, DagOperationId } from '../src/ids.ts'
 import { DagStateError, reduceDagState } from '../src/reducer.ts'
-import type { DagNodeInput, DagNotice, DagState } from '../src/types.ts'
+import type { DagNodeInput, DagNodeSnapshot, DagNotice, DagState } from '../src/types.ts'
 
 interface GatedEntry {
   readonly chunks: StreamChunk[]
@@ -134,6 +134,15 @@ function node(id = 'a'): DagNodeInput {
   }
 }
 
+function userMessageForTest(id: string) {
+  return freezeMessage({
+    id: MessageId(id),
+    role: 'user',
+    content: [{ type: 'text', text: id }],
+    source: { kind: 'user' },
+  })
+}
+
 function appendUndeliveredFailure(harness: TestHarness, prefix: string): DagNotice {
   const declared = harness.ctx.dag.state(harness.dispatcher)
   if (declared === null) throw new Error('test DAG declaration is missing')
@@ -215,7 +224,144 @@ function agentDisposed(ctx: Context, agent: Agent): Promise<void> {
   })
 }
 
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- Reflective test access preserves each private method signature.
+function serviceMethod<Args extends readonly unknown[], Result>(
+  service: DagService,
+  name: string,
+): (...args: Args) => Result {
+  const method: unknown = Reflect.get(service, name)
+  if (typeof method !== 'function') throw new Error(`DAG service method ${name} is missing`)
+  return (...args: Args) => Reflect.apply(method, service, args) as Result
+}
+
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- Reflective test access preserves each private field type.
+function serviceField<T>(service: DagService, name: string): T {
+  return Reflect.get(service, name) as T
+}
+
+function appendStartingOwner(harness: TestHarness, childId = SessionId('owner-child')): {
+  readonly state: DagState
+  readonly node: DagNodeSnapshot
+  readonly binding: { readonly controller: 'dag'; readonly metadata: { readonly version: 1; readonly dispatcherSessionId: SessionId; readonly nodeId: ReturnType<typeof DagNodeId> } }
+} {
+  harness.ctx.dag.write(harness.dispatcher, { nodes: [node()] })
+  const declared = harness.ctx.dag.state(harness.dispatcher)
+  if (declared === null) throw new Error('test DAG declaration is missing')
+  const state = reduceDagState(declared, {
+    type: 'dispatch',
+    nodeIds: [DagNodeId('a')],
+    bindings: {
+      a: {
+        childSessionId: childId,
+        branch: 'dsh/dag/owner/g1/a',
+        worktree: join(harness.temporary, 'home', 'dag', 'worktrees', 'v1', 'owner', 'g1', 'a'),
+      },
+    },
+  }).state
+  harness.dispatcher.session.append('dag/state', { state })
+  return {
+    state,
+    node: state.nodes[0]!,
+    binding: {
+      controller: 'dag',
+      metadata: { version: 1, dispatcherSessionId: harness.dispatcher.id, nodeId: DagNodeId('a') },
+    },
+  }
+}
+
+function appendOwnerPrepared(harness: TestHarness, owner: ReturnType<typeof appendStartingOwner>): DagState {
+  const command = owner.node.commands[0]!
+  const fence = {
+    nodeId: owner.node.id,
+    commandId: command.id,
+    generation: command.generation,
+    bindingGeneration: command.bindingGeneration,
+    operationId: command.operationId,
+  }
+  const probed = reduceDagState(owner.state, {
+    type: 'wave-probed', waveId: owner.node.waveId!, fences: [fence], branch: 'main', head: '1'.repeat(40),
+  }).state
+  harness.dispatcher.session.append('dag/state', { state: probed })
+  const evidence = {
+    branch: owner.node.branch!,
+    worktree: owner.node.worktree!,
+    frozenWaveBase: '1'.repeat(40),
+    preparedHead: '1'.repeat(40),
+    dependencyCommits: [],
+    conflictedFiles: [],
+    childSessionId: owner.node.childSessionId!,
+  }
+  const prepared = reduceDagState(probed, { type: 'git-prepared', ...fence, evidence }).state
+  harness.dispatcher.session.append('dag/state', { state: prepared })
+  return prepared
+}
+
+function appendOwnerInProgress(harness: TestHarness, owner: ReturnType<typeof appendStartingOwner>): DagState {
+  const prepared = appendOwnerPrepared(harness, owner)
+  const command = owner.node.commands[0]!
+  const fence = {
+    nodeId: owner.node.id,
+    commandId: command.id,
+    generation: command.generation,
+    bindingGeneration: command.bindingGeneration,
+    operationId: command.operationId,
+  }
+  const evidence = {
+    branch: owner.node.branch!,
+    worktree: owner.node.worktree!,
+    frozenWaveBase: '1'.repeat(40),
+    preparedHead: '1'.repeat(40),
+    dependencyCommits: [],
+    conflictedFiles: [],
+    childSessionId: owner.node.childSessionId!,
+  }
+  const started = reduceDagState(prepared, { type: 'start-succeeded', ...fence, evidence }).state
+  harness.dispatcher.session.append('dag/state', { state: started })
+  return started
+}
+
 describe('native DAG service', () => {
+  it('reports an empty board and rejects missing nodes and stale agent objects', async () => {
+    const { ctx, dispatcher } = await setup(new GatedAdapter([]))
+    expect(ctx.dag.status(dispatcher)).toBeNull()
+    expect(() => ctx.dag.inspect(dispatcher, DagNodeId('a')))
+      .toThrow(expect.objectContaining({ code: 'dag-not-declared' }))
+
+    ctx.dag.write(dispatcher, { nodes: [node()] })
+    expect(ctx.dag.status(dispatcher)).toMatchObject({ revision: 1, nodes: [{ id: 'a' }] })
+    expect(() => ctx.dag.inspect(dispatcher, DagNodeId('missing')))
+      .toThrow(expect.objectContaining({ code: 'dag-node-not-found' }))
+
+    const stale = { id: dispatcher.id, session: dispatcher.session } as unknown as Agent
+    expect(() => ctx.dag.state(stale)).toThrow(expect.objectContaining({ code: 'dag-agent-not-live' }))
+  })
+
+  it('validates immediate wait cancellation, empty public text, and the stop overload', async () => {
+    const { ctx, dispatcher } = await setup(new GatedAdapter([]))
+    const aborted = new AbortController()
+    const reason = new Error('already aborted')
+    aborted.abort(reason)
+    expect(() => ctx.dag.wait(dispatcher, 0, aborted.signal)).toThrow(reason)
+
+    ctx.dag.write(dispatcher, { nodes: [node()] })
+    expect(() => ctx.dag.reset(dispatcher, DagNodeId('a'), ' ')).toThrow(/reset target must be non-empty/)
+    const stopWithoutNode = ctx.dag.stop.bind(ctx.dag) as unknown as (agent: Agent) => unknown
+    expect(() => stopWithoutNode(dispatcher)).toThrow(expect.objectContaining({ code: 'dag-node-not-found' }))
+  })
+
+  it('returns already delivered notices without registering a waiter', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    harness.ctx.dag.write(harness.dispatcher, { nodes: [node()] })
+    const notice = appendUndeliveredFailure(harness, 'immediate-wait')
+    const state = harness.ctx.dag.state(harness.dispatcher)
+    if (state === null) throw new Error('test DAG state is missing')
+    const delivered = reduceDagState(state, { type: 'notice-delivered', noticeId: notice.id }).state
+    harness.dispatcher.session.append('dag/state', { state: delivered })
+
+    const result = await harness.ctx.dag.wait(harness.dispatcher, 0, new AbortController().signal)
+    expect(result.notices).toEqual([expect.objectContaining({ id: notice.id, delivered: true })])
+  })
+
   it('commits one complete snapshot and rejects a stale revision', async () => {
     const { ctx, dispatcher } = await setup(new GatedAdapter([]))
     const commits: number[] = []
@@ -468,6 +614,13 @@ describe('native DAG service', () => {
     const waited = ctx.dag.wait(dispatcher, dispatched.revision, new AbortController().signal)
     const worker = await child
     const active = await running
+    expect(ctx.dag.statusFrom(worker)).toMatchObject({
+      revision: active.revision,
+      topology: [{ id: 'a', deps: [], status: 'in_progress' }],
+      own: { id: 'a', status: 'in_progress' },
+    })
+    expect(() => ctx.dag.completeFrom(worker, ' ')).toThrow(/completion summary must be non-empty/)
+    expect(() => ctx.dag.blockFrom(worker, ' ')).toThrow(/block reason must be non-empty/)
     const worktree = active.nodes[0]?.worktree
     if (worktree === undefined) throw new Error('test node has no worktree')
     await writeFile(join(worktree, 'owned.txt'), 'complete\n')
@@ -506,6 +659,935 @@ describe('native DAG service', () => {
     expect(state.notices.some(row => row.kind === 'node-failed')).toBe(true)
     expect(dispatcher.session.events.some(event => event.type === 'user/message'
       && event.data.source.kind === 'subagent-settled')).toBe(false)
+  })
+
+  it('resets a failed prepared worktree and reports preserved untracked dirt', async () => {
+    const adapter = new GatedAdapter([{ chunks: textResponse('ordinary answer') }])
+    const { ctx, dispatcher } = await setup(adapter)
+    ctx.dag.write(dispatcher, { nodes: [node()] })
+    ctx.dag.dispatch(dispatcher, [DagNodeId('a')])
+    const failed = await stateWhen(ctx, dispatcher, state => state.nodes[0]?.status === 'failed')
+    const failedNode = failed.nodes[0]!
+    if (failedNode.worktree === undefined || failedNode.frozenWaveBase === undefined) {
+      throw new Error('failed node has no prepared worktree')
+    }
+
+    ctx.dag.reset(dispatcher, failedNode.id, failedNode.frozenWaveBase)
+    const clean = await stateWhen(ctx, dispatcher, state => state.nodes[0]?.commands.at(-1)?.kind === 'reset'
+      && state.nodes[0]?.commands.at(-1)?.state === 'settled')
+    expect(clean.nodes[0]?.commands.at(-1)?.detail).toContain('worktree is clean')
+
+    await writeFile(join(failedNode.worktree, 'untracked.txt'), 'preserve\n')
+    ctx.dag.reset(dispatcher, failedNode.id, failedNode.frozenWaveBase)
+    const dirty = await stateWhen(ctx, dispatcher, state => state.nodes[0]?.commands.filter(command => command.kind === 'reset').length === 2
+      && state.nodes[0]?.commands.at(-1)?.state === 'settled')
+    expect(dirty.nodes[0]?.commands.at(-1)?.detail).toContain('preserved remaining dirt: ? untracked.txt')
+  })
+
+  it('rejects malformed durable command payloads and settles a stop without a child', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const owner = appendStartingOwner(harness)
+    const execute = serviceMethod<[
+      Agent,
+      DagNodeSnapshot,
+      DagNodeSnapshot['commands'][number],
+      AbortSignal,
+    ], Promise<void>>(harness.ctx.dag, 'executeCommand')
+    const signal = new AbortController().signal
+    const command = owner.node.commands[0]!
+    const { childSessionId: _missingChild, ...nodeWithoutChild } = owner.node
+
+    await expect(execute(
+      harness.dispatcher,
+      { ...nodeWithoutChild, status: 'in_progress' },
+      { ...command, kind: 'steer', message: 'replace' },
+      signal,
+    )).rejects.toThrow('steer requires an existing child')
+    await expect(execute(
+      harness.dispatcher,
+      { ...owner.node, status: 'in_progress' },
+      { ...command, kind: 'steer' },
+      signal,
+    )).rejects.toThrow('steer requires a replacement message')
+    await expect(execute(
+      harness.dispatcher,
+      owner.node,
+      { ...command, kind: 'reset' },
+      signal,
+    )).rejects.toThrow('reset requires a target')
+
+    const interrupted = reduceDagState(owner.state, {
+      type: 'stop', nodeId: owner.node.id, reason: 'No child remains.',
+    }).state
+    harness.dispatcher.session.append('dag/state', { state: interrupted })
+    const stopCommand = interrupted.nodes[0]!.commands.at(-1)!
+    const { childSessionId: _stoppedChild, ...stoppedWithoutChild } = interrupted.nodes[0]!
+    await execute(
+      harness.dispatcher,
+      stoppedWithoutChild,
+      stopCommand,
+      signal,
+    )
+    expect(harness.ctx.dag.state(harness.dispatcher)?.nodes[0]?.commands.at(-1))
+      .toMatchObject({ kind: 'stop', state: 'settled', outcome: 'succeeded' })
+  })
+
+  it('settles both direct and owner-completed steer effects', async () => {
+    const directHarness = await setup(new GatedAdapter([]))
+    const directOwner = appendStartingOwner(directHarness, SessionId('direct-steer-child'))
+    const directStarted = appendOwnerInProgress(directHarness, directOwner)
+    const directSteered = reduceDagState(directStarted, {
+      type: 'steer', nodeId: DagNodeId('a'), message: 'Direct replacement.',
+    }).state
+    directHarness.dispatcher.session.append('dag/state', { state: directSteered })
+    const directNode = directSteered.nodes[0]!
+    const directCommand = directNode.commands.at(-1)!
+    serviceField<WeakMap<typeof directHarness.dispatcher.session, Set<ReturnType<typeof DagNodeId>>>>(
+      directHarness.ctx.dag,
+      'pumps',
+    ).set(directHarness.dispatcher.session, new Set([directNode.id]))
+    const directRedirect = vi.spyOn(directHarness.ctx.subagents, 'redirect')
+      .mockResolvedValue(MessageId(`${directCommand.id}-message`))
+    const directExecute = serviceMethod<[
+      Agent,
+      DagNodeSnapshot,
+      DagNodeSnapshot['commands'][number],
+      AbortSignal,
+    ], Promise<void>>(directHarness.ctx.dag, 'executeCommand')
+
+    await directExecute(directHarness.dispatcher, directNode, directCommand, new AbortController().signal)
+    expect(directRedirect).toHaveBeenCalledOnce()
+    expect(directHarness.ctx.dag.state(directHarness.dispatcher)?.nodes[0]?.commands.at(-1))
+      .toMatchObject({ kind: 'steer', state: 'settled', outcome: 'succeeded' })
+
+    const ownerHarness = await setup(new GatedAdapter([]))
+    const owner = appendStartingOwner(ownerHarness, SessionId('owner-steer-complete-child'))
+    const started = appendOwnerInProgress(ownerHarness, owner)
+    const steered = reduceDagState(started, {
+      type: 'steer', nodeId: DagNodeId('a'), message: 'Owner replacement.',
+    }).state
+    ownerHarness.dispatcher.session.append('dag/state', { state: steered })
+    const ownerNode = steered.nodes[0]!
+    const ownerCommand = ownerNode.commands.at(-1)!
+    serviceField<WeakMap<typeof ownerHarness.dispatcher.session, Set<ReturnType<typeof DagNodeId>>>>(
+      ownerHarness.ctx.dag,
+      'pumps',
+    ).set(ownerHarness.dispatcher.session, new Set([ownerNode.id]))
+    const finishSteer = serviceMethod<[
+      Agent,
+      DagNodeSnapshot['id'],
+      ReturnType<typeof DagCommandId>,
+      number,
+      ReturnType<typeof DagOperationId>,
+    ], unknown>(ownerHarness.ctx.dag, 'finishSteer')
+    vi.spyOn(ownerHarness.ctx.subagents, 'redirect').mockImplementation(async () => {
+      finishSteer(
+        ownerHarness.dispatcher,
+        ownerNode.id,
+        ownerCommand.id,
+        ownerCommand.generation,
+        ownerCommand.operationId,
+      )
+      return MessageId(`${ownerCommand.id}-message`)
+    })
+    const ownerExecute = serviceMethod<[
+      Agent,
+      DagNodeSnapshot,
+      DagNodeSnapshot['commands'][number],
+      AbortSignal,
+    ], Promise<void>>(ownerHarness.ctx.dag, 'executeCommand')
+
+    await ownerExecute(ownerHarness.dispatcher, ownerNode, ownerCommand, new AbortController().signal)
+    expect(ownerHarness.ctx.dag.state(ownerHarness.dispatcher)?.nodes[0]?.commands.at(-1))
+      .toMatchObject({ kind: 'steer', state: 'settled', outcome: 'succeeded' })
+  })
+
+  it('rejects incomplete starting facts before it runs Git or child effects', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const owner = appendStartingOwner(harness, SessionId('invalid-start-child'))
+    const started = appendOwnerInProgress(harness, owner)
+    const service = harness.ctx.dag
+    const prepare = serviceMethod<[
+      Agent,
+      DagNodeSnapshot,
+      DagNodeSnapshot['commands'][number],
+      AbortSignal,
+    ], Promise<void>>(service, 'prepareAndStart')
+    const originalRequireState = serviceField<(agent: Agent) => DagState>(service, 'requireState')
+    const command = owner.node.commands[0]!
+    const frozenWaveBase = started.nodes[0]!.frozenWaveBase
+    if (frozenWaveBase === undefined) throw new Error('prepared test node has no frozen wave base')
+    const nodeAtStart = { ...owner.node, frozenWaveBase }
+    const signal = new AbortController().signal
+    const expectStateFailure = async (
+      state: DagState,
+      message: string,
+      dispatcher: Agent = harness.dispatcher,
+    ): Promise<void> => {
+      Reflect.set(service, 'requireState', () => state)
+      await expect(prepare(dispatcher, nodeAtStart, command, signal)).rejects.toThrow(message)
+    }
+
+    try {
+      await expectStateFailure({ ...started, nodes: [] }, 'committed Git and child identities')
+      for (const missing of ['branch', 'worktree', 'childSessionId'] as const) {
+        const { [missing]: _removed, ...nodeWithoutFact } = started.nodes[0]!
+        await expectStateFailure({ ...started, nodes: [nodeWithoutFact] }, 'committed Git and child identities')
+      }
+      const { frozenWaveBase: _base, ...withoutBase } = started.nodes[0]!
+      await expectStateFailure({ ...started, nodes: [withoutBase] }, 'frozen wave base')
+      await expectStateFailure({ ...started, waves: [] }, 'open frozen wave')
+      await expectStateFailure({
+        ...started,
+        waves: started.waves.map(wave => ({ ...wave, status: 'settled' })),
+      }, 'open frozen wave')
+      await expectStateFailure({
+        ...started,
+        waves: started.waves.map(wave => ({ ...wave, rootHead: '2'.repeat(40) })),
+      }, 'open frozen wave')
+      await expectStateFailure({
+        ...started,
+        waves: started.waves.map(wave => ({ ...wave, nodeIds: [] })),
+      }, 'open frozen wave')
+      await expectStateFailure({
+        ...started,
+        nodes: [{ ...started.nodes[0]!, deps: [DagNodeId('missing-dependency')] }],
+      }, 'exact dependency commits')
+      await expectStateFailure(
+        started,
+        'dispatcher session has no cwd',
+        {
+          id: harness.dispatcher.id,
+          session: { header: {}, events: harness.dispatcher.session.events },
+        } as unknown as Agent,
+      )
+    } finally {
+      Reflect.set(service, 'requireState', originalRequireState)
+    }
+  })
+
+  it('validates wave ownership and cancels an unowned shared probe', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const owner = appendStartingOwner(harness, SessionId('wave-edge-child'))
+    const service = harness.ctx.dag
+    const ensureWave = serviceMethod<[
+      Agent,
+      DagNodeSnapshot,
+      AbortSignal,
+    ], Promise<void>>(service, 'ensureWave')
+    const originalRequireState = serviceField<(agent: Agent) => DagState>(service, 'requireState')
+    const waveId = owner.node.waveId!
+    const signal = new AbortController().signal
+    const { waveId: _waveId, ...nodeWithoutWave } = owner.node
+
+    await expect(ensureWave(
+      harness.dispatcher,
+      nodeWithoutWave,
+      signal,
+    )).rejects.toThrow('starting node lacks a wave')
+
+    const unrelatedWave: DagState['waves'][number] = {
+      id: waveId,
+      nodeIds: [],
+      rootBranch: 'main',
+      rootHead: '1'.repeat(40),
+      status: 'open',
+      pendingNodeIds: [],
+      completedNodeIds: [],
+      failedNodeIds: [],
+    }
+    Reflect.set(service, 'requireState', () => ({ ...owner.state, waves: [unrelatedWave] }))
+    await expect(ensureWave(harness.dispatcher, owner.node, signal))
+      .rejects.toThrow(`wave ${waveId} does not contain active node a`)
+
+    const settledCommands = owner.node.commands.map(command => ({
+      ...command,
+      state: 'settled' as const,
+      outcome: 'cancelled' as const,
+    }))
+    Reflect.set(service, 'requireState', () => ({
+      ...owner.state,
+      nodes: [{ ...owner.node, commands: settledCommands }],
+      activeCommandIds: [],
+    }))
+    await expect(ensureWave(harness.dispatcher, owner.node, signal))
+      .rejects.toThrow(`wave ${waveId} has no active dispatch commands`)
+
+    const missingRootDispatcher = {
+      id: harness.dispatcher.id,
+      session: {
+        header: { ...harness.dispatcher.session.header, cwd: undefined },
+        events: harness.dispatcher.session.events,
+      },
+    } as unknown as Agent
+    Reflect.set(service, 'requireState', () => owner.state)
+    await expect(ensureWave(missingRootDispatcher, owner.node, signal))
+      .rejects.toThrow('DAG dispatcher session has no cwd')
+    Reflect.set(service, 'requireState', originalRequireState)
+
+    serviceField<WeakMap<typeof harness.dispatcher.session, Set<ReturnType<typeof DagNodeId>>>>(
+      service,
+      'pumps',
+    ).set(harness.dispatcher.session, new Set([owner.node.id]))
+    const probes = serviceField<Map<string, {
+      readonly controller: AbortController
+      readonly promise: Promise<void>
+      readonly agent: Agent
+      readonly fences: readonly []
+      waiters: number
+    }>>(service, 'waveProbes')
+    const staleController = new AbortController()
+    probes.set(`${harness.dispatcher.id}:${waveId}`, {
+      controller: staleController,
+      promise: Promise.resolve(),
+      agent: { id: harness.dispatcher.id } as unknown as Agent,
+      fences: [],
+      waiters: 0,
+    })
+
+    await ensureWave(harness.dispatcher, owner.node, signal)
+    expect(staleController.signal.aborted).toBe(true)
+    await ensureWave(
+      harness.dispatcher,
+      harness.ctx.dag.state(harness.dispatcher)!.nodes[0]!,
+      signal,
+    )
+
+    const sharedHarness = await setup(new GatedAdapter([]))
+    const sharedOwner = appendStartingOwner(sharedHarness, SessionId('shared-wave-child'))
+    const sharedService = sharedHarness.ctx.dag
+    const sharedEnsure = serviceMethod<[
+      Agent,
+      DagNodeSnapshot,
+      AbortSignal,
+    ], Promise<void>>(sharedService, 'ensureWave')
+    const gitRuntime = serviceField<{
+      probeRoot: (root: string, signal: AbortSignal) => Promise<{ readonly branch: string; readonly head: string }>
+    }>(sharedService, 'git')
+    let probeSignal: AbortSignal | undefined
+    const probeRoot = vi.spyOn(gitRuntime, 'probeRoot').mockImplementation(async (_root, activeSignal) => {
+      probeSignal = activeSignal
+      return await new Promise((_resolve, reject) => {
+        activeSignal.addEventListener('abort', () => {
+          const reason = activeSignal.reason as unknown
+          reject(reason instanceof Error ? reason : new Error('shared probe aborted', { cause: reason }))
+        }, { once: true })
+      })
+    })
+    const firstController = new AbortController()
+    const secondController = new AbortController()
+    serviceField<WeakMap<typeof sharedHarness.dispatcher.session, Set<ReturnType<typeof DagNodeId>>>>(
+      sharedService,
+      'pumps',
+    ).set(sharedHarness.dispatcher.session, new Set([sharedOwner.node.id]))
+    const first = sharedEnsure(sharedHarness.dispatcher, sharedOwner.node, firstController.signal)
+    await vi.waitFor(() => { expect(probeRoot).toHaveBeenCalledOnce() })
+    const second = sharedEnsure(sharedHarness.dispatcher, sharedOwner.node, secondController.signal)
+    sharedService.stop(sharedHarness.dispatcher, sharedOwner.node.id, 'Cancel the shared wave.')
+    firstController.abort(new Error('first waiter stopped'))
+    secondController.abort(new Error('second waiter stopped'))
+
+    await expect(first).rejects.toThrow('first waiter stopped')
+    await expect(second).rejects.toThrow('second waiter stopped')
+    await vi.waitFor(() => { expect(probeSignal?.aborted).toBe(true) })
+  })
+
+  it('reconciles every existing and missing child delivery result', async () => {
+    const preparedDelivery = async (suffix: string): Promise<{
+      readonly harness: TestHarness
+      readonly node: DagNodeSnapshot
+      readonly command: DagNodeSnapshot['commands'][number]
+      readonly invoke: (instruction?: string) => Promise<void>
+    }> => {
+      const harness = await setup(new GatedAdapter([]))
+      const owner = appendStartingOwner(harness, SessionId(`delivery-${suffix}-child`))
+      const prepared = appendOwnerPrepared(harness, owner)
+      const node = prepared.nodes[0]!
+      const command = node.commands[0]!
+      const deliver = serviceMethod<[
+        Agent,
+        DagNodeSnapshot,
+        DagNodeSnapshot['commands'][number],
+        ReturnType<typeof SessionId>,
+        string,
+        string,
+        string,
+        string,
+        readonly string[],
+        readonly string[],
+        AbortSignal,
+        string?,
+      ], Promise<void>>(harness.ctx.dag, 'deliverStart')
+      serviceField<WeakMap<typeof harness.dispatcher.session, Set<ReturnType<typeof DagNodeId>>>>(
+        harness.ctx.dag,
+        'pumps',
+      ).set(harness.dispatcher.session, new Set([node.id]))
+      return {
+        harness,
+        node,
+        command,
+        invoke: async (instruction?: string): Promise<void> => {
+          await deliver(
+            harness.dispatcher,
+            node,
+            command,
+            node.childSessionId!,
+            node.branch!,
+            node.worktree!,
+            node.frozenWaveBase!,
+            node.preparedHead!,
+            node.dependencyCommits,
+            node.conflictedFiles,
+            new AbortController().signal,
+            instruction,
+          )
+        },
+      }
+    }
+
+    const refused = await preparedDelivery('refused')
+    vi.spyOn(refused.harness.ctx.subagents, 'followup')
+      .mockRejectedValueOnce(new SubagentError('followup refused', 'UNAUTHORIZED'))
+    await expect(refused.invoke()).rejects.toThrow('followup refused')
+
+    const missing = await preparedDelivery('missing')
+    const missingFollowup = vi.spyOn(missing.harness.ctx.subagents, 'followup')
+      .mockResolvedValueOnce(MessageId(`${missing.command.id}-message`))
+    await missing.invoke()
+    expect(missingFollowup).toHaveBeenCalledOnce()
+
+    const existing = await preparedDelivery('existing')
+    existing.harness.ctx.agentLoop.create(
+      existing.node.childSessionId!,
+      { provider: 'mock', model: 'mock' },
+      { cwd: existing.node.worktree! },
+    )
+    const existingFollowup = vi.spyOn(existing.harness.ctx.subagents, 'followup')
+      .mockResolvedValueOnce(MessageId(`${existing.command.id}-message`))
+    await existing.invoke('Continue the prepared work.')
+    expect(existingFollowup).toHaveBeenCalledOnce()
+
+    const recorded = await preparedDelivery('recorded')
+    const recordedChild = recorded.harness.ctx.agentLoop.create(
+      recorded.node.childSessionId!,
+      { provider: 'mock', model: 'mock' },
+      { cwd: recorded.node.worktree! },
+    )
+    recordedChild.inject(userMessageForTest(`${recorded.command.id}-message`))
+    const recordedFollowup = vi.spyOn(recorded.harness.ctx.subagents, 'followup')
+    await recorded.invoke()
+    expect(recordedFollowup).not.toHaveBeenCalled()
+  })
+
+  it('renders dependency and conflict facts in the child prompt', async () => {
+    const { ctx, dispatcher } = await setup(new GatedAdapter([]))
+    ctx.dag.write(dispatcher, { nodes: [node()] })
+    const dependencyCommit = '1'.repeat(40)
+    const prompt = serviceMethod<[
+      DagNodeSnapshot,
+      string,
+      readonly string[],
+      readonly string[],
+    ], string>(ctx.dag, 'nodePrompt')
+    const rendered = prompt(ctx.dag.inspect(dispatcher, DagNodeId('a')), '/tmp/worktree', [dependencyCommit], ['owned.txt'])
+
+    expect(rendered).toContain(`Dependency commits: ${dependencyCommit}`)
+    expect(rendered).toContain('Conflicted files for manual integration: owned.txt.')
+  })
+
+  it('ignores stale activation settlement facts and fails one matching activation', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const owner = appendStartingOwner(harness)
+    const command = owner.node.commands[0]!
+    const base = {
+      binding: owner.binding,
+      childId: owner.node.childSessionId!,
+      parentSessionId: harness.dispatcher.id,
+      stopReason: 'completed' as const,
+      messageId: MessageId(`${command.id}-message`),
+    }
+    harness.ctx.dag.settled({ ...base, binding: { ...owner.binding, metadata: { ...owner.binding.metadata, dispatcherSessionId: SessionId('missing') } } })
+    harness.ctx.dag.settled({ ...base, childId: SessionId('other') })
+    const { messageId: _messageId, ...settlementWithoutMessage } = base
+    harness.ctx.dag.settled(settlementWithoutMessage)
+    expect(harness.ctx.dag.state(harness.dispatcher)?.revision).toBe(owner.state.revision)
+
+    harness.ctx.dag.settled({ ...base, messageId: MessageId('unmatched-message') })
+    expect(harness.ctx.dag.state(harness.dispatcher)?.nodes[0]?.status).toBe('failed')
+    expect(harness.ctx.dag.state(harness.dispatcher)?.nodes[0]?.settlement).toMatchObject({
+      reason: 'DAG child turn ended with completed without dag_node_complete or dag_node_block.',
+    })
+
+    const staleHarness = await setup(new GatedAdapter([]))
+    const staleOwner = appendStartingOwner(staleHarness, SessionId('stale-owner-child'))
+    const started = appendOwnerInProgress(staleHarness, staleOwner)
+    const steered = reduceDagState(started, {
+      type: 'steer', nodeId: DagNodeId('a'), message: 'replace',
+    }).state
+    staleHarness.dispatcher.session.append('dag/state', { state: steered })
+    staleHarness.ctx.dag.settled({
+      ...base,
+      binding: staleOwner.binding,
+      childId: staleOwner.node.childSessionId!,
+      parentSessionId: staleHarness.dispatcher.id,
+      messageId: MessageId(`${staleOwner.node.commands[0]!.id}-message`),
+    })
+    expect(staleHarness.ctx.dag.state(staleHarness.dispatcher)).toMatchObject({
+      revision: steered.revision,
+      nodes: [{ status: 'in_progress', generation: steered.nodes[0]!.generation }],
+    })
+
+    const matchingHarness = await setup(new GatedAdapter([]))
+    const matchingOwner = appendStartingOwner(matchingHarness, SessionId('matching-owner-child'))
+    const matchingCommand = matchingOwner.node.commands[0]!
+    matchingHarness.ctx.dag.settled({
+      binding: matchingOwner.binding,
+      childId: matchingOwner.node.childSessionId!,
+      parentSessionId: matchingHarness.dispatcher.id,
+      stopReason: 'error',
+      messageId: MessageId(`${matchingCommand.id}-message`),
+      error: 'matching activation failed',
+    })
+    expect(matchingHarness.ctx.dag.state(matchingHarness.dispatcher)?.nodes[0]).toMatchObject({
+      status: 'failed',
+      settlement: { kind: 'failed', reason: 'matching activation failed' },
+    })
+  })
+
+  it('stops terminal ordinary settlements and ignores stale or cancelled steer turns', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const owner = appendStartingOwner(harness)
+    const command = owner.node.commands[0]!
+    const child = { id: owner.node.childSessionId } as unknown as Agent
+    const stop = vi.fn()
+    const base = {
+      binding: owner.binding,
+      child,
+      parentSessionId: harness.dispatcher.id,
+      turn: 1,
+      stopReason: 'completed' as const,
+      messageId: MessageId(`${command.id}-message`),
+      stop,
+    }
+
+    harness.ctx.dag.turnSettled({ ...base, binding: { ...owner.binding, metadata: { ...owner.binding.metadata, dispatcherSessionId: SessionId('missing') } } })
+    harness.ctx.dag.turnSettled({ ...base, child: { id: SessionId('other') } as unknown as Agent })
+    const stopped = reduceDagState(owner.state, { type: 'stop', nodeId: DagNodeId('a'), reason: 'stop' }).state
+    harness.dispatcher.session.append('dag/state', { state: stopped })
+    harness.ctx.dag.turnSettled(base)
+    expect(stop).toHaveBeenCalledOnce()
+
+    stop.mockClear()
+    harness.ctx.dag.turnSettled({ ...base, messageId: MessageId('unmatched-terminal-turn') })
+    expect(stop).toHaveBeenCalledOnce()
+
+    stop.mockClear()
+    const steerHarness = await setup(new GatedAdapter([]))
+    const steerOwner = appendStartingOwner(steerHarness, SessionId('steer-owner-child'))
+    const started = appendOwnerInProgress(steerHarness, steerOwner)
+    const steered = reduceDagState(started, {
+      type: 'steer', nodeId: DagNodeId('a'), message: 'replace',
+    }).state
+    steerHarness.dispatcher.session.append('dag/state', { state: steered })
+    steerHarness.ctx.dag.turnSettled({
+      ...base,
+      binding: steerOwner.binding,
+      child: { id: steerOwner.node.childSessionId } as unknown as Agent,
+      parentSessionId: steerHarness.dispatcher.id,
+      messageId: MessageId('generic'),
+      stopReason: 'aborted',
+    })
+    expect(stop).not.toHaveBeenCalled()
+  })
+
+  it('routes owner stops through one durable transition and reuses interruption state', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const owner = appendStartingOwner(harness)
+    const child = { id: owner.node.childSessionId } as unknown as Agent
+    const stop = vi.fn()
+    const request = {
+      binding: owner.binding,
+      child,
+      authority: { kind: 'user' as const, parentSessionId: harness.dispatcher.id },
+      stop,
+    }
+    harness.ctx.dag.stop(request)
+    expect(stop).toHaveBeenCalledOnce()
+    expect(harness.ctx.dag.state(harness.dispatcher)?.nodes[0]).toMatchObject({ status: 'interrupted' })
+    expect(harness.ctx.dag.state(harness.dispatcher)?.nodes[0]?.commands.at(-1)).toMatchObject({
+      kind: 'stop', state: 'settled', outcome: 'succeeded',
+    })
+
+    harness.ctx.dag.stop(request)
+    expect(stop).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects missing owner routes, stale bindings, and unowned child agents', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const owner = appendStartingOwner(harness)
+    const child = { id: owner.node.childSessionId } as unknown as Agent
+    const message = userMessageForTest('owner-route')
+    const redirect = vi.fn()
+
+    expect(() => harness.ctx.dag.redirect({
+      binding: { ...owner.binding, metadata: { ...owner.binding.metadata, nodeId: 'missing' } },
+      child,
+      message,
+      redirect,
+    })).toThrow(expect.objectContaining({ code: 'dag-node-not-found' }))
+    expect(() => harness.ctx.dag.redirect({
+      binding: { ...owner.binding, metadata: { ...owner.binding.metadata, dispatcherSessionId: SessionId('missing') } },
+      child,
+      message,
+      redirect,
+    })).toThrow(expect.objectContaining({ code: 'dag-dispatcher-not-live' }))
+
+    const unrelated = harness.ctx.agentLoop.create(
+      SessionId('unowned-child'),
+      { provider: 'mock', model: 'mock' },
+      { cwd: harness.root },
+    )
+    expect(() => harness.ctx.dag.statusFrom(unrelated))
+      .toThrow(expect.objectContaining({ code: 'dag-child-owner-missing' }))
+    const stale = { id: unrelated.id, session: unrelated.session } as unknown as Agent
+    expect(() => harness.ctx.dag.statusFrom(stale))
+      .toThrow(expect.objectContaining({ code: 'dag-child-not-live' }))
+
+    const assertBinding = serviceMethod<[
+      Agent,
+      {
+        readonly version: 1
+        readonly dispatcherSessionId: ReturnType<typeof SessionId>
+        readonly nodeId: ReturnType<typeof DagNodeId>
+      },
+      ReturnType<typeof SessionId>,
+    ], DagNodeSnapshot>(harness.ctx.dag, 'assertBinding')
+    expect(() => assertBinding(
+      harness.dispatcher,
+      { ...owner.binding.metadata, nodeId: DagNodeId('missing') },
+      owner.node.childSessionId!,
+    )).toThrow(expect.objectContaining({ code: 'dag-stale-child-binding' }))
+    expect(() => assertBinding(
+      harness.dispatcher,
+      owner.binding.metadata,
+      SessionId('wrong-child'),
+    )).toThrow(expect.objectContaining({ code: 'dag-stale-child-binding' }))
+
+    const command = owner.node.commands[0]!
+    const finishSteer = serviceMethod<[
+      Agent,
+      DagNodeSnapshot['id'],
+      ReturnType<typeof DagCommandId>,
+      number,
+      ReturnType<typeof DagOperationId>,
+    ], unknown>(harness.ctx.dag, 'finishSteer')
+    expect(() => {
+      finishSteer(
+        harness.dispatcher,
+        DagNodeId('missing'),
+        command.id,
+        command.generation,
+        command.operationId,
+      )
+    }).toThrow('steer requires a prepared child binding')
+  })
+
+  it('rejects owner redirect delivery after service disposal', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const service = harness.ctx.dag
+    const owner = appendStartingOwner(harness)
+    const command = owner.node.commands[0]!
+    const deliver = serviceMethod<[
+      Agent,
+      DagNodeSnapshot['id'],
+      DagNodeSnapshot['commands'][number],
+      {
+        readonly binding: typeof owner.binding
+        readonly child: Agent
+        readonly message: ReturnType<typeof userMessageForTest>
+        readonly redirect: () => void
+      },
+    ], Promise<void>>(service, 'deliverOwnerRedirect')
+    await harness.disposeDag()
+
+    await expect(deliver(harness.dispatcher, owner.node.id, command, {
+      binding: owner.binding,
+      child: { id: owner.node.childSessionId } as unknown as Agent,
+      message: userMessageForTest('disposed-owner-redirect'),
+      redirect: vi.fn(),
+    })).rejects.toMatchObject({ code: 'dag-service-disposed' })
+  })
+
+  it('contains post-commit and reconciliation work after disposal starts', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const reconcile = serviceMethod<[Agent], unknown>(harness.ctx.dag, 'reconcile')
+    const scheduleFlush = serviceMethod<[Agent], unknown>(harness.ctx.dag, 'scheduleFlush')
+
+    harness.ctx.dag.write(harness.dispatcher, { nodes: [node()] })
+    reconcile(harness.dispatcher)
+    Reflect.set(harness.ctx.dag, 'disposed', true)
+    scheduleFlush(harness.dispatcher)
+    await Promise.resolve()
+    expect(serviceField<Set<Promise<void>>>(harness.ctx.dag, 'flushTasks').size).toBe(0)
+    Reflect.set(harness.ctx.dag, 'disposed', false)
+  })
+
+  it('settles an admitted owner stop and uses dispatcher authority text', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const owner = appendStartingOwner(harness)
+    const stop = vi.fn()
+    harness.ctx.dag.stop({
+      binding: owner.binding,
+      child: { id: owner.node.childSessionId } as unknown as Agent,
+      authority: { kind: 'ancestor', agent: harness.dispatcher },
+      stop,
+    })
+    expect(stop).toHaveBeenCalledOnce()
+    expect(harness.ctx.dag.state(harness.dispatcher)?.nodes[0]?.settlement).toEqual({
+      kind: 'interrupted',
+      reason: 'Stopped by the dispatcher.',
+    })
+
+    const activeHarness = await setup(new GatedAdapter([]))
+    const activeOwner = appendStartingOwner(activeHarness, SessionId('active-stop-child'))
+    const interrupted = reduceDagState(activeOwner.state, {
+      type: 'stop', nodeId: DagNodeId('a'), reason: 'Already accepted.',
+    }).state
+    activeHarness.dispatcher.session.append('dag/state', { state: interrupted })
+    const activeStop = vi.fn()
+    activeHarness.ctx.dag.stop({
+      binding: activeOwner.binding,
+      child: { id: activeOwner.node.childSessionId } as unknown as Agent,
+      authority: { kind: 'user', parentSessionId: activeHarness.dispatcher.id },
+      stop: activeStop,
+    })
+    expect(activeStop).toHaveBeenCalledOnce()
+    expect(activeHarness.ctx.dag.state(activeHarness.dispatcher)?.nodes[0]?.commands.at(-1))
+      .toMatchObject({ kind: 'stop', state: 'settled', outcome: 'succeeded' })
+
+    expect(() => {
+      activeHarness.ctx.dag.stop({
+        binding: { ...activeOwner.binding, metadata: { ...activeOwner.binding.metadata, nodeId: 'missing' } },
+        child: { id: activeOwner.node.childSessionId } as unknown as Agent,
+        authority: { kind: 'user', parentSessionId: activeHarness.dispatcher.id },
+        stop: vi.fn(),
+      })
+    }).toThrow(expect.objectContaining({ code: 'dag-node-not-found' }))
+  })
+
+  it('guards scheduler entry points for empty, stale, and disposed activations', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const schedule = serviceMethod<[Agent], unknown>(harness.ctx.dag, 'schedule')
+    const deliverNotices = serviceMethod<[Agent], unknown>(harness.ctx.dag, 'deliverNotices')
+    const reconcile = serviceMethod<[Agent], unknown>(harness.ctx.dag, 'reconcile')
+    const canRun = serviceMethod<[Agent], boolean>(harness.ctx.dag, 'canRun')
+    const stale = { id: harness.dispatcher.id, session: harness.dispatcher.session } as unknown as Agent
+
+    schedule(harness.dispatcher)
+    schedule(stale)
+    deliverNotices(harness.dispatcher)
+    deliverNotices(stale)
+    reconcile(harness.dispatcher)
+    expect(canRun(stale)).toBe(false)
+
+    const service = harness.ctx.dag
+    await harness.disposeDag()
+    schedule(harness.dispatcher)
+    expect(canRun(harness.dispatcher)).toBe(false)
+    expect(() => { deliverNotices(stale) }).not.toThrow()
+    expect(service).toBeDefined()
+  })
+
+  it('settles a stopped effect as cancelled before it drains the stop command', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const owner = appendStartingOwner(harness, SessionId('cancelled-effect-child'))
+    const service = harness.ctx.dag
+    const pump = serviceMethod<[Agent, DagNodeSnapshot['id']], Promise<void>>(service, 'pump')
+    const originalExecute = serviceMethod<[
+      Agent,
+      DagNodeSnapshot,
+      DagNodeSnapshot['commands'][number],
+      AbortSignal,
+    ], Promise<void>>(service, 'executeCommand')
+    serviceField<WeakMap<typeof harness.dispatcher.session, Set<ReturnType<typeof DagNodeId>>>>(
+      service,
+      'pumps',
+    ).set(harness.dispatcher.session, new Set([owner.node.id]))
+    vi.spyOn(harness.ctx.subagents, 'interrupt').mockImplementation(() => {})
+    Reflect.set(service, 'executeCommand', async (
+      dispatcher: Agent,
+      nodeAtStart: DagNodeSnapshot,
+      command: DagNodeSnapshot['commands'][number],
+      signal: AbortSignal,
+    ) => {
+      if (command.kind === 'dispatch') {
+        service.stop(dispatcher, nodeAtStart.id, 'Cancel the running effect.')
+        signal.throwIfAborted()
+      }
+      await originalExecute(dispatcher, nodeAtStart, command, signal)
+    })
+
+    await pump(harness.dispatcher, owner.node.id)
+
+    expect(service.state(harness.dispatcher)?.nodes[0]).toMatchObject({ status: 'interrupted' })
+    expect(service.state(harness.dispatcher)?.nodes[0]?.commands.at(-1))
+      .toMatchObject({ kind: 'stop', state: 'settled', outcome: 'succeeded' })
+  })
+
+  it('drops an effect failure after its DAG service activation is disposed', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const owner = appendStartingOwner(harness, SessionId('disposed-effect-child'))
+    const service = harness.ctx.dag
+    const pump = serviceMethod<[Agent, DagNodeSnapshot['id']], Promise<void>>(service, 'pump')
+    serviceField<WeakMap<typeof harness.dispatcher.session, Set<ReturnType<typeof DagNodeId>>>>(
+      service,
+      'pumps',
+    ).set(harness.dispatcher.session, new Set([owner.node.id]))
+    Reflect.set(service, 'executeCommand', async () => {
+      await harness.disposeDag()
+      throw new Error('late disposed effect failure')
+    })
+
+    await pump(harness.dispatcher, owner.node.id)
+
+    expect(serviceField<Map<symbol, unknown>>(service, 'effects').size).toBe(0)
+    expect(serviceField<boolean>(service, 'disposed')).toBe(true)
+  })
+
+  it('aborts owned effects and shared probes during service disposal', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const effectController = new AbortController()
+    const probeController = new AbortController()
+    const effects = serviceField<Map<symbol, {
+      readonly controller: AbortController
+      readonly session: typeof harness.dispatcher.session
+      readonly nodeId: ReturnType<typeof DagNodeId>
+      readonly commandId: ReturnType<typeof DagCommandId>
+    }>>(harness.ctx.dag, 'effects')
+    const probes = serviceField<Map<string, {
+      readonly controller: AbortController
+      readonly promise: Promise<void>
+      readonly agent: Agent
+      readonly fences: readonly []
+      waiters: number
+    }>>(harness.ctx.dag, 'waveProbes')
+    effects.set(Symbol('effect'), {
+      controller: effectController,
+      session: harness.dispatcher.session,
+      nodeId: DagNodeId('a'),
+      commandId: DagCommandId('command'),
+    })
+    probes.set('probe', {
+      controller: probeController,
+      promise: Promise.resolve(),
+      agent: harness.dispatcher,
+      fences: [],
+      waiters: 0,
+    })
+
+    await harness.disposeDag()
+
+    expect(effectController.signal.aborted).toBe(true)
+    expect(probeController.signal.aborted).toBe(true)
+    expect(effects.size).toBe(0)
+    expect(probes.size).toBe(0)
+  })
+
+  it('cancels only stale effects owned by the committed dispatcher session', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const owner = appendStartingOwner(harness)
+    const cancel = serviceMethod<[typeof harness.dispatcher.session, DagState], unknown>(harness.ctx.dag, 'cancelStaleEffects')
+    const effects = serviceField<Map<symbol, {
+      readonly controller: AbortController
+      readonly session: typeof harness.dispatcher.session
+      readonly nodeId: ReturnType<typeof DagNodeId>
+      readonly commandId: ReturnType<typeof DagCommandId>
+    }>>(harness.ctx.dag, 'effects')
+    const exact = new AbortController()
+    const missing = new AbortController()
+    const foreign = new AbortController()
+    const command = owner.node.commands[0]!
+    effects.set(Symbol('exact'), {
+      controller: exact, session: harness.dispatcher.session, nodeId: owner.node.id, commandId: command.id,
+    })
+    effects.set(Symbol('missing'), {
+      controller: missing, session: harness.dispatcher.session, nodeId: DagNodeId('missing'), commandId: command.id,
+    })
+    effects.set(Symbol('foreign'), {
+      controller: foreign, session: {} as typeof harness.dispatcher.session, nodeId: owner.node.id, commandId: command.id,
+    })
+
+    cancel(harness.dispatcher.session, owner.state)
+    expect(exact.signal.aborted).toBe(false)
+    expect(missing.signal.aborted).toBe(true)
+    expect(foreign.signal.aborted).toBe(false)
+
+    cancel(harness.dispatcher.session, {
+      ...owner.state,
+      nodes: [{ ...owner.node, commands: [{ ...command, state: 'settled' }] }],
+    })
+    expect(exact.signal.aborted).toBe(true)
+  })
+
+  it('contains reconciliation and scheduled-flush failures', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const warn = vi.spyOn(harness.ctx.logger, 'warn').mockImplementation(() => harness.ctx.logger)
+    harness.ctx.dag.write(harness.dispatcher, { nodes: [node()] })
+    const originalDelivery = serviceField<(agent: Agent) => void>(harness.ctx.dag, 'deliverNotices')
+    Reflect.set(harness.ctx.dag, 'deliverNotices', () => { throw new Error('delivery failed') })
+    serviceMethod<[Agent], unknown>(harness.ctx.dag, 'reconcile')(harness.dispatcher)
+    await Promise.resolve()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('notice reconciliation failed'))
+    Reflect.set(harness.ctx.dag, 'deliverNotices', originalDelivery)
+
+    const originalFlush = serviceField<(agent: Agent) => Promise<void>>(harness.ctx.dag, 'flushAndSchedule')
+    Reflect.set(harness.ctx.dag, 'flushAndSchedule', () => Promise.reject(new Error('post-commit failed')))
+    serviceMethod<[Agent], unknown>(harness.ctx.dag, 'scheduleFlush')(harness.dispatcher)
+    await new Promise<void>((resolve) => { setImmediate(resolve) })
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('post-commit scheduling failed'))
+    Reflect.set(harness.ctx.dag, 'flushAndSchedule', originalFlush)
+  })
+
+  it('validates the exact command message admitted to a child turn', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const owner = appendStartingOwner(harness)
+    const command = owner.node.commands[0]!
+    const assertTurn = serviceMethod<[DagNodeSnapshot, Agent], unknown>(harness.ctx.dag, 'assertCurrentChildTurn')
+    const child = (events: readonly unknown[]): Agent => ({
+      session: { events },
+    }) as unknown as Agent
+    const start = { type: 'turn/start', data: { turn: 1 } }
+    const end = { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } }
+    const currentMessage = {
+      type: 'user/message',
+      data: userMessageForTest(`${command.id}-message`),
+    }
+
+    const { currentOperationId: _operationId, ...nodeWithoutOperation } = owner.node
+    expect(() => { assertTurn({ ...nodeWithoutOperation, commands: [] }, child([start])) })
+      .toThrow(expect.objectContaining({ code: 'dag-stale-child-turn' }))
+    expect(() => { assertTurn(owner.node, child([])) })
+      .toThrow(/requires an active turn/)
+    expect(() => { assertTurn(owner.node, child([start, end])) })
+      .toThrow(/requires an active turn/)
+    expect(() => { assertTurn(owner.node, child([start, currentMessage])) }).not.toThrow()
+    expect(() => { assertTurn(owner.node, child([currentMessage, start])) }).not.toThrow()
+    expect(() => { assertTurn(owner.node, child([start])) })
+      .toThrow(/invalidated turn/)
+
+    const old = {
+      ...command,
+      id: DagCommandId('op-0-a-g0-old'),
+      operationId: DagOperationId('op-0'),
+      generation: 0,
+      bindingGeneration: 0,
+    }
+    expect(() => {
+      assertTurn({ ...owner.node, commands: [old, command] }, child([
+        start,
+        { type: 'user/message', data: userMessageForTest(`${old.id}-message`) },
+      ]))
+    }).toThrow(/invalidated turn/)
   })
 
   it('fails the ended owner turn and discards queued generic child work', async () => {
@@ -923,6 +2005,11 @@ describe('native DAG service', () => {
       },
     }).state
     harness.dispatcher.session.append('dag/state', { state: dispatched })
+    harness.ctx.agentLoop.create(
+      SessionId('reload-empty-dispatcher'),
+      { provider: 'mock', model: 'mock' },
+      { cwd: harness.root },
+    )
     const child = childCreated(harness.ctx, harness.dispatcher)
 
     await harness.ctx.plugin(DagService, {

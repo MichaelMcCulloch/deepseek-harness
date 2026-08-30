@@ -141,6 +141,19 @@ function followup(
   })
 }
 
+/** Complete owner controller with per-test hook overrides. */
+function ownerController(
+  overrides: Partial<SubagentOwnerController> = {},
+): SubagentOwnerController {
+  return {
+    stop(request) { request.stop() },
+    redirect(request) { request.redirect() },
+    turnSettled() {},
+    settled() {},
+    ...overrides,
+  }
+}
+
 /**
  * Exercise manager-wide teardown through the package-private owner rather than
  * adding the irreversible operation to the public service contract.
@@ -838,6 +851,68 @@ describe('SubagentRuntime.redirect', () => {
     expect(adapter.requests.filter(request => request.sessionId === started.childId)).toHaveLength(2)
     const loaded = await ctx.sessionPersistence.load(started.childId)
     expect(userTexts(loaded.events)).toEqual(['child task', 'stable work'])
+  })
+
+  it('rejects an owner redirect that does not admit its message', async () => {
+    const release = Promise.withResolvers<undefined>()
+    const adapter = new GatedAdapter([{ chunks: textResponse('done'), gate: release.promise }])
+    const { ctx, parent } = await setupWith(adapter)
+    ctx.subagents.registerOwnerController('rejecting-owner', ownerController({
+      redirect() {},
+    }))
+    const started = await ctx.subagents.startContinuable({
+      ...startSpec(parent),
+      owner: { controller: 'rejecting-owner', metadata: {} },
+      settlementDelivery: 'none',
+    })
+    await vi.waitFor(() => { expect(adapter.requests).toHaveLength(1) })
+    const manager = (ctx.subagents as unknown as {
+      continuations: { activations: Map<SessionId, { accepted: Set<MessageId> }> }
+    }).continuations
+
+    await expect(ctx.subagents.redirect(parent, started.childId, message('replacement'), {
+      source: { kind: 'user' },
+      cause: { kind: 'parent' },
+      signal: testSignal,
+    })).rejects.toMatchObject({ code: 'INVALID_OWNER' })
+    expect(manager.activations.get(started.childId)?.accepted.size).toBe(0)
+
+    release.resolve(undefined)
+    await waitNoActivation(ctx, started.childId)
+  })
+
+  it('rejects a second owner admission and clears the accepted reservation', async () => {
+    const release = Promise.withResolvers<undefined>()
+    const adapter = new GatedAdapter([
+      { chunks: textResponse('discarded'), gate: release.promise },
+      { chunks: textResponse('replacement answer') },
+    ])
+    const { ctx, parent } = await setupWith(adapter)
+    ctx.subagents.registerOwnerController('double-owner', ownerController({
+      redirect(request) {
+        request.redirect()
+        request.redirect()
+      },
+    }))
+    const started = await ctx.subagents.startContinuable({
+      ...startSpec(parent),
+      owner: { controller: 'double-owner', metadata: {} },
+      settlementDelivery: 'none',
+    })
+    await vi.waitFor(() => { expect(adapter.requests).toHaveLength(1) })
+    const manager = (ctx.subagents as unknown as {
+      continuations: { activations: Map<SessionId, { accepted: Set<MessageId> }> }
+    }).continuations
+
+    await expect(ctx.subagents.redirect(parent, started.childId, message('replacement'), {
+      source: { kind: 'user' },
+      cause: { kind: 'parent' },
+      signal: testSignal,
+    })).rejects.toMatchObject({ code: 'INVALID_OWNER' })
+    expect(manager.activations.get(started.childId)?.accepted.size).toBe(0)
+
+    release.resolve(undefined)
+    await waitNoActivation(ctx, started.childId)
   })
 })
 
@@ -1860,6 +1935,93 @@ describe('continuable settlement delivery', () => {
     await waitNoActivation(ctx, started.childId)
 
     expect(settlementNotices(parent)).toEqual([])
+  })
+
+  it('falls back to activation settlement with the closing output when the turn hook fails', async () => {
+    const { ctx, parent } = await setup([textResponse('owned answer')])
+    const settlements: Array<Parameters<SubagentOwnerController['settled']>[0]> = []
+    const warnings: string[] = []
+    ctx.logger.warn = (message: string) => { warnings.push(message) }
+    ctx.subagents.registerOwnerController('fallback-output', ownerController({
+      turnSettled() { throw new Error('turn hook failed') },
+      settled(settlement) { settlements.push(settlement) },
+    }))
+
+    const started = await ctx.subagents.startContinuable({
+      ...startSpec(parent),
+      owner: { controller: 'fallback-output', metadata: {} },
+      settlementDelivery: 'none',
+    })
+    await waitNoActivation(ctx, started.childId)
+
+    expect(warnings.some(message => message.includes('owner turn settlement failed'))).toBe(true)
+    expect(settlements).toHaveLength(1)
+    expect(settlements[0]).toMatchObject({
+      stopReason: 'completed',
+      output: [{ type: 'text', text: 'owned answer' }],
+    })
+  })
+
+  it('falls back to activation settlement without output after a blocked turn', async () => {
+    const { ctx, parent } = await setup([])
+    const settlements: Array<Parameters<SubagentOwnerController['settled']>[0]> = []
+    ctx.on('agent/pre-step', async ({ agent: subject }, next) => {
+      if (subject === parent) return next()
+      return { kind: 'reject' }
+    })
+    ctx.subagents.registerOwnerController('fallback-empty', ownerController({
+      turnSettled() { throw new Error('turn hook failed') },
+      settled(settlement) { settlements.push(settlement) },
+    }))
+
+    const started = await ctx.subagents.startContinuable({
+      ...startSpec(parent),
+      owner: { controller: 'fallback-empty', metadata: {} },
+      settlementDelivery: 'none',
+    })
+    await waitNoActivation(ctx, started.childId)
+
+    expect(settlements).toHaveLength(1)
+    expect(settlements[0]).toMatchObject({ stopReason: 'refusal' })
+    expect(settlements[0]).not.toHaveProperty('output')
+  })
+
+  it('maps an owned error turn and includes its diagnostic', async () => {
+    const { ctx, parent } = await setup([])
+    const turns: Array<Parameters<SubagentOwnerController['turnSettled']>[0]> = []
+    ctx.subagents.registerOwnerController('error-owner', ownerController({
+      turnSettled(settlement) { turns.push(settlement) },
+    }))
+
+    const started = await ctx.subagents.startContinuable({
+      ...startSpec(parent),
+      owner: { controller: 'error-owner', metadata: {} },
+      settlementDelivery: 'none',
+    })
+    await waitNoActivation(ctx, started.childId)
+
+    expect(turns).toHaveLength(1)
+    expect(turns[0]).toMatchObject({ stopReason: 'error' })
+    expect(turns[0]?.error).toContain('MockAdapter: script exhausted')
+  })
+
+  it('maps an owned token-ceiling turn', async () => {
+    const { ctx, parent } = await setup([maxTokensResponse('partial')])
+    const turns: Array<Parameters<SubagentOwnerController['turnSettled']>[0]> = []
+    ctx.subagents.registerOwnerController('token-owner', ownerController({
+      turnSettled(settlement) { turns.push(settlement) },
+    }))
+
+    const started = await ctx.subagents.startContinuable({
+      ...startSpec(parent),
+      owner: { controller: 'token-owner', metadata: {} },
+      settlementDelivery: 'none',
+    })
+    await waitNoActivation(ctx, started.childId)
+
+    expect(turns).toHaveLength(1)
+    expect(turns[0]).toMatchObject({ stopReason: 'max-tokens' })
+    expect(turns[0]).not.toHaveProperty('error')
   })
 
   it('delegates authorized redirect, stop, and settlement to the durable owner', async () => {
