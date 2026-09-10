@@ -16,7 +16,7 @@
 
 `@deepseek-ai/dsh-dag` 在调度器会话的每个 `dag/state` 事件中保存一份完整且不可变的版本 1 状态值。快照包含 revision、graph generation、operation counter、完整节点面板、拓扑顺序、就绪列表、状态计数、wave、持久命令 mailbox、operation receipt 与通知。会话日志是唯一持久权威；第一次状态前 `dag` projection 为 `null`，之后派生浏览器安全的当前视图。
 
-生产 reducer 与独立 reference reducer 都是纯函数。服务命令读取当前 revision、同步 reduce，并在没有 `await` 的情况下追加一份完整快照。可选 `if_revision` 执行比较并设置。陈旧 revision、嵌套 append 或竞争的重入 commit 返回 `dag-revision-conflict`；它不等待状态锁。新的类型化事件加入已知 session-event vocabulary，但不改变结构化会话格式，因此 `SESSION_FORMAT_VERSION` 仍为 `0`。
+生产 reducer 与独立 reference reducer 都是纯函数。服务命令读取当前 revision、同步 reduce，并在没有 `await` 的情况下追加一份完整快照。可选 `if_revision` 执行比较并设置。陈旧 revision、嵌套 append 或竞争的重入 commit 返回 `dag-revision-conflict`；它不等待状态锁。类型化 `dag/state` 事件加入已知 session-event vocabulary，但不改变结构化会话格式，因此不认识该事件的构建会拒绝它，而不是误读快照。
 
 节点生命周期是 `pending → starting → in_progress → completed | blocked | failed | interrupted`。blocked 与 interrupted 节点通过 starting resume，failed 节点只能通过 redispatch 回到 pending，completed 是终态。stop 在取消 effect 或子级前提交 interrupted。每个使早期工作失效的操作都会推进节点 generation。每个 effect 结果必须匹配 binding generation、节点 generation 与 operation id，因此陈旧回调对状态没有影响。
 
@@ -64,6 +64,6 @@ Barrier 测试覆盖竞争命令对与重启历史。没有 remote 的真实本�
 
 调度器可以在早期 effect 运行时接受图命令，在会话重新打开后恢复这些 effect，并忽略 generation fence 陈旧的每个晚到结果。一条 session event 显示完整当前状态，而浏览器接收较小 projection，模型只通过显式工具与持久通知接收状态。
 
-DAG 工作创建持久本地分支、worktree 与子会话。服务绝不自动删除它们，因此清理仍是显式 operator 操作。完成证明本地 Git 事实与声明归属，不证明语义正确性。一个 harness 进程可以修改一个 live session；仍不支持多进程修改一个调度器会话。
+DAG 工作创建持久本地分支、worktree 与子会话。服务绝不自动删除它们，因此清理仍是显式 operator 操作。完成证明本地 Git 事实与声明归属，不证明语义正确性。图变更通过一个 harness 进程内的 live 调度器 Agent 进行，该会话日志的第二个写入者会被[会话写入 lease](../feature/2026-08-31-cross-process-session-write-lease.zh.md)拒绝，而不会共享同一张图。
 
-Todo 功能保持独立。通用 one-shot 与可续行 subagent 保持既有行为。`dag-todo` 会话与 sidecar 没有迁移到版本 1 原生状态的路径。
+Todo 功能保持独立，通用 one-shot 与可续行 subagent 保持既有行为。

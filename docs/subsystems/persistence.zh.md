@@ -188,6 +188,8 @@ interface SessionHeader {
 
 后端用 `SessionFormatUnsupportedError` 拒绝无法可靠解读的日志，它与 `SessionPersistenceCorruptionError` 区分，因为数据没有损坏。`stat` 与 `list` 会对最高规范 generation 分类，并在不读取或改变正文的前提下转换受支持的历史 header。历史 `open` 会共享每个 Session 唯一的一次 migration preparation，再返回当前逻辑值，并保持每个源路径、字节与 inode 不变。JSONL provider 直接从该内存结果返回读句柄而不发布；写 open 则在持有单写者 claim 与文件 lease 时复用 preparation、排他发布最终 current generation，随后才返回可写句柄。即使仍有较旧的可读 generation，最高的未来 generation 仍会导致拒绝。当前格式恢复会保留已安装扩展和带 `ignorable: true` 的未知事件；历史 v0/v1/v2 迁移则会拒绝未知类型，即使它带有 ignorable 标记。后端为每个会话保留独立文件时，消息附上选定的原始日志路径。仓库外后端必须在自己的物理格式入口提供等价的仅当前句柄值与方向感知拒绝。[已发布格式迁移决策](../../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.zh.md)负责迁移链与不可变发布规则。
 
+`dag/state` 是该事件词汇表中一个已知的具名成员。其 payload 是带有自身 payload 版本的完整 DAG 快照，因此该成员不会改变 Session header 与事件信封的当前格式版本；不认识 `dag/state` 的构建会拒绝该事件（除非信封将其标记为 ignorable），而不是误读或跳过它。[DAG 子系统](dag.zh.md)拥有该 payload 版本与回放规则。
+
 ## `CreateSessionOptions`：seed 与元数据
 
 通过 store 创建 `Session` 时会接收 `seed`（初始回放或 fork 历史）、可选的精确 `inheritedEventCount` 与 `meta`（store 整合进 `SessionHeader` 的存储层字段）。store 填充 `version`/`id` 并为 `createdAt` 提供默认值；调用方可以提供已校验的绝对 `cwd`、`parentSession` 谱系、`isSeeded` 谱系标记、可选的粗粒度 `origin`、`delegationDepth`、用于组装该 agent（智能体）的 `agentPreset` 以及已有的 `createdAt`。seeded 创建必须显式提供与 inherited prefix 完全相等的 seed 和精确 cut；constructor 会先在该 cut 追加 child-owned tagged end-seed marker，setup 再添加 child-owned event。`origin: 'subagent'` 让产品导航能够隐藏重复的 child 行；它不证明描述符有效，也不证明 child 可以恢复。
