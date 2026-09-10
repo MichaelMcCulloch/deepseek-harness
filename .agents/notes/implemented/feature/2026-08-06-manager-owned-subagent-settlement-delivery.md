@@ -14,9 +14,9 @@ The signal already existed. `subagent/end` has carried `stopReason` and `lastAss
 
 ## Decision
 
-The continuation manager delivers the account itself, from inside the disposal transaction that ends the Activation.
+For an Activation whose durable descriptor selects `adaptive` or `quiet` settlement delivery, the continuation manager delivers the account from inside the disposal transaction that ends the Activation. A `none` descriptor suppresses the generic message. An owner-bound child still calls its registered owner controller with the terminal facts, so the owner can publish its own account.
 
-When a resident Activation settles, `notifySettlement()` resolves the child's durable direct parent and sends it one user-role message: the epoch's outcome as a sentence the parent can act on, then the child's final assistant content, or a statement that it produced none. Delivery is unconditional for every child whose id a caller actually received. It does not consult whether the child reported, and it keeps no bookkeeping that could make the promise conditional — that unconditionality is what lets `tool-subagent` promise a runtime notice containing the outcome and any final assistant message. A materialization rolled back before its first accepted message stays silent, because the caller was told that child was not established.
+When a resident Activation settles under `adaptive` or `quiet`, `notifySettlement()` resolves the child's durable direct parent and sends it one user-role message: the epoch's outcome as a sentence the parent can act on, then the child's final assistant content, or a statement that it produced none. Delivery is unconditional within either policy for every child whose id a caller actually received. It does not consult whether the child reported, and it keeps no bookkeeping that could make the promise conditional — that unconditionality is what lets `tool-subagent` promise a runtime notice containing the outcome and any final assistant message. `quiet` injects the same message without waking the parent. The [native DAG owner](../architecture/2026-08-29-event-sourced-native-dag-orchestrator.md) selects `none` and publishes durable DAG notices instead. A materialization rolled back before its first accepted message stays silent, because the caller was told that child was not established.
 
 ### Provenance
 
@@ -28,7 +28,7 @@ An external `ctx.on('subagent/end')` listener looks more decoupled and is wrong.
 
 **The send happens before `releaseOwnership`.** At that point the parent's owned-child set still contains this child, so the settlement predicate cannot succeed. Delivering after the release instead races a watcher that resumes one microtask later, finds itself childless and quiet, and disposes an Agent whose `cancel()` clears the very inbox the notice is sitting in. The failure mode is a silently missing message with no error anywhere.
 
-**A resident parent receives it through its private `SubagentInbox`.** The wrapper checks the Activation's closing promise immediately before the synchronous waking send, and the manager renews the wake generation before returning. The final settlement decision rechecks that generation, the Session sequence, the pending Inbox, and the owned-child set under the child lock, then claims the Agent's idle phase through `runMaintenance()` before closing admission. This is not redundant with the first rule: `Agent.status` folds context maintenance into `idle`, and a waking send behind maintenance only arms a deferred wake.
+**Under `adaptive`, a resident parent receives it through its private `SubagentInbox`.** The wrapper checks the Activation's closing promise immediately before the synchronous waking send, and the manager renews the wake generation before returning. The final settlement decision rechecks that generation, the Session sequence, the pending Inbox, and the owned-child set under the child lock, then claims the Agent's idle phase through `runMaintenance()` before closing admission. This is not redundant with the first rule: `Agent.status` folds context maintenance into `idle`, and a waking send behind maintenance only arms a deferred wake.
 
 Both rules are pinned by tests that fail when the ordering is reversed or the accounting removed.
 
@@ -78,7 +78,7 @@ The refusal and interruption wordings are pinned verbatim in unit tests rather t
 
 **Deliver only when the child sent no message.** This was the first design. It needs per-Activation bookkeeping, still misses the child that sent progress and then died before its result, and — decisively — makes the parent-facing promise conditional. "Usually you are told" is not a contract a tool description can state, and a model that cannot rely on the notice will poll anyway.
 
-**Make delivery configurable.** A deployment switch would return the model-facing text to "usually", which is the failure this change exists to remove. Protocol constants and safety invariants stay fixed; this is one of them.
+**Add a deployment-wide opt-out or let the model choose delivery.** Rejected. Ordinary delegation needs the `adaptive` default so its model-facing promise stays unconditional. Only an explicit child creator that owns the alternate delivery path can select `quiet` or `none`; the model cannot choose the policy.
 
 **Change `subagent/end` to carry the parent, and let a plugin deliver.** That widens a published payload for one in-package consumer, keeps every ordering hazard, and makes the return channel an optional plugin again. Extending the package-private `ActivationObserver` with `terminal(failure)` keeps one computation of the terminal facts and no public surface change.
 
@@ -86,11 +86,11 @@ The refusal and interruption wordings are pinned verbatim in unit tests rather t
 
 ## Consequences
 
-- A continuable child's parent receives one message per settled Activation. Fan-out deployments therefore add parent turns; steering keeps a simultaneous batch to one step.
-- `tool-subagent` promises the notice in its schema because the return channel is service behavior, not an optional plugin.
+- Under `adaptive`, a continuable child's parent receives one message per settled Activation. Fan-out deployments therefore add parent turns; steering keeps a simultaneous batch to one step. `quiet` injects without waking, and `none` creates no generic message.
+- `tool-subagent` promises the notice in its schema because its child descriptors use the `adaptive` service behavior, not an optional plugin.
 - `Activation` carries `parentSession` and `announced`. The first exists because the child handle is disposed before delivery; the second is what keeps a rolled-back materialization silent.
 - `foldConsumedWork()` replaces `dsh-session`'s `findLastMessageTurnEnd()` and moves to `dsh-agent`, which owns the inbox marker it reads; the one-shot in-process path folds the same answer and does not classify a cut-short one-shot child as `completed`.
-- Unit coverage pins the unconditional contract, each terminal reason, idle and busy scheduling, the batch, the maintenance regression, the pre-release ordering, a parent that is gone, and a rejected send that must not fail teardown.
+- Unit coverage pins `adaptive`, `quiet`, and `none`, owner terminal delegation, the unconditional contract, each terminal reason, idle and busy scheduling, the batch, the maintenance regression, the pre-release ordering, a parent that is gone, and a rejected send that must not fail teardown.
 - Three ACP scenarios use an explicit settlement fence, and `subagent-send-message` pins the Agent-message-before-settlement next-step order.
 - A keyless headless Loader snapshot pins background start → manager-authored settlement notice → final parent answer with no polling or child-authored message.
 
@@ -102,6 +102,6 @@ A notice injected during teardown is not read by a model when that parent is dis
 
 Stop-reason attribution is a best effort over the log's existing splice vocabulary, biased against overstating success. `Inbox.remove()` and teardown's `clear()` write identical cancellation splices, so removing a message whose content survives elsewhere — `agent-instructions` vacuuming a pending instruction refresh, or settlement's own cancel clearing one left pending — can read as work dropped unrun and report a finished child as stopped. Separating them requires a richer removal vocabulary in `dsh-agent`; without it, the misread is narrow and errs toward the parent double-checking a finished child, never toward trusting an unfinished one.
 
-Turn amplification is real for deep or wide trees, and it is not configurable by design. The step-boundary batch bounds it for simultaneous settlement but not for children that settle apart.
+Turn amplification is real for deep or wide trees under `adaptive`. The step-boundary batch bounds it for simultaneous settlement but not for children that settle apart. An owner may select `quiet` or `none` only when another delivery path preserves its user-facing completion account.
 
 Agent messages and their later settlement notices are ordered through the parent's next-step FIFO. Independent settlements from sibling children retain their actual delivery order rather than a synthetic sibling ordering.

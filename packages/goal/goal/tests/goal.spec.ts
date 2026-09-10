@@ -54,7 +54,7 @@ function stubAgentForSession(session: Session, suppliedCtx?: Context): StubAgent
     status: 'idle',
     send: () => {},
     followup: () => {},
-    steer: () => {},
+    steer: () => {}, redirect: () => {},
     inject(input) { this.inbox.append('next-step', input) },
     cancel() {},
     runMaintenance: task => task(new AbortController().signal),

@@ -1,11 +1,11 @@
 /**
- * The globally named `send_message` and `interrupt_agent` tools: thin
- * model-facing adapters over `ctx.subagents.sendMessage()` and
- * `ctx.subagents.interrupt()`. They perform no lifecycle routing of their own —
- * residency, cold resume, and interrupt authorization belong to the subagent
- * service — and they live apart from the provider-bound
- * `@deepseek-ai/dsh-tool-subagent` instances so multiple delegation tools share
- * one control API.
+ * The globally named `send_message`, `steer_agent`, and `interrupt_agent` tools:
+ * thin model-facing adapters over `ctx.subagents.sendMessage()`,
+ * `ctx.subagents.redirect()`, and `ctx.subagents.interrupt()`. They perform no
+ * lifecycle routing of their own — residency, cold resume, owner delegation,
+ * and interrupt authorization belong to the subagent service — and they live
+ * apart from the provider-bound `@deepseek-ai/dsh-tool-subagent` instances so
+ * multiple delegation tools share one control API.
  * @module @deepseek-ai/dsh-tool-subagent-control
  */
 
@@ -21,7 +21,7 @@ export const name = 'tool-subagent-control'
 export const inject = ['tools', 'subagents']
 
 /**
- * Register the `send_message` and `interrupt_agent` tools.
+ * Register the `send_message`, `steer_agent`, and `interrupt_agent` tools.
  * @param ctx - context carrying the tool registry and subagent service.
  */
 export function apply(ctx: Context): void {
@@ -72,6 +72,57 @@ export function apply(ctx: Context): void {
       return { messageId }
     },
   })))
+
+  ctx.tools.register(defineTool({
+    name: 'steer_agent',
+    description:
+      'Interrupt a background subagent\'s current turn and replace it with new instructions. Pending inbox '
+      + 'messages remain queued, but this replacement runs before queued ordinary turns. The child keeps its '
+      + 'conversation and durable session. This call returns only the accepted message id; it does not wait for '
+      + 'the child\'s answer. A failure means the replacement was NOT delivered.',
+    parameters: {
+      agent_id: {
+        type: 'string',
+        required: true,
+        description: 'The continuable subagent id whose current work must be replaced.',
+      },
+      message: {
+        type: 'string',
+        required: true,
+        description: 'Replacement instructions for the subagent.',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          messageId: { type: 'string', required: true },
+        },
+      },
+      render: (args, _value) => [{
+        type: 'text',
+        text: `replacement work accepted for subagent ${args.agent_id}`,
+      }],
+    },
+    async execute(args, exec) {
+      const caller = exec.agent
+      if (!caller) {
+        throw new Error('steer_agent requires a calling agent (exec.agent was undefined)')
+      }
+      const messageId = await ctx.subagents.redirect(
+        caller,
+        brandString<SessionId>(args.agent_id),
+        [{ type: 'text', text: args.message }],
+        {
+          source: { kind: 'agent-message', form: 'relay', senderSessionId: caller.id },
+          signal: exec.signal,
+          cause: { kind: 'parent' },
+        },
+      )
+      return { messageId }
+    },
+  }))
 
   ctx.tools.register(defineTool({
     name: 'interrupt_agent',

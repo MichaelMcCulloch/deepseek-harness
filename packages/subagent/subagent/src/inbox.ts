@@ -4,12 +4,16 @@
  * @module @deepseek-ai/dsh-subagent/inbox
  */
 
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentCancelCause } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 import type { SubagentPromptRequest } from './control-types.ts'
 import { SubagentError } from './error.ts'
 
-/** One Agent inbox destination, as the wire request selects it. */
+/**
+ * One Agent inbox destination this Activation admits directly. A redirect is
+ * not one: it cancels an activity as well as inserting, so it is an Agent
+ * operation rather than a destination selector.
+ */
 export type SubagentDelivery = SubagentPromptRequest['delivery']
 
 /** Delegate Queue and Steer to one live Agent until its Activation starts closing. */
@@ -52,6 +56,22 @@ export class SubagentInbox {
     }
     if (delivery === 'steer') this.agent.steer(message)
     else this.agent.followup(message)
+  }
+
+  /**
+   * Interrupt the active activity and place one replacement ordinary turn before
+   * every queued ordinary turn.
+   * @param message - the accepted replacement input.
+   * @param cause - caller intent recorded on the interrupted activity.
+   */
+  redirect(message: UserMessage, cause: AgentCancelCause): void {
+    if (this.closingPromise !== undefined) {
+      throw new SubagentError(
+        `subagent "${this.agent.id}" activation is being disposed; the message was not accepted`,
+        'ACTIVATION_CLOSING',
+      )
+    }
+    this.agent.redirect(message, cause)
   }
 
   /**

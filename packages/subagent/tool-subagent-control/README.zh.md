@@ -1,5 +1,5 @@
 ---
-description: "全局 send_message、interrupt_agent 与 list_agents 工具，供用户与维护者组合或排查可继续子级的控制。"
+description: "全局 send_message、steer_agent、interrupt_agent 与 list_agents 工具，供用户与维护者组合或排查可继续子级的控制。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-tool-subagent-control` 为可继续子级添加全局控制工具：`send_message` 在直接 parent 与 child 之间 steer，`interrupt_agent` 停止 child 当前轮次但保留其 inbox 与后代，`list_agents`（来自可单独加载的 `list-agents` 插件）按持久化 id 与标签列出可继续 child。parent 与可继续 child 继承相同的 `send_message` 定义和顺序，因此模型通信不会增加 child 专属工具 schema。是否加载这些工具不会决定委派工具是否启动可继续工作。
+`dsh-tool-subagent-control` 为可继续子级添加全局控制工具：`send_message` 在直接 parent 与 child 之间 steer，`steer_agent` 中断直接 child 的活跃工作并替换它，`interrupt_agent` 停止 child 当前轮次但保留其 inbox 与后代，`list_agents`（来自可单独加载的 `list-agents` 插件）按持久化 id 与标签列出可继续 child。parent 与可继续 child 继承相同的 `send_message` 定义和顺序，因此模型通信不会增加 child 专属工具 schema。是否加载这些工具不会决定委派工具是否启动可继续工作。
 
 ## 目录
 
@@ -25,11 +25,11 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-在模型需要对可继续子级发消息、中断或列出的任何组合中挂载本包。根插件只需要 subagent 服务；列表工具是独立插件，部署方可以省略。
+在模型需要对可继续子级发消息、steer、中断或列出的任何组合中挂载本包。根插件只需要 subagent 服务；列表工具是独立插件，部署方可以省略。
 
 ### 最小配置
 
-先加载 subagent 服务、一个后端、委派工具与本包。加上独立的列表插件即可公开全部三个工具：
+先加载 subagent 服务、一个后端、委派工具与本包。加上独立的列表插件即可公开全部四个工具：
 
 ```yaml
 - name: '@deepseek-ai/dsh-subagent'
@@ -42,11 +42,15 @@ kind: "package-reference"
 - name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
 ```
 
-本包不接收任何配置：根插件提供 `send_message` 与 `interrupt_agent`，列表插件提供 `list_agents`。
+本包不接收任何配置：根插件提供 `send_message`、`steer_agent` 与 `interrupt_agent`，列表插件提供 `list_agents`。
 
 ### send_message
 
 向 `agent_id` 指定的 Agent 发送消息：任何确切在线 Agent 都可以指定自己的直接可继续 child，而驻留的可继续 child 还可以指定自己的直接 parent。正在工作的目标通过 Steer 在最近的 step 边界接收消息；空闲目标会启动一个轮次，冷状态的直接 child 会通过继续执行生命周期恢复。调用只返回接受结果（被接受消息的稳定 `messageId`），绝不返回回复。失败——不受支持的目标、不可用的 parent、未知 child、缺少描述符而无法恢复的 child，或准入被拒——会明确说明消息未送达。
+
+### steer_agent
+
+中断直接可继续 child 的活跃轮次，保留其尚未领取的 inbox，在 child 已排队的普通轮次前放置一个替换普通轮次，并唤醒它。调用返回被接受的替换 `messageId`，而非其结果。对于 DAG-owned child，已授权请求会先经过 DAG 的 stop-and-steer 状态转换；普通 child 直接使用继续执行管理器。child 不存在时会冷恢复并把替换作为其下一个轮次，失败则明确说明替换未送达。
 
 ### interrupt_agent
 
@@ -54,7 +58,7 @@ kind: "package-reference"
 
 ### list_agents
 
-列出调用 agent 下方的可继续子级：`children`（默认）只显示直接子级，`descendants` 按稳定 pre-order 遍历整棵树，并为每个条目标注其持久化直接父级会话 id 与深度。状态来自在线 Agent 注册表——`running`、`idle` 或 `ready`。一次性子级因无法接受 `send_message` 而被有意排除，无法读取的候选项以 diagnostic 呈现。
+列出调用 agent 下方的可继续子级：`children`（默认）只显示直接子级，`descendants` 按稳定 pre-order 遍历整棵树，并为每个条目标注其持久化直接父级会话 id 与深度。状态来自在线 Agent 注册表——`running`、`idle` 或 `ready`。一次性子级因无法接受 `send_message` 而被有意排除，无法读取的候选项以 diagnostic 呈现。`steer_agent` 面向该列表报告的同一批持久化 id。
 
 -----
 
@@ -68,7 +72,7 @@ kind: "package-reference"
 
 ### 设计理念
 
-`ctx.subagents.sendMessage()`、`interrupt()` 与列表投影之上的轻量适配器；工具不执行任何生命周期路由。驻留、冷恢复与授权归服务所有，工具把确切在线的调用 Agent（`exec.agent`）同时作为 sender 与权限凭据传入。
+`ctx.subagents.sendMessage()`、`redirect()`、`interrupt()` 与列表投影之上的轻量适配器；工具不执行任何生命周期路由。驻留、冷恢复、owner 委派与授权归服务所有，工具把确切在线的调用 Agent（`exec.agent`）同时作为 sender 与权限凭据传入。
 
 ### 投递与信号所有权
 
@@ -82,7 +86,7 @@ kind: "package-reference"
 
 | 文件 | 职责 |
 |---|---|
-| [`src/index.ts`](src/index.ts) | `send_message` 与 `interrupt_agent` 注册 |
+| [`src/index.ts`](src/index.ts) | `send_message`、`steer_agent` 与 `interrupt_agent` 注册 |
 | [`src/list-agents.ts`](src/list-agents.ts) | `list_agents` 注册：作用域、状态细化、投影 |
 | — | 不发布运行时不变式伴生入口；这个模型侧 adapter 没有独立 lifecycle stream；delivery 与 activation 关系由 subagent service 负责。 |
 
@@ -97,7 +101,7 @@ kind: "package-reference"
 
 - [Subagent 子系统](../../../docs/subsystems/subagent.zh.md)——可继续子级、Activation、inbox、中断与后续消息权限。
 - [dsh-tool-subagent](../tool-subagent/README.zh.md)——启动可继续子级的委派工具。
-- [生成工具目录](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-subagent-control)——三个工具的 schema。
+- [生成工具目录](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-subagent-control)——四个工具的 schema。
 
 -----
 
@@ -108,7 +112,7 @@ kind: "package-reference"
 
 #### 模型看到什么
 
-已生成的 [schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-subagent-control)：`send_message` 接受 `agent_id` 与 `message`；`interrupt_agent` 接受 `agent_id`；`list_agents` 接受可选的 `scope` 枚举。
+已生成的 [schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-subagent-control)：`send_message` 与 `steer_agent` 接受 `agent_id` 与 `message`；`interrupt_agent` 接受 `agent_id`；`list_agents` 接受可选的 `scope` 枚举。
 
 #### Token 影响
 
@@ -168,7 +172,8 @@ kind: "package-reference"
 这些限制说明控制工具无法观察或引导什么；它们是当前包约束。
 
 - **已投递消息没有独立结果**——接受时只返回其 inbox `messageId`；目标后续工作会落入该目标的持久化会话，绝不会通过本工具收集。回复是另一条显式指定地址的 `send_message`，而非本次调用的结果。
-- **只有受支持的相邻 Agent 可以通信**——每个 sender 都可以指定直接可继续 child，只有具备驻留可继续 Activation 的 sender 可以指定自己的直接 parent，且该 parent 必须仍在线；sibling 与更深的后代不能作为消息目标，只有直接 child 投递支持冷激活。
+- **只有受支持的相邻 Agent 可以通信**——每个 sender 都可以指定直接可继续 child，只有具备驻留可继续 Activation 的 sender 可以指定自己的直接 parent，且该 parent 必须仍在线；sibling 与更深的后代不能作为消息目标，只有直接 child 投递支持冷激活。`steer_agent` 使用同一套 exact-direct-parent 权限；`interrupt_agent` 是唯一的 ancestor 级操作。
+- **发送与 steer 刻意保持不同**——`send_message` 绝不中断：正在工作的目标在最近 step 接收它。只有 `steer_agent` 会中断并替换当前工作。
 - **列表是快照，而非投递承诺**——它可能与发布、dispose（资源释放）或后续消息发生竞态，另一个进程也可能激活当前进程报告为 `ready` 的子级；跨进程准确性需要共享租约。`interrupt_agent` 自己执行权威的在线 lineage 检查，因此过期的发现结果不会授予权限。
 - **没有分页或删除**——系统返回完整且稳定排序的集合；只要子级会话仍在持久化存储中，它就会继续出现在列表中，服务级上限或删除操作留待后续产品决策。
 

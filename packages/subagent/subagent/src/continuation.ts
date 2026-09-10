@@ -14,11 +14,12 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { isAbsolute } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentCancelCause } from '@deepseek-ai/dsh-agent'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import { ReasoningEffortId, contentHasImage, createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId, contentHasImage, createUserMessage, freezeMessage } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, MessageId, MessageSource, UserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
@@ -29,6 +30,7 @@ import {
   resolveChildAgentOptions,
   resolveChildDepth,
 } from './child-agent.ts'
+import type SubagentActivationSetupRegistry from './activation-setup-registry.ts'
 import {
   ContinuableActivationRegistry,
 } from './continuation-activation.ts'
@@ -43,12 +45,14 @@ import { establishCatalogChild } from './catalog.ts'
 import { SubagentError } from './error.ts'
 import { isAdjacentAgentSendMessageTool } from './internal.ts'
 import type { ActivationObserver } from './lifecycle.ts'
+import type { SubagentOwnerController } from './owner-controller.ts'
 import type {
   ContinuableCreateRequest,
   ContinuableCreateSpec,
   ContinuableStart,
   ContinuableStartSpec,
   SubagentInterruptAuthority,
+  SubagentOwnerBinding,
   SubagentSendMessageOptions,
 } from './types.ts'
 
@@ -62,8 +66,41 @@ type ChildDeliveryOptions =
      */
     readonly source?: MessageSource
     readonly signal: AbortSignal
+    /** Optional stable inbox identity, so a durable caller can recover without delivering twice. */
+    readonly messageId?: MessageId
   }
-  | { readonly delivery: 'queue'; readonly source: MessageSource; readonly signal: AbortSignal }
+  | {
+    readonly delivery: 'queue'
+    readonly source: MessageSource
+    readonly signal: AbortSignal
+    /** Optional stable inbox identity, so a durable caller can recover without delivering twice. */
+    readonly messageId?: MessageId
+  }
+  | {
+    readonly delivery: 'redirect'
+    readonly source: MessageSource
+    readonly signal: AbortSignal
+    /** Optional stable inbox identity, so a durable caller can recover without delivering twice. */
+    readonly messageId?: MessageId
+    /** Caller intent recorded on the interrupted activity. */
+    readonly cause: AgentCancelCause
+  }
+
+/** Inputs for one parent-authorized continuation delivery. */
+export interface SubagentDeliveryOptions {
+  /** Durable attribution retained on the delivered message; it grants no authority. */
+  readonly source: MessageSource
+  /** Optional stable inbox identity used for idempotent recovery. */
+  readonly messageId?: MessageId
+  /** Caller cancellation, owning the operation only until inbox acceptance. */
+  readonly signal: AbortSignal
+}
+
+/** Options for interrupting and replacing one continuable child's current work. */
+export interface SubagentRedirectOptions extends SubagentDeliveryOptions {
+  /** Caller intent recorded on the interrupted turn. */
+  readonly cause: AgentCancelCause
+}
 
 /** Package-private hooks supplied by the owning service. */
 interface ContinuationHost {
@@ -71,6 +108,8 @@ interface ContinuationHost {
   prepareContinuable(name: string, request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>
   /** Build the lifecycle observer for one Activation residency epoch. */
   observeActivation(provider: string, childId: SessionId, parent: Agent): ActivationObserver
+  /** Resolve the mounted controller for one durable owner binding. */
+  ownerController(binding: SubagentOwnerBinding): SubagentOwnerController | undefined
 }
 
 /**
@@ -85,10 +124,13 @@ export class SubagentContinuationManager {
   constructor(
     private readonly ctx: Context,
     private readonly host: ContinuationHost,
+    setupRegistry: SubagentActivationSetupRegistry,
   ) {
     this.activations = new ContinuableActivationRegistry(
       ctx,
       (provider, childId, parent) => host.observeActivation(provider, childId, parent),
+      binding => host.ownerController(binding),
+      setupRegistry,
     )
   }
 
@@ -103,6 +145,9 @@ export class SubagentContinuationManager {
     const request = spec.request
     const parent = request.parent
     this.activations.assertAdmitting(parent)
+    if (spec.cwd !== undefined && !isAbsolute(spec.cwd)) {
+      throw new SubagentError('continuable subagent cwd must be absolute', 'INVALID_CWD')
+    }
     const persistence = this.requirePersistence()
     assertSubagentMaxDepth(request.maxDepth)
     const childId = spec.childId ?? brandString<SessionId>(randomUUID())
@@ -123,6 +168,8 @@ export class SubagentContinuationManager {
       ...agentReasoningEffort !== undefined ? { agentReasoningEffort } : {},
       ...request.persona !== undefined ? { persona: request.persona } : {},
       ...request.toolFilter !== undefined ? { toolFilter: request.toolFilter } : {},
+      settlementDelivery: spec.settlementDelivery ?? 'adaptive',
+      ...spec.owner !== undefined ? { owner: spec.owner } : {},
     })
     // Capture before the first await: a later parent switch belongs to the
     // parent's future, not to this child.
@@ -159,10 +206,12 @@ export class SubagentContinuationManager {
         const activation = await this.activations.materialize({
           childId,
           provider: spec.provider,
+          settlementDelivery: descriptor.settlementDelivery,
+          ...descriptor.owner === undefined ? {} : { owner: descriptor.owner },
           parent,
           create: {
             seed,
-            meta: childSessionMeta(parent, childDepth, prepared.seed !== undefined),
+            meta: childSessionMeta(parent, childDepth, prepared.seed !== undefined, spec.cwd),
             inheritedEventCount,
             delegatedPolicies,
             descriptor,
@@ -177,7 +226,12 @@ export class SubagentContinuationManager {
           isAdjacentAgentSendMessageTool(this.ctx.get('tools')?.get('send_message', activation.handle.agent))
             ? withContinuableReturnGuidance(parent.id, request.prompt)
             : request.prompt,
-          { source: { kind: 'user' }, signal: spec.signal, delivery: 'queue' },
+          {
+            source: { kind: 'user' },
+            signal: spec.signal,
+            delivery: 'queue',
+            ...spec.messageId === undefined ? {} : { messageId: spec.messageId },
+          },
           parent,
           () => { establishCatalogChild(parent.session, childHeader, descriptor) },
         )
@@ -236,18 +290,16 @@ export class SubagentContinuationManager {
    * @param parent - exact live direct parent authorizing delivery.
    * @param childId - durable direct-child session id.
    * @param content - model-visible prompt blocks.
-   * @param source - durable attribution for the human prompt.
-   * @param signal - caller cancellation before inbox acceptance.
+   * @param options - durable attribution, optional stable message id, and caller cancellation.
    * @returns the accepted durable message id.
    */
   async queuePrompt(
     parent: Agent,
     childId: SessionId,
     content: ContentBlock[],
-    source: MessageSource,
-    signal: AbortSignal,
+    options: SubagentDeliveryOptions,
   ): Promise<MessageId> {
-    return this.deliverToChild(parent, childId, content, { source, signal, delivery: 'queue' })
+    return this.deliverToChild(parent, childId, content, { ...options, delivery: 'queue' })
   }
 
   /**
@@ -255,18 +307,36 @@ export class SubagentContinuationManager {
    * @param parent - exact live direct parent authorizing delivery.
    * @param childId - durable direct-child session id.
    * @param content - model-visible prompt blocks.
-   * @param source - durable attribution for the host prompt.
-   * @param signal - caller cancellation before inbox acceptance.
+   * @param options - durable attribution, optional stable message id, and caller cancellation.
    * @returns the accepted durable message id.
    */
   async steerPrompt(
     parent: Agent,
     childId: SessionId,
     content: ContentBlock[],
-    source: MessageSource,
-    signal: AbortSignal,
+    options: SubagentDeliveryOptions,
   ): Promise<MessageId> {
-    return this.deliverToChild(parent, childId, content, { source, signal, delivery: 'steer' })
+    return this.deliverToChild(parent, childId, content, { ...options, delivery: 'steer' })
+  }
+
+  /**
+   * Interrupt one continuable child's current work and admit one replacement
+   * ordinary turn ahead of its queued ordinary turns. An absent child
+   * cold-resumes and accepts the replacement as its next turn. Authorization,
+   * residency routing, and owner delegation are identical to follow-up delivery.
+   * @param parent - exact live direct parent authorizing delivery.
+   * @param childId - durable direct-child session id.
+   * @param content - model-visible replacement blocks.
+   * @param options - durable attribution, optional stable message id, cancellation, and cause.
+   * @returns the accepted durable message id.
+   */
+  async redirect(
+    parent: Agent,
+    childId: SessionId,
+    content: ContentBlock[],
+    options: SubagentRedirectOptions,
+  ): Promise<MessageId> {
+    return this.deliverToChild(parent, childId, content, { ...options, delivery: 'redirect' })
   }
 
   /** Route one parent-originated delivery through residency and cold resume. */
@@ -310,8 +380,8 @@ export class SubagentContinuationManager {
             return undefined
           }
         }
-        const messageId = this.submitAdmitted(activation, content, options, parent)
-        activation.announced = true
+        const messageId = await this.submitAdmitted(activation, content, options, parent)
+        this.announce(activation, messageId)
         return messageId
       })
       /* v8 ignore start -- only a delivery that lost the disposal cutoff retries. */
@@ -434,6 +504,8 @@ export class SubagentContinuationManager {
       activation = await this.activations.materialize({
         childId,
         provider: descriptor.provider,
+        settlementDelivery: descriptor.settlementDelivery,
+        ...descriptor.owner === undefined ? {} : { owner: descriptor.owner },
         parent,
         agentOptions: {
           ...descriptor.agentProvider !== undefined ? { provider: descriptor.agentProvider } : {},
@@ -468,9 +540,9 @@ export class SubagentContinuationManager {
           throw new SubagentError(`subagent "${activation.childId}" is closing`, 'ACTIVATION_CLOSING')
         }
       }
-      const messageId = this.submitAdmitted(activation, content, options, parent)
+      const messageId = await this.submitAdmitted(activation, content, options, parent)
       commit?.()
-      activation.announced = true
+      this.announce(activation, messageId)
       return messageId
     } catch (error: unknown) {
       try {
@@ -484,23 +556,73 @@ export class SubagentContinuationManager {
     }
   }
 
-  /** Build and submit one message across the final synchronous admission cutoff. */
-  private submitAdmitted(
+  /**
+   * Build and submit one message across the final synchronous admission cutoff,
+   * then let an owner-bound redirect cross its own asynchronous owner barrier.
+   */
+  private async submitAdmitted(
     activation: Activation,
     content: ContentBlock[],
     options: ChildDeliveryOptions,
     parent: Agent,
-  ): MessageId {
-    const message = options.source === undefined
+  ): Promise<MessageId> {
+    const message: UserMessage = options.source === undefined
       ? createAgentMessage(parent, content)
-      : createUserMessage({ content, source: options.source })
-    return this.activations.submitAdmitted(
-      activation,
-      message,
-      options.delivery,
-      parent,
-      options.signal,
-    )
+      : options.messageId === undefined
+        ? createUserMessage({ content, source: options.source })
+        : freezeMessage({ id: options.messageId, role: 'user', content, source: options.source })
+    if (options.messageId !== undefined && this.activations.recordsMessage(activation, options.messageId)) {
+      // A repeated stable identity still leaves the caller holding this child,
+      // so its settlement remains owed to the parent and to any owner.
+      activation.announced = true
+      activation.lastMessageId = options.messageId
+      return options.messageId
+    }
+    const owner = activation.owner
+    return options.delivery !== 'redirect'
+      ? this.activations.submitAdmitted(
+        activation,
+        message,
+        options.delivery,
+        parent,
+        options.signal,
+      )
+      : await this.activations.submitRedirectAdmitted(
+        activation,
+        message,
+        options.cause,
+        parent,
+        options.signal,
+        owner === undefined
+          ? undefined
+          : redirect => this.requireOwnerController(owner).redirect({
+            binding: owner,
+            child: activation.handle.agent,
+            message,
+            redirect,
+          }),
+      )
+  }
+
+  /**
+   * Record that a caller now holds this child's id, so its settlement is owed an
+   * account. Called only after every rollback point of the delivering operation.
+   */
+  private announce(activation: Activation, messageId: MessageId): void {
+    activation.announced = true
+    activation.lastMessageId = messageId
+  }
+
+  /** Resolve a durable child's mounted owner controller or fail loud. */
+  private requireOwnerController(binding: SubagentOwnerBinding): SubagentOwnerController {
+    const controller = this.host.ownerController(binding)
+    if (controller === undefined) {
+      throw new SubagentError(
+        `subagent owner controller "${binding.controller}" is unavailable`,
+        'OWNER_CONTROLLER_UNAVAILABLE',
+      )
+    }
+    return controller
   }
 
   /** Refuse image content for a child whose fixed model accepts text only. */

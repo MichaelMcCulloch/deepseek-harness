@@ -12,6 +12,7 @@ import SubagentRuntime, {
   assertSubagentMaxDepth,
   type ResolvedSubagentStartRequest,
   type SubagentCapabilities,
+  type SubagentOwnerController,
   type SubagentProvider,
   type SubagentResult,
   type SubagentRun,
@@ -375,6 +376,25 @@ describe('SubagentRuntime', () => {
     expect(warnings.some(message => message.includes('<unrenderable thrown value>'))).toBe(true)
   })
 
+  it('validates owner-controller names, duplicates, and stale disposal', async () => {
+    const { subagents } = await service()
+    const controller = {} as SubagentOwnerController
+    const replacement = {} as SubagentOwnerController
+
+    expect(() => { subagents.registerOwnerController('', controller) })
+      .toThrow(expect.objectContaining({ code: 'INVALID_OWNER' }))
+    const dispose = subagents.registerOwnerController('dag', controller)
+    expect(() => { subagents.registerOwnerController('dag', controller) })
+      .toThrow(expect.objectContaining({ code: 'DUPLICATE_OWNER' }))
+
+    const ownerControllers = (subagents as unknown as {
+      ownerControllers: Map<string, SubagentOwnerController>
+    }).ownerControllers
+    ownerControllers.set('dag', replacement)
+    dispose()
+    expect(ownerControllers.get('dag')).toBe(replacement)
+  })
+
   it('SubagentError participates in the harness error taxonomy', () => {
     const error = new SubagentError('boom', 'NO_PROVIDER')
     expect(error).toBeInstanceOf(HarnessError)
@@ -413,6 +433,7 @@ describe('subagent descriptors', () => {
       agentReasoningEffort: ReasoningEffortId('high'),
       persona: 'reviewer',
       toolFilter: { allow: ['read'], deny: ['bash'] },
+      settlementDelivery: 'adaptive' as const,
     }
     expect(snapshotSubagentDescriptor({
       mode: 'continuable',
@@ -423,6 +444,7 @@ describe('subagent descriptors', () => {
       agentReasoningEffort: complete.agentReasoningEffort,
       persona: complete.persona,
       toolFilter: complete.toolFilter,
+      settlementDelivery: complete.settlementDelivery,
     })).toEqual(complete)
     expect(foldSubagentDescriptor([event(complete)])).toEqual(complete)
     expect(foldSubagentDescriptor([
@@ -432,6 +454,7 @@ describe('subagent descriptors', () => {
         provider: 'spawn',
         label: 'l',
         toolFilter: { allow: ['read'] },
+        settlementDelivery: 'adaptive',
       }),
     ])).toMatchObject({ toolFilter: { allow: ['read'] } })
     expect(foldSubagentDescriptor([
@@ -441,6 +464,7 @@ describe('subagent descriptors', () => {
         provider: 'spawn',
         label: 'l',
         toolFilter: { deny: ['bash'] },
+        settlementDelivery: 'adaptive',
       }),
     ])).toMatchObject({ toolFilter: { deny: ['bash'] } })
     expect(foldSubagentDescriptor([
@@ -561,6 +585,37 @@ describe('subagent descriptors', () => {
       label: 'l',
       toolFilter: { deny: [7] },
     }, 'toolFilter.deny must be an array of strings'],
+    ['invalid settlement delivery', {
+      version: SUBAGENT_DESCRIPTOR_VERSION,
+      mode: 'continuable',
+      provider: 'spawn',
+      label: 'l',
+      settlementDelivery: 'wake',
+    }, 'settlementDelivery is invalid'],
+    ['non-object owner', {
+      version: SUBAGENT_DESCRIPTOR_VERSION,
+      mode: 'continuable',
+      provider: 'spawn',
+      label: 'l',
+      settlementDelivery: 'none',
+      owner: [],
+    }, 'owner must be an object'],
+    ['incomplete owner', {
+      version: SUBAGENT_DESCRIPTOR_VERSION,
+      mode: 'continuable',
+      provider: 'spawn',
+      label: 'l',
+      settlementDelivery: 'none',
+      owner: { controller: 'dag' },
+    }, 'owner requires controller and metadata'],
+    ['empty owner controller', {
+      version: SUBAGENT_DESCRIPTOR_VERSION,
+      mode: 'continuable',
+      provider: 'spawn',
+      label: 'l',
+      settlementDelivery: 'none',
+      owner: { controller: '', metadata: {} },
+    }, 'owner.controller must be a non-empty string'],
   ])('rejects a malformed persisted descriptor: %s', (_case, data, detail) => {
     expect(() => foldSubagentDescriptor([event(data)])).toThrow(detail)
   })

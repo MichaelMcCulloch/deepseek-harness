@@ -119,6 +119,18 @@ export interface SubagentPromptReceipt {
   readonly messageId: MessageId
 }
 
+/**
+ * One human redirect addressed to a continuable direct child. It carries no
+ * delivery selector: a redirect always interrupts the active work and places
+ * its replacement before the child's queued ordinary turns.
+ */
+export type SubagentSteerRequest = Omit<SubagentPromptRequest, 'delivery'>
+
+/** Inbox identity returned once the continuation accepts one redirect. */
+export interface SubagentSteerReceipt {
+  readonly messageId: MessageId
+}
+
 /** Uniform acknowledgement that one interrupt request was admitted. */
 export interface SubagentInterruptReceipt {
   readonly accepted: true

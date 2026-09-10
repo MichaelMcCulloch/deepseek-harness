@@ -4,6 +4,8 @@ import { ToolCallId, createUserMessage, expandAssistantStream } from '@deepseek-
  * queued and steering work, while `keepInbox` preserves pending input for a
  * later wake after the active turn reaches quiescence. The suite
  * covers every landing window plus signal reset and `whenIdle()` quiescence.
+ * `Agent.redirect()` builds on the same preserving cancellation and adds one
+ * ordinary turn ahead of the queued ones.
  * @module dsh-agent-loop/tests/cancel
  */
 
@@ -1061,5 +1063,57 @@ describe('Agent.cancel()', () => {
     expect(turnEnd?.type === 'turn/end' && turnEnd.data.reason)
       .toEqual({ kind: 'aborted', reason: { kind: 'user' } })
     await ctx.fiber.dispose()
+  })
+})
+
+describe('Agent.redirect()', () => {
+  it('redirects an idle agent without an active turn to cancel', async () => {
+    const adapter = new MockAdapter([textResponse('replacement reply')])
+    const ctx = await harness(adapter)
+    const agent = await ctx.agentLoop.create(SessionId('idle-redirect'), { provider: 'mock', model: 'mock' })
+
+    agent.redirect(createUserMessage({
+      content: [{ type: 'text', text: 'replacement' }],
+      source: { kind: 'user' },
+    }), { kind: 'user' })
+    await agent.whenIdle()
+
+    expect(userTexts(agent)).toEqual(['replacement'])
+    expect(adapter.requests).toHaveLength(1)
+    const turnEnd = agent.session.snapshotEvents().findLast(event => event.type === 'turn/end')
+    expect(turnEnd?.type === 'turn/end' && turnEnd.data.reason).toEqual({ kind: 'completed' })
+  })
+
+  it('cancels active work and runs the replacement before queued turns', async () => {
+    const adapter = new MockAdapter([
+      'hang',
+      textResponse('replacement reply'),
+      textResponse('first queued reply'),
+      textResponse('second queued reply'),
+    ])
+    const ctx = await harness(adapter)
+    const agent = await ctx.agentLoop.create(SessionId('redirect-order'), { provider: 'mock', model: 'mock' })
+
+    send(agent, 'active')
+    await new Promise(resolve => setTimeout(resolve, 30))
+    send(agent, 'first queued')
+    send(agent, 'second queued')
+    agent.redirect(createUserMessage({
+      content: [{ type: 'text', text: 'replacement' }],
+      source: { kind: 'user' },
+    }), { kind: 'user' })
+
+    await agent.whenIdle()
+
+    expect(userTexts(agent)).toEqual(['active', 'replacement', 'first queued', 'second queued'])
+    expect(agent.inbox.nextTurn).toEqual([])
+    expect(agent.inbox.nextStep).toEqual([])
+    expect(agent.session.snapshotEvents().flatMap(event => event.type === 'turn/end' ? [event.data.reason] : []))
+      .toEqual([
+        { kind: 'aborted', reason: { kind: 'user' } },
+        { kind: 'completed' },
+        { kind: 'completed' },
+        { kind: 'completed' },
+      ])
   })
 })

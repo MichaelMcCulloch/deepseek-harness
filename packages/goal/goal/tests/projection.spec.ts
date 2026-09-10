@@ -40,7 +40,7 @@ function liveAgent(ctx: Context, session: Session): Agent {
     get status() { return status },
     send: () => {},
     followup: () => {},
-    steer: () => ({ outcome: Promise.resolve({ status: 'rejected' as const }) }),
+    steer: () => ({ outcome: Promise.resolve({ status: 'rejected' as const }) }), redirect: () => {},
     inject: () => { throw new Error('goal projection tests do not inject model context') },
     cancel() {},
     runMaintenance: task => task(new AbortController().signal),

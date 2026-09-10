@@ -396,6 +396,19 @@ Types: [ContentBlock](subsystems/core.md) · [TokenUsage](subsystems/llm-streami
 
 Source: [`packages/compaction/compaction/src/types.ts:34`](../packages/compaction/compaction/src/types.ts)
 
+### `dag/*`
+
+<a id="dagstate--log-only"></a>
+
+#### `dag/state` — log-only
+
+```ts persistence-catalog
+/** One complete immutable native DAG state value. */
+'dag/state': { readonly state: DagState }
+```
+
+Source: [`packages/dag/dag/src/types.ts:228`](../packages/dag/dag/src/types.ts)
+
 ### `deliverables/*`
 
 <a id="deliverablespresented--log-only"></a>

@@ -9,8 +9,11 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { MessageId, UserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import type { SubagentInterruptAuthority } from './continuation.ts'
-import type { SubagentOwnerBinding, SubagentResult } from './types.ts'
+import type {
+  SubagentInterruptAuthority,
+  SubagentOwnerBinding,
+  SubagentResult,
+} from './types.ts'
 
 /** Authorized stop request for one owner-bound live child. */
 export interface SubagentOwnerStopRequest {

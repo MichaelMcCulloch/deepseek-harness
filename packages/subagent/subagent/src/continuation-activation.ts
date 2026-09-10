@@ -12,6 +12,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {
   Agent,
+  AgentCancelCause,
   AgentHandle,
   AgentOptions,
   CreateAgentOptions,
@@ -22,9 +23,12 @@ import type {
   SessionEvent,
   SessionId,
   SessionLogOffset as SessionLogOffsetType,
+  TurnEndReason,
   UserMessage,
 } from '@deepseek-ai/dsh-session'
 import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
+import type { AgentSetupCommit } from '@deepseek-ai/dsh-agent'
+import type SubagentActivationSetupRegistry from './activation-setup-registry.ts'
 import {
   appendDelegatedPolicyOverrides,
   applyChildComposition,
@@ -36,6 +40,12 @@ import { SubagentError } from './error.ts'
 import { SubagentInbox } from './inbox.ts'
 import type { SubagentDelivery } from './inbox.ts'
 import type { ActivationObserver, ActivationTerminal } from './lifecycle.ts'
+import type { SubagentOwnerController } from './owner-controller.ts'
+import type {
+  SubagentOwnerBinding,
+  SubagentResult,
+  SubagentSettlementDelivery,
+} from './types.ts'
 
 /**
  * One residency epoch for a reconstructed continuable child Agent. It directly
@@ -54,6 +64,10 @@ export interface Activation {
   readonly parentSession: SessionId
   /** The provider name recorded in the durable descriptor. */
   readonly provider: string
+  /** Generic parent-notice policy persisted with the child descriptor. */
+  readonly settlementDelivery: SubagentSettlementDelivery
+  /** Optional durable capability ownership. */
+  readonly owner?: SubagentOwnerBinding
   /** The retained live Agent handle, disposed exactly once at settlement. */
   readonly handle: AgentHandle
   /** The Activation-local admission and close wrapper around the handle's Agent inbox. */
@@ -78,6 +92,18 @@ export interface Activation {
    * not exist, so its teardown owes the parent no settlement account.
    */
   announced: boolean
+  /** Stable identity of the latest ordinary turn admitted in this activation. */
+  lastMessageId: MessageId | undefined
+  /**
+   * Ordinary messages this manager admitted and the child has not claimed or
+   * discarded yet. Only these open a turn of their own, so only these attribute
+   * a `turn/end` to an owner-owned message.
+   */
+  readonly admittedTurns: Set<MessageId>
+  /** Ordinary message identity each open or completed turn claimed. */
+  readonly claimedByTurn: Map<number, MessageId>
+  /** Messages already reported through the per-turn owner hook. */
+  readonly ownerSettledMessages: Set<MessageId>
   /** Renewed whenever a settlement watcher must re-check residency state. */
   poke: PromiseWithResolvers<void>
 }
@@ -86,6 +112,10 @@ export interface Activation {
 export interface MaterializeInputs {
   childId: SessionId
   provider: string
+  /** Generic parent-notice policy this activation delivers under. */
+  settlementDelivery: SubagentSettlementDelivery
+  /** Optional durable capability ownership resolved from the descriptor. */
+  owner?: SubagentOwnerBinding
   parent: Agent
   /**
    * Creation inputs; absent for a cold resume, which loads the persisted
@@ -119,6 +149,12 @@ interface Materialization {
 
 /** Residency state observed by the natural-settlement watcher. */
 type SettlementState = 'closed' | 'retry' | 'wait' | 'ready'
+
+/** Mutable state of one redirect an owner controller may admit at most once. */
+interface RedirectAdmission {
+  acceptedId: MessageId
+  redirected: boolean
+}
 
 /** Result of the final child-lock settlement decision. */
 type SettlementAttempt =
@@ -172,6 +208,8 @@ export class ContinuableActivationRegistry {
    * Build one registry inside the service's Agent-injected context.
    * @param ctx - context providing Agents, Sessions, and teardown ownership.
    * @param observeActivation - build the lifecycle observer for one residency epoch.
+   * @param ownerController - resolve the mounted controller for one durable owner binding.
+   * @param setupRegistry - deployment contributions composed into unpublished children.
    */
   constructor(
     private readonly ctx: Context,
@@ -180,6 +218,10 @@ export class ContinuableActivationRegistry {
       childId: SessionId,
       parent: Agent,
     ) => ActivationObserver,
+    private readonly ownerController: (
+      binding: SubagentOwnerBinding,
+    ) => SubagentOwnerController | undefined,
+    private readonly setupRegistry: SubagentActivationSetupRegistry,
   ) {
     // Ordinary Cordis owner effects unwind in reverse registration order, which
     // cannot express the dynamic child graph. Register the private scope's
@@ -293,10 +335,34 @@ export class ContinuableActivationRegistry {
     // Disposal already stopped the target with a whole-Activation teardown;
     // a second cancel would be a redundant signal on a closing handle.
     if (activation.inbox.closing !== undefined) return
-    activation.handle.agent.cancel(
-      authority.kind === 'user' ? { kind: 'user' } : { kind: 'parent' },
-      { keepInbox: true },
-    )
+    const stop = (): void => {
+      activation.handle.agent.cancel(
+        authority.kind === 'user' ? { kind: 'user' } : { kind: 'parent' },
+        { keepInbox: true },
+      )
+    }
+    if (activation.owner === undefined) {
+      stop()
+      return
+    }
+    this.requireOwnerController(activation.owner).stop({
+      binding: activation.owner,
+      child: activation.handle.agent,
+      authority,
+      stop,
+    })
+  }
+
+  /** Resolve one durable child's mounted owner controller or fail loud. */
+  private requireOwnerController(binding: SubagentOwnerBinding): SubagentOwnerController {
+    const controller = this.ownerController(binding)
+    if (controller === undefined) {
+      throw new SubagentError(
+        `subagent owner controller "${binding.controller}" is unavailable`,
+        'OWNER_CONTROLLER_UNAVAILABLE',
+      )
+    }
+    return controller
   }
 
   /**
@@ -494,12 +560,80 @@ export class ContinuableActivationRegistry {
       activation.handle.agent.session.header.parentSession,
     )
     this.acquireOwnership(parent, activation.childId)
+    if (delivery === 'queue') activation.admittedTurns.add(message.id)
     try {
       activation.inbox.deliver(message, delivery)
     } finally {
       this.wake(activation)
     }
     return message.id
+  }
+
+  /**
+   * Cross the final authorization cutoff, then admit one redirect. An
+   * owner-bound child's controller commits its own state before the single
+   * `redirect` call reaches the Agent, and the child lock keeps every later
+   * delivery behind that barrier.
+   * @param activation - the exact resident child receiving the replacement.
+   * @param message - the already-built durable replacement message.
+   * @param cause - caller intent recorded on the interrupted activity.
+   * @param parent - exact live direct parent authorizing admission.
+   * @param signal - caller cancellation before inbox acceptance.
+   * @param admitOwner - owner admission calling `redirect` exactly once, when bound.
+   * @returns the accepted durable message id.
+   * @throws {SubagentError} `INVALID_OWNER` when a bound controller admits no message or more than one.
+   */
+  async submitRedirectAdmitted(
+    activation: Activation,
+    message: UserMessage,
+    cause: AgentCancelCause,
+    parent: Agent,
+    signal: AbortSignal,
+    admitOwner?: (redirect: (replacement?: UserMessage) => void) => void | Promise<void>,
+  ): Promise<MessageId> {
+    signal.throwIfAborted()
+    this.assertAdmitting(parent)
+    this.authorizeLineage(
+      parent,
+      activation.childId,
+      activation.handle.agent.session.header.parentSession,
+    )
+    this.acquireOwnership(parent, activation.childId)
+    const admission: RedirectAdmission = { acceptedId: message.id, redirected: false }
+    const redirect = (replacement: UserMessage = message): void => {
+      if (admission.redirected) {
+        throw new SubagentError('subagent owner redirect can admit only one message', 'INVALID_OWNER')
+      }
+      admission.redirected = true
+      admission.acceptedId = replacement.id
+      activation.admittedTurns.add(replacement.id)
+      activation.inbox.redirect(replacement, cause)
+    }
+    try {
+      if (admitOwner === undefined) redirect()
+      else await admitOwner(redirect)
+    } finally {
+      this.wake(activation)
+    }
+    if (!admission.redirected) {
+      throw new SubagentError('subagent owner redirect did not admit a message', 'INVALID_OWNER')
+    }
+    return admission.acceptedId
+  }
+
+  /**
+   * Whether one stable identity already reached this child: recorded in its own
+   * log, or still pending in the reconstructed inbox. A caller repeating a
+   * delivery after a restart must not open a second turn for it.
+   * @param activation - the resident child the delivery addresses.
+   * @param messageId - the stable identity of the caller's message.
+   * @returns whether the child already holds this message.
+   */
+  recordsMessage(activation: Activation, messageId: MessageId): boolean {
+    const agent = activation.handle.agent
+    return agent.session.snapshotEvents().some(
+      event => event.type === 'user/message' && event.data.id === messageId,
+    ) || [...agent.inbox.nextStep, ...agent.inbox.nextTurn].some(message => message.id === messageId)
   }
 
   /**
@@ -576,7 +710,7 @@ export class ContinuableActivationRegistry {
   ): Promise<Activation> {
     const { childId, provider, parent, create } = inputs
     inputs.signal.throwIfAborted()
-    const setup = (childCtx: Context, child: Agent): void => {
+    const setup = (childCtx: Context, child: Agent): AgentSetupCommit => {
       // Only fresh creation appends the descriptor and delegated policy after
       // the inherited marker; a cold resume replays those persisted events.
       if (create !== undefined) {
@@ -584,6 +718,7 @@ export class ContinuableActivationRegistry {
         appendDelegatedPolicyOverrides(child.session, create.delegatedPolicies)
       }
       applyChildComposition(childCtx, parent, inputs.composition)
+      return this.setupRegistry.apply(childCtx, inputs.owner)
     }
     const observer = this.observeActivation(provider, childId, parent)
     const handle: AgentHandle = create === undefined
@@ -609,12 +744,18 @@ export class ContinuableActivationRegistry {
       childId,
       parentSession: parent.id,
       provider,
+      settlementDelivery: inputs.settlementDelivery,
+      ...inputs.owner === undefined ? {} : { owner: inputs.owner },
       handle,
       inbox: new SubagentInbox(handle.agent),
       ancestry: new WeakSet([handle.agent, ...parentLineage]),
       ownedChildren: new Set(),
       observer,
       announced: false,
+      lastMessageId: undefined,
+      admittedTurns: new Set(),
+      claimedByTurn: new Map(),
+      ownerSettledMessages: new Set(),
       poke: Promise.withResolvers<void>(),
     }
     this.resident.set(childId, activation)
@@ -623,8 +764,18 @@ export class ContinuableActivationRegistry {
       this.assertAdmitting(parent)
       this.acquireOwnership(parent, childId)
       const wakeOnInboxRemoval = (): void => { this.wake(activation) }
-      handle.agent.ctx.on('agent/inbox/claimed', wakeOnInboxRemoval)
-      handle.agent.ctx.on('agent/inbox/discarded', wakeOnInboxRemoval)
+      handle.agent.ctx.on('agent/inbox/claimed', ({ message, turn }) => {
+        if (activation.admittedTurns.delete(message.id)) activation.claimedByTurn.set(turn, message.id)
+        wakeOnInboxRemoval()
+      })
+      handle.agent.ctx.on('agent/inbox/discarded', ({ message }) => {
+        activation.admittedTurns.delete(message.id)
+        wakeOnInboxRemoval()
+      })
+      handle.agent.ctx.on('session/event', (session, event) => {
+        if (session !== handle.agent.session || event.type !== 'turn/end') return
+        this.notifyOwnerTurn(activation, event.data.turn, event.data.reason)
+      }, { global: true })
       observer.start(handle.agent)
     } catch (error: unknown) {
       /* v8 ignore next -- rollback failure must not mask the admission failure
@@ -822,11 +973,13 @@ export class ContinuableActivationRegistry {
   /** Tell the durable direct parent how this Activation ended. */
   private notifySettlement(activation: Activation, terminal: ActivationTerminal): void {
     if (!activation.announced) return
+    this.notifyOwnerSettlement(activation, terminal)
+    if (activation.settlementDelivery === 'none') return
     try {
       const parent = this.ctx.agents.get(activation.parentSession)
       if (parent === undefined) return
       const message = createSettlementMessage(activation.childId, terminal)
-      if (this.closingTeardownFor(parent) !== undefined) {
+      if (activation.settlementDelivery === 'quiet' || this.closingTeardownFor(parent) !== undefined) {
         parent.inject(message)
         return
       }
@@ -835,6 +988,62 @@ export class ContinuableActivationRegistry {
       this.ctx.logger.warn(
         `subagent "${activation.childId}" settlement notice was not delivered to its parent: `
         + errorChain(error),
+      )
+    }
+  }
+
+  /**
+   * Report terminal facts to a durable owner whose last admitted message never
+   * reached its own turn end. Failure is logged: owner accounting must not fail
+   * the teardown that produced the facts.
+   */
+  private notifyOwnerSettlement(activation: Activation, terminal: ActivationTerminal): void {
+    const { owner } = activation
+    const messageId = activation.lastMessageId
+    if (owner === undefined || messageId === undefined) return
+    if (activation.ownerSettledMessages.has(messageId)) return
+    try {
+      this.requireOwnerController(owner).settled({
+        binding: owner,
+        childId: activation.childId,
+        parentSessionId: activation.parentSession,
+        stopReason: terminal.stopReason,
+        messageId,
+        ...terminal.output === undefined ? {} : { output: terminal.output },
+      })
+    } catch (error: unknown) {
+      this.ctx.logger.warn(
+        `subagent "${activation.childId}" owner settlement failed: ${errorChain(error)}`,
+      )
+    }
+  }
+
+  /**
+   * Report one claimed ordinary turn to its durable owner before queued work can
+   * start. Failure is logged for the same reason as settlement reporting.
+   */
+  private notifyOwnerTurn(activation: Activation, turn: number, reason: TurnEndReason): void {
+    const messageId = activation.claimedByTurn.get(turn)
+    if (activation.owner === undefined || messageId === undefined) return
+    activation.claimedByTurn.delete(turn)
+    const owner = activation.owner
+    try {
+      this.requireOwnerController(owner).turnSettled({
+        binding: owner,
+        child: activation.handle.agent,
+        parentSessionId: activation.parentSession,
+        turn,
+        stopReason: turnStopReason(reason),
+        messageId,
+        ...reason.kind === 'error' ? { error: reason.error.message } : {},
+        stop: () => {
+          queueMicrotask(() => { activation.handle.agent.cancel({ kind: 'parent' }) })
+        },
+      })
+      activation.ownerSettledMessages.add(messageId)
+    } catch (error: unknown) {
+      this.ctx.logger.warn(
+        `subagent "${activation.childId}" owner turn settlement failed: ${errorChain(error)}`,
       )
     }
   }
@@ -850,5 +1059,25 @@ export class ContinuableActivationRegistry {
         + `the persisted state may be unavailable or stale on resume: ${errorChain(error)}`,
       )
     }
+  }
+}
+
+/** Map one durable turn ending to the generic subagent result vocabulary. */
+function turnStopReason(reason: TurnEndReason): SubagentResult['stopReason'] {
+  switch (reason.kind) {
+    case 'completed':
+      return 'completed'
+    case 'aborted':
+    case 'interrupted':
+      return 'aborted'
+    case 'blocked':
+      return 'refusal'
+    case 'error':
+      return 'error'
+    case 'max-tokens':
+      return 'max-tokens'
+    /* v8 ignore next 2 -- TurnEndReason is merge-extensible; an unknown ending cannot mean success. */
+    default:
+      return 'error'
   }
 }

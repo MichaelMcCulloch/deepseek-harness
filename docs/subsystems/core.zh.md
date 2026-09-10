@@ -134,6 +134,16 @@ interface Agent {
   steer(message: UserMessage): void
 
   /**
+   * Replace the current activity with one ordinary turn. The active activity
+   * is cancelled with its pending inbox preserved, then `message` is inserted
+   * before every queued ordinary turn and wakes the driver. Pending steering
+   * and injected context remain queued for their normal step boundary.
+   * @param message - identified replacement content and its source.
+   * @param cause - stable caller intent carried by the cancelled activity.
+   */
+  redirect(message: UserMessage, cause: AgentCancelCause): void
+
+  /**
    * Queue model-facing context for the next pre-step without waking the
    * driver. A running driver claims it at the nearest later step boundary;
    * idle drivers leave it pending until follow-up or steering

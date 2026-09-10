@@ -398,6 +398,19 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源：[`packages/compaction/compaction/src/types.ts:34`](../packages/compaction/compaction/src/types.ts)
 
+### `dag/*`
+
+<a id="dagstate--log-only"></a>
+
+#### `dag/state` — 仅日志
+
+```ts persistence-catalog
+/** One complete immutable native DAG state value. */
+'dag/state': { readonly state: DagState }
+```
+
+来源：[`packages/dag/dag/src/types.ts:228`](../packages/dag/dag/src/types.ts)
+
 ### `deliverables/*`
 
 <a id="deliverablespresented--log-only"></a>

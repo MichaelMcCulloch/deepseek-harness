@@ -55,7 +55,7 @@ function stubAgent(rawId: string, supplied?: Session, suppliedCtx?: Context): St
     ctx: agentCtx,
     send: () => {},
     followup: () => {},
-    steer: () => ({ outcome: Promise.resolve({ status: 'rejected' as const }) }),
+    steer: () => ({ outcome: Promise.resolve({ status: 'rejected' as const }) }), redirect: () => {},
     inject(input) {
       this.inbox.append('next-step', input)
     },

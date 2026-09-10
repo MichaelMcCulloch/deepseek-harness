@@ -13,6 +13,7 @@ import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { ContentBlock, MessageId } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { ObjectJsonSchema, ToolRestriction } from '@deepseek-ai/dsh-tools'
 import type { SubagentDescriptorData } from './descriptor.ts'
 
@@ -40,6 +41,20 @@ export interface ContinuableStartSpec {
    * before child materialization without a second identity handshake.
    */
   readonly childId?: SessionId
+  /**
+   * Optional stable identity for the initial inbox message. Supplying one lets
+   * a durable caller recover an interrupted start without delivering twice.
+   */
+  readonly messageId?: MessageId
+  /**
+   * Optional absolute working directory stored in the child Session header.
+   * Omission inherits the parent's recorded `cwd`.
+   */
+  readonly cwd?: string
+  /** Durable capability ownership interpreted by an effect-scoped controller. */
+  readonly owner?: SubagentOwnerBinding
+  /** Generic parent-notice policy; omission resolves to `adaptive`. */
+  readonly settlementDelivery?: SubagentSettlementDelivery
   /**
    * The delegation request. The manager reserves the stable child id, resolves
    * the durable descriptor, and composes the child itself.
@@ -70,6 +85,21 @@ export type SubagentInterruptAuthority =
 export interface SubagentSendMessageOptions {
   /** Caller cancellation, owning the operation only until inbox acceptance. */
   readonly signal: AbortSignal
+}
+
+/** Generic parent-notice policy applied when one continuable activation settles. */
+export type SubagentSettlementDelivery = 'adaptive' | 'quiet' | 'none'
+
+/**
+ * Durable attribution that lets one capability own a continuable child. The
+ * controller name selects an effect-scoped host controller; `metadata` is an
+ * immutable JSON value interpreted only by that controller.
+ */
+export interface SubagentOwnerBinding {
+  /** Registered owner-controller name. */
+  readonly controller: string
+  /** Controller-private durable JSON metadata. */
+  readonly metadata: JsonValue
 }
 
 /**

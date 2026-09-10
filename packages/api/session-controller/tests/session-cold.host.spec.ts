@@ -536,12 +536,14 @@ describe('subagent ownership fence', () => {
     await ctx.plugin(SessionStore)
     await ctx.plugin(AgentRegistry)
     const session = ctx.sessions.create(sid('session-ordinary-fork'), {
+      // A foreign descriptor version is exactly what this case seeds, so it is
+      // cast like the other pre-current-version fixtures in this file.
       seed: [{
         type: 'subagent/descriptor',
         seq: SessionSeq(0),
         time: 1,
         data: { version: 2, mode: 'continuable', provider: 'spawn', label: 'ancestor' },
-      }],
+      }] as SessionEvent[],
       meta: { cwd: '/proj', parentSession: sid('session-source'), isSeeded: true },
       inheritedEventCount: SessionLogOffset(1),
     })

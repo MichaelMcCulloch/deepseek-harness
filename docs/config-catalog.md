@@ -540,6 +540,35 @@ export interface Config {
 
 Source: [`packages/credentials/credentials-local/src/index.ts:64`](../packages/credentials/credentials-local/src/index.ts)
 
+<a id="deepseek-aidsh-dag"></a>
+
+## `@deepseek-ai/dsh-dag`
+
+Requires: `agents` · `subagents` · `subprocess` · `sessions`
+
+```ts config-catalog
+/** Deployment choices for the local DAG runtime. */
+export interface Config extends DagRuntimeConfig {}
+
+/** Deployment choices accepted by the local DAG runtime. */
+export interface DagRuntimeConfig {
+  /** Optional DSH home. A blank value uses normal DSH_HOME resolution. */
+  readonly dshHome?: string
+  /** Git executable name or absolute path. */
+  readonly gitExecutable?: string
+  /** Deadline for each Git process. */
+  readonly commandDeadlineMs?: number
+  /** TERM-to-KILL grace for each Git process. */
+  readonly terminationGraceMs?: number
+  /** Per-stream collected Git output limit. */
+  readonly outputLimitBytes?: number
+  /** Continuable in-process provider used for DAG children. */
+  readonly subagentProvider?: string
+}
+```
+
+Source: [`packages/dag/dag/src/index.ts:103`](../packages/dag/dag/src/index.ts)
+
 <a id="deepseek-aidsh-e2b"></a>
 
 ## `@deepseek-ai/dsh-e2b`
@@ -3459,6 +3488,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-commands` ([`packages/client/ui-commands/src/index.ts`](../packages/client/ui-commands/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-conversation` ([`packages/client/ui-conversation/src/index.ts`](../packages/client/ui-conversation/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-cordis` ([`packages/extensions/ui-cordis/src/index.ts`](../packages/extensions/ui-cordis/src/index.ts))
+- `@deepseek-ai/dsh-client-ui-dag` ([`packages/client/ui-dag/src/index.ts`](../packages/client/ui-dag/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-deliverables` — requires `systemPrompt` · `connection` · `sessionQuery` · `sessionController` · `workspaceFiles` · `fs` · `sandboxPolicy` ([`packages/client/ui-deliverables/src/index.ts`](../packages/client/ui-deliverables/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-directory-picker-browse` ([`packages/client/ui-directory-picker-browse/src/index.ts`](../packages/client/ui-directory-picker-browse/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-directory-picker-native` ([`packages/client/ui-directory-picker-native/src/index.ts`](../packages/client/ui-directory-picker-native/src/index.ts))
@@ -3521,6 +3551,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-tool-ask-user` — requires `tools` · `userQuestions` ([`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts))
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — requires `tools` ([`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts))
 - `@deepseek-ai/dsh-tool-cordis` — requires `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect` ([`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts))
+- `@deepseek-ai/dsh-tool-dag` — requires `tools` · `dag` · `systemPrompt` ([`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts))
 - `@deepseek-ai/dsh-tool-subagent-control` — requires `tools` · `subagents` ([`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts))
 - `@deepseek-ai/dsh-user-questions` ([`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts))
 - `@deepseek-ai/dsh-webhook` — requires `agents` · `agentDefaultModel` · `agentPresets` · `permissionPresets` · `sessionTitle` · `workspaceRegistry` ([`packages/webhook/webhook/src/index.ts`](../packages/webhook/webhook/src/index.ts))

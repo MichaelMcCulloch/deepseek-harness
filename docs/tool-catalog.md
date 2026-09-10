@@ -25,6 +25,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-bash-persistent` | `bash` | `ctx.tools`, `ctx.terminals`, `an owning Agent at execution time` | `tool/call`, `PTY shell state`, `tool/result` | - | One owner-isolated persistent bash tool; deployment composition supplies the PTY backend and may override the model-facing environment description. |
 | `@deepseek-ai/dsh-tool-pwsh-persistent` | `pwsh` | `ctx.tools`, `ctx.terminals`, `an owning Agent at execution time` | `tool/call`, `PTY shell state`, `tool/result` | - | One owner-isolated persistent pwsh tool, the Windows counterpart of the persistent bash tool; deployment composition supplies a pwsh-dialect PTY backend and may override the model-facing environment description. |
 | `@deepseek-ai/dsh-tool-str-replace-editor` | `str_replace_editor` | `ctx.tools`, `ctx.fs` | `tool/call`, `fs/observed after view presence/absence, edit absence, or successful mutation`, `tool/result` | - | Standalone view/create/unique literal replace/line insert tool over the filesystem seam; it composes with any shell or terminal API. |
+| `@deepseek-ai/dsh-tool-dag` | `dag_dispatch`, `dag_node_block`, `dag_node_complete`, `dag_node_inspect`, `dag_node_redispatch`, `dag_node_reset`, `dag_node_resume`, `dag_node_steer`, `dag_node_stop`, `dag_status`, `dag_wait`, `dag_write` | `ctx.tools`, `ctx.dag`, `ctx.systemPrompt`, `an owning dispatcher or DAG child Agent` | `tool/call`, `dag/state for mutations`, `tool/result` | - | Dispatchers receive the graph controls. Owner-bound DAG children receive only dag_status, dag_node_complete, and dag_node_block; the catalog combines both scoped schema sets, while actual child composition removes every dispatcher control. |
 | `@deepseek-ai/dsh-tool-fs` | `edit`, `read`, `read_image`, `write` | `ctx.tools`, `ctx.fs`, `ctx.systemPrompt`, `ctx.attachments (image-tool registration)`, `ctx.llm + an image-capable route (image-tool execution)` | `tool/call`, `fs/write-intent or fs/edit-intent for mutations`, `fs/observed after read presence/absence or successful file operation`, `durable attachment (read_image)`, `tool/result` | - | The read-before-write/edit policy is added by `@deepseek-ai/dsh-fs-observation-policy` (an `fs/*` event-gate plugin, no schema change); a deployment that loads these tools is expected to also load it. The image tool is not registered without `ctx.attachments`; its schema is route-independent, and execution refuses unless the exact routed model declares image input. |
 | `@deepseek-ai/dsh-tool-fs-search` | `glob`, `grep` | `ctx.tools`, `ctx.subprocess`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | glob and grep are unconditional discovery tools that spawn the packaged ripgrep binary (`@vscode/ripgrep`) through ctx.subprocess as ordinary foreground calls (never background jobs) — no host `rg` install and no shell layer. The catalog uses `sampleOverCapGlobResults: true`; deployments must choose that behavior explicitly. Capped results save the complete formatted list through the optional ctx.spillStore backend; returned locators are follow-up-readable/searchable when the backend exposes local paths in co-located deployments. |
 | `@deepseek-ai/dsh-tool-terminal` | `terminal_close`, `terminal_list`, `terminal_open`, `terminal_read`, `terminal_send`, `terminal_signal` | `ctx.tools`, `ctx.terminals`, `ctx.systemPrompt`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The six terminal tools are opt-in and complement one-shot shell/filesystem tools. `terminal_send(run_in_background: true)` registers with `ctx.jobs`; TUI, named key sequences, BEL, resize, auto-start, and cross-agent sharing are absent from the schema. |
@@ -35,7 +36,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-skill` | `skill` | `ctx.tools`, `ctx.agents`, `ctx.skills` | `tool/call`, `tool/result`, `user/message replacement catalogs via agent.inject()` | - | - |
 | `@deepseek-ai/dsh-tool-session-query` | `session_event_read`, `session_event_search`, `session_event_trace`, `session_search`, `session_trace` | `ctx.tools`, `ctx.systemPrompt`, `ctx.sessionQuery`, `a calling Agent for workspace authority` | `tool/call`, `tool/result` | - | The five read-only tools hide provider cursors and authorize every result from the immutable calling agent session. The package is opt-in; compositions that need enforced deadlines or bounded inline output also mount the generic timeout or spill policies. |
 | `@deepseek-ai/dsh-tool-subagent` | `list_subagent_models`, `subagent` | `ctx.tools`, `ctx.subagents`, `ctx.systemPrompt`, `ctx.llm for model discovery and selected-route validation` | `tool/call`, `tool/result`, `child session events through the chosen provider` | `subagent`, `subagent_fork` | The registered delegation name is the load-time `toolName` config (default `subagent`); the default schema above has model selection off, while the discovery schema is shown as the fixed companion available in an enabled Session. Web presets sample the Plugins preference for each new top-level Session and preserve that decision for its child Sessions; `subagent_fork` remains fixed-route. Each instance independently controls whether it reads model-selection settings and its background behavior through `modelSelectionSettings`, `backgroundMode`, and `enableRunInBackground`. |
-| `@deepseek-ai/dsh-tool-subagent-control` | `interrupt_agent`, `list_agents`, `send_message` | `ctx.tools`, `ctx.subagents`, `ctx.agents and ctx.sessionProjections (list_agents only)` | `tool/call`, `tool/result`, `child session events through ctx.subagents` | - | The globally named control tools over continuable background subagents: provider-bound `tool-subagent` instances register distinct delegation tools, while this package registers `send_message` and `interrupt_agent` once, plus `list_agents` from its separately loaded `/list-agents` plugin (whose catalog rows use the sessionProjections and live Agent registries). |
+| `@deepseek-ai/dsh-tool-subagent-control` | `interrupt_agent`, `list_agents`, `send_message`, `steer_agent` | `ctx.tools`, `ctx.subagents`, `ctx.agents and ctx.sessionProjections (list_agents only)` | `tool/call`, `tool/result`, `child session events through ctx.subagents` | - | The globally named control tools over continuable background subagents: provider-bound `tool-subagent` instances register distinct delegation tools, while this package registers `send_message` and `interrupt_agent` once, plus `list_agents` from its separately loaded `/list-agents` plugin (whose catalog rows use the sessionProjections and live Agent registries). |
 | `@deepseek-ai/dsh-tool-jobs` | `job_kill`, `job_list`, `job_output` | `ctx.tools`, `ctx.jobs`, `ctx.systemPrompt` | `tool/call`, `tool/result`, `user/message via agent.inject() for background completion notices` | - | The kind-agnostic background-job controller: background bash commands, PTY sends, and subagents are read, listed, and killed through the same three tools. Loading the plugin attaches the controller that arms producers' `ctx.jobs.start()`. |
 | `@deepseek-ai/dsh-experimental-tool-agent-team` | `interrupt_agent`, `list_agents`, `send_message`, `spawn_teammate`, `team_task_create`, `team_task_get`, `team_task_list`, `team_task_update`, `wait_agent` | `ctx.tools`, `ctx.systemPrompt`, `ctx.agentTeams`, `an exact live Team member Agent` | `tool/call`, `team/member`, `team/message/queued`, `team/message/delivered`, `team/task`, `tool/result` | - | All nine tools are scoped to implicit Team Leads and durable teammates. The shipped dsh-base bundle keeps the package disabled; the documented Agent Teams profile patch enables it while disabling the legacy continuable-child control names. |
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`, `owning Agent session` | `tool/call`, `todo/write`, `tool/result` | - | todo_write is session-owned state; UIs render the latest todo/write event as a checklist. `allowParallelInProgress` is required with no default, so the catalog states its choice: `true`, whose description invites several `in_progress` items. A deployment choosing `false` receives the same tool with a description asking for exactly one active task. |
@@ -703,6 +704,350 @@ Notes for using the `str_replace` command:
 Source: [`packages/fs/tool-str-replace-editor/src/index.ts`](../packages/fs/tool-str-replace-editor/src/index.ts)
 
 Standalone view/create/unique literal replace/line insert tool over the filesystem seam; it composes with any shell or terminal API.
+
+<a id="deepseek-aidsh-tool-dag"></a>
+
+## `@deepseek-ai/dsh-tool-dag`
+
+### `dag_dispatch`
+
+Start distinct dependency-ready pending nodes. The response does not wait for Git or child creation.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "node_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "if_revision": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "node_ids"
+  ]
+}
+```
+
+Source: [`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_node_block`
+
+Suspend this DAG node with a clear reason when work cannot continue.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "reason"
+  ]
+}
+```
+
+Source: [`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_node_complete`
+
+Report committed clean work for local Git validation. This accepts the command; completion follows only after validation succeeds.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "summary": {
+      "type": "string"
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {}
+    }
+  },
+  "required": [
+    "summary"
+  ]
+}
+```
+
+Source: [`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_node_inspect`
+
+Inspect one node, including its durable child and local Git execution facts.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "node_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "node_id"
+  ]
+}
+```
+
+Source: [`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_node_redispatch`
+
+Re-arm one failed node as pending for a later dag_dispatch call.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "node_id": {
+      "type": "string"
+    },
+    "if_revision": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "node_id"
+  ]
+}
+```
+
+Source: [`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_node_reset`
+
+Reset tracked worktree state to the frozen base, an exact commit, or a local refs/heads ref. Untracked files remain.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "node_id": {
+      "type": "string"
+    },
+    "target": {
+      "type": "string"
+    },
+    "if_revision": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "node_id",
+    "target"
+  ]
+}
+```
+
+Source: [`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_node_resume`
+
+Resume one blocked or interrupted node with new instructions.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "node_id": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    },
+    "if_revision": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "node_id",
+    "message"
+  ]
+}
+```
+
+Source: [`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_node_steer`
+
+Interrupt and replace active node work. A suspended node returns through starting.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "node_id": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    },
+    "if_revision": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "node_id",
+    "message"
+  ]
+}
+```
+
+Source: [`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_node_stop`
+
+Commit interrupted state, then cancel the node child.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "node_id": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "if_revision": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "node_id"
+  ]
+}
+```
+
+Source: [`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_status`
+
+Read the current DAG board. Use dag_wait, not repeated status calls, while work runs.
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+Source: [`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_wait`
+
+Wait until a later actionable DAG notice has been injected. Use this after dispatch instead of status polling.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "after_revision": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "after_revision"
+  ]
+}
+```
+
+Source: [`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+### `dag_write`
+
+Declare or amend the complete dependency graph. Send every node on each call. Existing nodes must repeat their immutable fields and exact live status.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "brief": {
+            "type": "string",
+            "description": "Must contain VALIDATION: and ACCEPTANCE: sections."
+          },
+          "deps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "starting",
+              "in_progress",
+              "completed",
+              "blocked",
+              "failed",
+              "interrupted"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "task",
+              "integration"
+            ]
+          },
+          "policy": {
+            "type": "string",
+            "enum": [
+              "delegate",
+              "ours",
+              "theirs"
+            ]
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "content",
+          "brief",
+          "deps",
+          "status"
+        ]
+      }
+    },
+    "if_revision": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "nodes"
+  ]
+}
+```
+
+Source: [`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
+Dispatchers receive the graph controls. Owner-bound DAG children receive only dag_status, dag_node_complete, and dag_node_block; the catalog combines both scoped schema sets, while actual child composition removes every dispatcher control.
 
 <a id="deepseek-aidsh-tool-fs"></a>
 
@@ -1696,6 +2041,32 @@ Send a message to a direct continuable child by its agent id. If you are a resid
     "message": {
       "type": "string",
       "description": "The message to deliver to the agent."
+    }
+  },
+  "required": [
+    "agent_id",
+    "message"
+  ]
+}
+```
+
+Source: [`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts)
+
+### `steer_agent`
+
+Interrupt a background subagent's current turn and replace it with new instructions. Pending inbox messages remain queued, but this replacement runs before queued ordinary turns. The child keeps its conversation and durable session. This call returns only the accepted message id; it does not wait for the child's answer. A failure means the replacement was NOT delivered.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "agent_id": {
+      "type": "string",
+      "description": "The continuable subagent id whose current work must be replaced."
+    },
+    "message": {
+      "type": "string",
+      "description": "Replacement instructions for the subagent."
     }
   },
   "required": [

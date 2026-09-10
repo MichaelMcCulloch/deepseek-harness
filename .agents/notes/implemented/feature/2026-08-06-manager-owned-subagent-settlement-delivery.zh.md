@@ -14,9 +14,9 @@ Status: implemented
 
 ## 决策
 
-继续执行管理器自己投递这份记账，就在结束 Activation 的那笔 dispose 事务内部完成。
+对于持久化描述符选择 `adaptive` 或 `quiet` settlement 投递的 Activation，继续执行管理器会在结束 Activation 的 dispose 事务内部投递这份记账。`none` 描述符会抑制通用消息。owner-bound child 仍会使用终止事实调用其已注册 owner controller，因此 owner 可以发布自己的记账。
 
-当驻留 Activation 结算时，`notifySettlement()` 解析该 child 持久化的直接父级，并向它发送一条用户角色消息：先是父级可据以行动的一句结果说明，然后是 child 的最终 assistant 内容，或一句说明它没有产出内容。对每个调用方真正拿到过 id 的 child，投递都是无条件的。它不查询 child 是否上报过，也不保留任何可能让这项承诺变成有条件的记账——正是这种无条件性，才让 `tool-subagent` 能够承诺一条包含结局与可能存在的最终 assistant 消息的运行时通知。在第一条消息被接受之前就回滚的物化保持静默，因为调用方已被告知该 child 未建立。
+当驻留 Activation 在 `adaptive` 或 `quiet` 下结算时，`notifySettlement()` 解析该 child 持久化的直接 parent，并向它发送一条用户角色消息：先是 parent 可据以行动的一句结果说明，然后是 child 的最终 assistant 内容，或一句说明它没有产出内容。在任一策略中，对每个调用方拿到过 id 的 child，投递都是无条件的。它不查询 child 是否上报过。`quiet` 会 inject 同一消息，但不唤醒 parent。[原生 DAG owner](../architecture/2026-08-29-event-sourced-native-dag-orchestrator.zh.md)选择 `none`，改为发布持久化 DAG 通知。在第一条消息被接受之前就回滚的物化保持静默，因为调用方已被告知该 child 未建立。
 
 ### 来源信息
 
@@ -78,7 +78,7 @@ Status: implemented
 
 **仅在 child 没有发送消息时投递。** 这是最初的设计。它需要按 Activation 记账，仍会漏掉「发送了进度、随后在给出结果前死掉」的 child，而且最关键的是：它让面向父级的承诺变成有条件的。「通常你会被告知」不是工具描述能陈述的契约，而无法依赖该通知的模型无论如何都会去轮询。
 
-**把投递做成可配置。** 部署开关会把面向模型的文本重新变回「通常」，而这正是本次改动要消除的失效。协议常量与安全不变量保持固定；这就是其中之一。
+**增加全局部署 opt-out，或让模型选择投递方式。** 否决。普通委派需要 `adaptive` 默认值，才能让面向模型的承诺保持无条件。只有拥有替代投递路径的显式 child 创建方才能选择 `quiet` 或 `none`；模型不能选择该策略。
 
 **修改 `subagent/end` 让它携带父级，由插件负责投递。** 那会为一个包内消费者拓宽已发布的 payload，保留全部顺序风险，并让返回通道重新变成可选插件。以 `terminal(failure)` 扩展包私有的 `ActivationObserver`，则只保留一处终止事实的计算，且不改动任何公开面。
 
@@ -86,11 +86,11 @@ Status: implemented
 
 ## 后果
 
-- 可继续 child 的父级会为每个已结算 Activation 收到一条消息。因此，做扇出的部署会增加父级轮次；steer 会把同时结算的一批压缩到一个 step。
-- `tool-subagent` 在其 schema 中承诺该通知，因为返回通道是服务行为，不是可选插件。
+- 在 `adaptive` 下，可继续 child 的 parent 会为每个已结算 Activation 收到一条消息。因此，做 fan-out 的部署会增加 parent 轮次；steering 会把同时结算的一批压缩到一个 step。`quiet` 会 inject 但不唤醒，`none` 不创建通用消息。
+- `tool-subagent` 在其 schema 中承诺该通知，因为其 child 描述符使用 `adaptive` 服务行为，而不是可选插件。
 - `Activation` 携带 `parentSession` 与 `announced`。前者存在是因为 child handle 在投递前已被 dispose；后者让被回滚的物化保持静默。
 - `foldConsumedWork()` 取代 `dsh-session` 的 `findLastMessageTurnEnd()`，并迁移到 `dsh-agent`——它拥有该 fold 所读取的 inbox 标记；一次性 in-process 路径折叠同一个答案，不会把被中途切断的一次性 child 归类为 `completed`。
-- 单元覆盖固定了无条件约定、每种终止原因、空闲与繁忙两种调度、批量语义、维护期回归、释放前顺序、父级已消失，以及一次不得让拆卸失败的发送被拒。
+- 单元覆盖固定 `adaptive`、`quiet` 与 `none`、owner 终止委派、无条件约定、每种终止原因、空闲与繁忙两种调度、批量语义、维护期回归、释放前顺序、父级已消失，以及一次不得让拆卸失败的发送被拒。
 - 三个 ACP 场景使用显式的结算围栏，`subagent-send-message` 固定 Agent 消息先于结算的 next-step 顺序。
 - 一个无密钥的 headless Loader 快照固定了「后台启动 → 管理器写入的结算通知 → 父级最终答案」路径，其中没有轮询，也没有 child 编写的消息。
 
@@ -102,6 +102,6 @@ Status: implemented
 
 终止原因的归因是对日志既有 splice 词汇的尽力而为，偏向永不高估成功。`Inbox.remove()` 与拆卸的 `clear()` 写出的取消 splice 完全相同，因此删除一条内容仍保留在别处的消息——`agent-instructions` 清理待处理的 instructions 刷新、或结算自身的 cancel 清掉一条仍在挂起的这类消息——可能被读作「工作被丢弃且从未运行」，把已完成的 child 报成被停下。区分二者需要 `dsh-agent` 提供更丰富的删除词汇；在该词汇可用前，这项误读的范围很窄，且错的方向是让父级复查一个已完成的 child，而永远不是信任一个未完成的 child。
 
-对于深或宽的树，轮次放大是真实存在的，而且按设计不可配置。step 边界的批量语义只能约束同时结算的情形，无法约束分散结算的 child。
+在 `adaptive` 下，对于深或宽的树，轮次放大是真实存在的。step 边界的批量语义只能约束同时结算的情形，无法约束分散结算的 child。只有当另一条投递路径能保留面向用户的完成记账时，owner 才能选择 `quiet` 或 `none`。
 
 Agent 消息与其稍后的结算通知通过 parent 的 next-step FIFO 排序。来自同级 child 的独立结算保留其实际投递顺序，不会虚构同级间的顺序。

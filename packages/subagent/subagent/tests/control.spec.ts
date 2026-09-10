@@ -43,6 +43,18 @@ function childRow(id: SessionId, activity: 'running' | 'inactive'): SubagentList
   return { kind: 'child', id, mode: 'continuable', label: 'worker', activity, hasChildren: false }
 }
 
+/** One browser redirect: the prompt address and content without a delivery selector. */
+function steerRequest(clientTimeZone?: string) {
+  return {
+    requestId: REQUEST_ID,
+    parentSessionId: PARENT,
+    childSessionId: CHILD,
+    mode: 'continuable' as const,
+    content: [{ type: 'text' as const, text: 'continue' }],
+    ...clientTimeZone === undefined ? {} : { clientTimeZone },
+  }
+}
+
 function promptRequest(clientTimeZone?: string, delivery: 'queue' | 'steer' = 'queue') {
   return {
     requestId: REQUEST_ID,
@@ -347,6 +359,50 @@ describe('subagent prompt Remote', () => {
 
     await expect(subagents.prompt(promptRequest(), signal))
       .rejects.toMatchObject({ code: 'gateway/cancelled' })
+  })
+})
+
+describe('subagent steer Remote', () => {
+  it('validates its own operation name before redirect delivery', async () => {
+    const { subagents } = await bench({ [PARENT]: { status: 'idle' } })
+    const redirect = vi.spyOn(subagents, 'redirect')
+
+    for (const [field, request] of [
+      ['parentSessionId', { ...steerRequest(), parentSessionId: SessionId('') }],
+      ['childSessionId', { ...steerRequest(), childSessionId: SessionId('') }],
+    ] as const) {
+      await expect(subagents.steer(request, signal))
+        .rejects.toMatchObject(emptyIdFailure('subagent.steer', field))
+    }
+    expect(redirect).not.toHaveBeenCalled()
+  })
+
+  it('redirects under the live parent with a user cancellation cause', async () => {
+    const parent = { status: 'idle' as const }
+    const { subagents } = await bench({ [PARENT]: parent })
+    const redirect = vi.spyOn(subagents, 'redirect').mockResolvedValue('m-steer' as MessageId)
+
+    await expect(subagents.steer(steerRequest('UTC'), signal)).resolves.toEqual({ messageId: 'm-steer' })
+    expect(redirect).toHaveBeenCalledWith(
+      parent,
+      CHILD,
+      [{ type: 'text', text: 'continue' }],
+      {
+        source: { kind: 'user', rpcId: REQUEST_ID, clientTimeZone: 'UTC' },
+        signal,
+        cause: { kind: 'user' },
+      },
+    )
+  })
+
+  it('uses the prompt admission failure vocabulary', async () => {
+    const { subagents } = await bench({ [PARENT]: { status: 'idle' } })
+    vi.spyOn(subagents, 'redirect').mockRejectedValue(new SubagentError('not yours', 'UNAUTHORIZED'))
+
+    await expect(subagents.steer(steerRequest(), signal)).rejects.toMatchObject({
+      code: 'subagent/unauthorized',
+      details: { childSessionId: CHILD },
+    })
   })
 })
 
