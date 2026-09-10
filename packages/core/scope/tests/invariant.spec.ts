@@ -54,6 +54,12 @@ describe('scoped-dispatch invariants', () => {
       'agent/session-start': [{ agent, source: 'startup' }],
       'agent/pre-step': [{ agent, messages: [message], turn: 1, step: 1, signal }, () => Promise.resolve({ kind: 'enter', messages: [message] })],
       'agent/request': [{ agent, turn: 1, step: 1, signal }, () => Promise.resolve(config)],
+      'agent/assistant-stream': [{
+        agent,
+        frame: {
+          type: 'start', attemptId: 'attempt-1' as never, revision: 1, turn: 1, step: 1,
+        },
+      }],
       'agent/request-error': [
         {
           agent,
@@ -72,7 +78,6 @@ describe('scoped-dispatch invariants', () => {
     const rows: Array<[string, unknown[]]> = [
       ...Object.entries(agentRows),
       ['approval/request', [{ agent, toolName: 'echo' }, () => Promise.resolve('unavailable')]],
-      ['dag/committed', [{ agent, committed: {} }]],
       ['goal/changed', [{ agent, change: { operation: 'create', ref: { id: 'goal-a', revision: 1 } } }]],
       ['system-prompt/assemble', [[], { scope: agent }]],
       ['tools/ptc-dispatch-log', [{ exec: { callId: 'c', name: 't', arguments: {} }, agent, subCallId: 'c:code:1', name: 't', isError: false, content: [] }, () => Promise.resolve([])]],

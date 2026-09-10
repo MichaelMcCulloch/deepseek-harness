@@ -13,8 +13,8 @@
  *
  * Public operations express caller intent: `start` returns one published owned
  * one-shot run, `startContinuable` establishes a durable continuable child, and
- * `followup` delivers later content without exposing whether the child is
- * resident. Continuable children never become a {@link SubagentRun}: the
+ * `sendMessage` steers between adjacent Agents without exposing whether a child
+ * is resident. Continuable children never become a {@link SubagentRun}: the
  * continuation manager holds their `AgentHandle` directly and orders every turn
  * through the child's own inbox, so providers contribute only the detached
  * creation spec and see no handle, turn, or teardown. Child and descendant
@@ -30,16 +30,17 @@
  */
 
 import { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-attachment'
 import { scopeTarget } from '@deepseek-ai/dsh-scope'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
 import { assertObjectJsonSchema } from '@deepseek-ai/dsh-tools'
-import type { ContentBlock, MessageId } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { canonicalClientTimeZone } from '@deepseek-ai/dsh-util-time'
+import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import {
-  canonicalClientTimeZone, catalogView, rejectCatalogRead, rejectControl, rejectPrompt,
-  validateControlRequest,
+  catalogView, rejectCatalogRead, rejectPrompt, validateControlRequest,
 } from './control.ts'
 import type {
   SubagentCatalog,
@@ -47,18 +48,20 @@ import type {
   SubagentPromptReceipt,
   SubagentPromptRequest,
   SubagentPromptRequestId,
-  SubagentSteerReceipt,
-  SubagentSteerRequest,
 } from './control-types.ts'
 import type {
   ContinuableCreateRequest,
   ContinuableCreateSpec,
+  ContinuableStart,
+  ContinuableStartSpec,
   ResolvedSubagentStartRequest,
   SubagentCapabilities,
+  SubagentInterruptAuthority,
   SubagentProvider,
   SubagentRun,
   SubagentRunEndInfo,
   SubagentRunInfo,
+  SubagentSendMessageOptions,
   SubagentStartRequest,
 } from './types.ts'
 import { SubagentError } from './error.ts'
@@ -66,38 +69,33 @@ import { assertSubagentMaxDepth } from './depth.ts'
 import { createActivationObserver, createLifecycleEmitter, observeRun } from './lifecycle.ts'
 import type { ActivationObserver, LifecycleEmitter } from './lifecycle.ts'
 import SubagentContinuationManager from './continuation.ts'
-import type {
-  ContinuableStart,
-  ContinuableStartSpec,
-  SubagentFollowupOptions,
-  SubagentInterruptAuthority,
-  SubagentRedirectOptions,
-  SubagentReportOptions,
-} from './continuation.ts'
-import SubagentActivationSetupRegistry from './activation-setup-registry.ts'
-import type { ContinuableSetupContribution } from './activation-setup-registry.ts'
+import type { SubagentDelivery } from './inbox.ts'
 import { listChildren as listSubagentChildren, listDescendants as listSubagentDescendants } from './list-children.ts'
 import type { SubagentDescendantListEntry, SubagentListEntry } from './list-children.ts'
 import { snapshotSubagentDescriptor } from './descriptor.ts'
 import { subagentIdentityProjectionDefinition, subagentTimingProjectionDefinition } from './projection.ts'
-import type { SubagentOwnerController } from './owner-controller.ts'
+import { establishCatalogChild, subagentCatalogProjectionDefinition } from './catalog.ts'
+import { deliverSubagentPrompt } from './internal.ts'
 
+export type {} from './catalog.ts'
 export * from './out-of-process.ts'
 export { AssistantOutputFold, finalAssistantOutput } from './assistant-output.ts'
 export { SubagentRunId } from './types.ts'
 export type {
   ContinuableCreateRequest,
   ContinuableCreateSpec,
+  ContinuableStart,
+  ContinuableStartSpec,
   ResolvedSubagentStartRequest,
   SubagentCapabilities,
+  SubagentInterruptAuthority,
   SubagentProvider,
   SubagentResult,
   SubagentRun,
+  SubagentSendMessageOptions,
   SubagentStartRequest,
   SubagentStopReason,
   SubagentStopReasonMap,
-  SubagentOwnerBinding,
-  SubagentSettlementDelivery,
 } from './types.ts'
 export {
   foldSubagentDescriptor,
@@ -112,7 +110,6 @@ export type {
   SubagentDescriptorData,
   SubagentDescriptorInput,
 } from './descriptor.ts'
-export { seedDescriptorTurn } from './descriptor-seed.ts'
 export { SubagentError } from './error.ts'
 export { settleRun } from './run-settlement.ts'
 export { assertSubagentMaxDepth, delegationDepthOf } from './depth.ts'
@@ -127,26 +124,7 @@ export {
   SubagentDepthError,
 } from './child-agent.ts'
 export type { ChildComposition, DelegatedPolicyOverrides } from './child-agent.ts'
-export type {
-  ContinuableStart,
-  ContinuableStartSpec,
-  CoordinatorMessageSource,
-  SubagentFollowupOptions,
-  SubagentInterruptAuthority,
-  SubagentRedirectOptions,
-  SubagentReportDelivery,
-  SubagentReportMessageSource,
-  SubagentReportOptions,
-  SubagentSettledMessageSource,
-} from './continuation.ts'
-export type {
-  SubagentOwnerController,
-  SubagentOwnerRedirectRequest,
-  SubagentOwnerSettlement,
-  SubagentOwnerStopRequest,
-  SubagentOwnerTurnSettlement,
-} from './owner-controller.ts'
-export type { ContinuableSetupContribution } from './activation-setup-registry.ts'
+export type { AgentMessageSource, SubagentSettledMessageSource } from './continuation-messages.ts'
 export type * from './control-types.ts'
 export type { SubagentDescendantListEntry } from './list-children.ts'
 export type { SubagentRunEndInfo, SubagentRunInfo } from './types.ts'
@@ -209,10 +187,7 @@ interface BrowserPromptSource {
 /** Named provider registry with one-shot runs, durable discovery, and continuable-child operations. */
 export class SubagentRuntime extends TypertRemoteService {
   private providers = new Map<string, SubagentProvider>()
-  private ownerControllers = new Map<string, SubagentOwnerController>()
   private continuations: SubagentContinuationManager | undefined
-  /** Deployment contributions composed into unpublished continuable children. */
-  private readonly setupRegistry = new SubagentActivationSetupRegistry()
   /**
    * The contained lifecycle-edge publisher. Built here because scoped dispatch
    * keys its carrier by this exact service instance, whose own context filter
@@ -227,8 +202,7 @@ export class SubagentRuntime extends TypertRemoteService {
       const manager = new SubagentContinuationManager(childCtx, {
         prepareContinuable: (name, request) => this.prepareContinuable(name, request),
         observeActivation: (provider, childId, parent) => this.observeActivation(provider, childId, parent),
-        ownerController: binding => this.ownerControllers.get(binding.controller),
-      }, this.setupRegistry)
+      })
       this.continuations = manager
       childCtx.effect(() => () => {
         /* v8 ignore else -- one injected binding owns the slot until its fiber disposes. */
@@ -236,6 +210,7 @@ export class SubagentRuntime extends TypertRemoteService {
       }, 'subagents.continuationBinding()')
     })
     ctx.inject(['sessionProjections'], (projectionCtx) => {
+      projectionCtx.sessionProjections.register(subagentCatalogProjectionDefinition)
       projectionCtx.sessionProjections.register(subagentTimingProjectionDefinition)
       projectionCtx.sessionProjections.register(subagentIdentityProjectionDefinition)
     })
@@ -255,48 +230,51 @@ export class SubagentRuntime extends TypertRemoteService {
   }
 
   /**
-   * Deliver one later message to a continuable child as its next FIFO turn. A
-   * resident child's Agent inbox accepts it directly (waking a `waiting`
-   * Activation), while an absent one is cold-resumed from its persisted
-   * Session. The Agent inbox is the only queue, so every accepted message has
-   * one observable order.
-   * @param parent - the exact live direct parent authorizing this delivery.
-   * @param childId - durable child session id.
-   * @param content - user-role content to deliver.
-   * @param options - the message source fields and caller cancellation, which stops the
-   *   operation only before inbox acceptance.
+   * Steer one model-authored message to the sender's direct parent or direct
+   * continuable child. A running target admits it at the nearest step boundary;
+   * an idle target starts a turn, and an absent direct child cold-resumes from
+   * persistence. The service derives durable sender attribution from the exact
+   * live sender. Caller cancellation stops only pre-acceptance work.
+   * @param sender - exact live Agent authorizing and originating the message.
+   * @param targetId - durable direct-parent or direct-child session id.
+   * @param content - model-authored content to deliver.
+   * @param options - caller cancellation before inbox acceptance.
    * @returns the accepted message's inbox id.
-   * @throws when continuation services are unavailable, parent authority is
-   *   rejected, or the message was not admitted.
+   * @throws when continuation services are unavailable, adjacency is rejected,
+   *   or the message was not admitted.
    */
-  async followup(
-    parent: Agent,
-    childId: SessionId,
+  async sendMessage(
+    sender: Agent,
+    targetId: SessionId,
     content: ContentBlock[],
-    options: SubagentFollowupOptions,
+    options: SubagentSendMessageOptions,
   ): Promise<MessageId> {
-    return this.requireContinuations().followup(parent, childId, content, options)
+    return this.requireContinuations().sendMessage(sender, targetId, content, options)
   }
 
   /**
-   * Interrupt one continuable child's active turn and place replacement
-   * content before its queued ordinary turns. An absent child cold-resumes and
-   * accepts the replacement as its next turn. Owner-bound children delegate
-   * the authorized state transition to their registered controller before the
-   * Agent operation runs.
+   * Deliver one host-protocol message to a direct continuable child.
+   * Symbol-keyed so host adapters can preserve their own provenance without
+   * widening the public Service Definition or impersonating an Agent sender.
    * @param parent - exact live direct parent authorizing delivery.
-   * @param childId - durable child session id.
-   * @param content - replacement user-role content.
-   * @param options - source, optional stable message id, cancellation, and interrupt cause.
-   * @returns the accepted inbox message identity.
+   * @param childId - durable direct-child session id.
+   * @param content - host-authored content to deliver.
+   * @param source - durable host-protocol provenance.
+   * @param signal - caller cancellation before inbox acceptance.
+   * @param delivery - Queue as a distinct turn or Steer at the nearest step.
+   * @returns the accepted message's inbox id.
    */
-  async redirect(
+  private [deliverSubagentPrompt](
     parent: Agent,
     childId: SessionId,
     content: ContentBlock[],
-    options: SubagentRedirectOptions,
+    source: MessageSource,
+    signal: AbortSignal,
+    delivery: SubagentDelivery,
   ): Promise<MessageId> {
-    return this.requireContinuations().redirect(parent, childId, content, options)
+    return delivery === 'steer'
+      ? this.requireContinuations().steerPrompt(parent, childId, content, source, signal)
+      : this.requireContinuations().queuePrompt(parent, childId, content, source, signal)
   }
 
   /**
@@ -316,63 +294,6 @@ export class SubagentRuntime extends TypertRemoteService {
    */
   interrupt(targetSessionId: SessionId, authority: SubagentInterruptAuthority): void {
     this.continuations?.interrupt(targetSessionId, authority)
-  }
-
-  /**
-   * Deliver selected content from one live continuable child to its durable
-   * direct parent. The child is the authority credential; callers cannot name a
-   * recipient. Reporting does not conclude the child's turn or Activation.
-   * @param child - exact live reporting child.
-   * @param content - selected model-facing content.
-   * @param options - parent scheduling and pre-acceptance cancellation.
-   * @returns the stable identity of the parent-accepted message.
-   * @throws when continuation services are unavailable, sender authorization
-   *   fails, or the direct parent is not live.
-   */
-  async reportFrom(
-    child: Agent,
-    content: ContentBlock[],
-    options: SubagentReportOptions,
-  ): Promise<MessageId> {
-    return this.requireContinuations().reportFrom(child, content, options)
-  }
-
-  /**
-   * Compose one deployment capability into every continuable child's
-   * unpublished creation context on fresh creation and cold resume. Grants wait
-   * for the next Activation; removing the contribution revokes every resident
-   * installation immediately.
-   * @param contribution - synchronous child-scope installer.
-   * @returns the exact Cordis effect disposer.
-   */
-  registerContinuableSetup(contribution: ContinuableSetupContribution): () => void {
-    // oxlint-disable-next-line typescript/no-misused-promises -- synchronous disposer
-    return this.ctx.effect(
-      () => this.setupRegistry.register(contribution),
-      'subagents.registerContinuableSetup()',
-    )
-  }
-
-  /**
-   * Register one durable owner namespace. The returned disposer revokes new
-   * owner operations immediately; existing children retain their binding and
-   * fail loud until the same controller name is registered again.
-   * @param name - non-empty durable controller name.
-   * @param controller - owner hooks; redirect admission can be asynchronous.
-   * @returns the exact Cordis effect disposer.
-   */
-  registerOwnerController(name: string, controller: SubagentOwnerController): () => void {
-    if (name.length === 0) throw new SubagentError('subagent owner controller name must not be empty', 'INVALID_OWNER')
-    // oxlint-disable-next-line typescript/no-misused-promises -- synchronous disposer
-    return this.ctx.effect(() => {
-      if (this.ownerControllers.has(name)) {
-        throw new SubagentError(`a subagent owner controller named "${name}" is already registered`, 'DUPLICATE_OWNER')
-      }
-      this.ownerControllers.set(name, controller)
-      return () => {
-        if (this.ownerControllers.get(name) === controller) this.ownerControllers.delete(name)
-      }
-    }, 'subagents.registerOwnerController()')
   }
 
   /**
@@ -457,9 +378,9 @@ export class SubagentRuntime extends TypertRemoteService {
    * @param parentSessionId - parent session whose direct children are listed.
    * @param signal - carrier cancellation forwarded to Session queries.
    * @returns the catalog view for that parent.
-   * @throws {TypertRemoteFailure} `bad-request` for an empty parent id,
-   *   `cancelled` for an aborted read, `subagent-projections-unavailable` when
-   *   the deployment has no projection registry, otherwise `internal`.
+   * @throws {RemoteError} `gateway/bad-request` for an empty parent id,
+   *   `gateway/cancelled` for an aborted read, `subagent/projections-unavailable` when
+   *   the deployment has no projection registry, otherwise `gateway/internal`.
    */
   @Remote('list')
   async remoteExportList(parentSessionId: SessionId, signal: AbortSignal): Promise<SubagentCatalog> {
@@ -475,45 +396,66 @@ export class SubagentRuntime extends TypertRemoteService {
    * Deliver one browser-authored message to a continuable child through the
    * exact live direct parent, retaining the caller-minted request identity and
    * validated browser zone on the accepted message. Success identifies the
-   * message the child's FIFO inbox accepted; later execution is independent of
-   * this call.
-   * @param request - durable address, minted identity, content, and optional browser zone.
+   * message the child's inbox accepted; later execution is independent of this
+   * call. Queue delivery targets a later turn; steer delivery targets the
+   * nearest step and retains the Agent loop's best-effort fallback semantics.
+   * Image parts are admitted and persisted through the attachment store
+   * before delivery, and the child's model must accept image input.
+   * @param request - durable address, delivery, minted identity, content, and optional browser zone.
    * @param signal - carrier cancellation, owning the call until inbox acceptance.
    * @returns the accepted message's inbox identity.
-   * @throws {TypertRemoteFailure} `bad-request`, `invalid-time-zone`,
-   *   `subagent-parent-unavailable`, `subagent-not-resumable`,
-   *   `subagent-unauthorized`, `subagent-delivery-unavailable`, `cancelled`, or
-   *   `internal`.
+   * @throws {RemoteError} `gateway/bad-request`, `subagent/attachment-invalid`,
+   *   `subagent/invalid-time-zone`, `subagent/parent-unavailable`,
+   *   `subagent/not-resumable`, `subagent/unauthorized`,
+   *   `subagent/delivery-unavailable`, `gateway/cancelled`, or `gateway/internal`.
    */
   @Remote('prompt')
   async prompt(request: SubagentPromptRequest, signal: AbortSignal): Promise<SubagentPromptReceipt> {
-    const { parent, childSessionId, source } = this.browserPromptContext('subagent.prompt', request)
-    const content: ContentBlock[] = [...request.content]
-    try {
-      return { messageId: await this.followup(parent, childSessionId, content, { source, signal }) }
-    } catch (error: unknown) {
-      return rejectPrompt(error, childSessionId, signal)
+    const { parentSessionId, childSessionId, clientTimeZone, delivery } = request
+    validateControlRequest('subagent.prompt', request)
+    const canonicalTimeZone = clientTimeZone === undefined
+      ? undefined
+      : canonicalClientTimeZone(clientTimeZone)
+    if (clientTimeZone !== undefined && canonicalTimeZone === undefined) {
+      throw new RemoteError(
+        'subagent/invalid-time-zone',
+        'clientTimeZone must be UTC or a valid IANA Area/Location name',
+        { value: clientTimeZone },
+      )
     }
-  }
-
-  /**
-   * Interrupt one browser-addressed continuable child and accept a replacement
-   * ordinary turn before its queued turns. The exact live direct parent remains
-   * the authority credential.
-   * @param request - durable address, request identity, content, and optional browser zone.
-   * @param signal - carrier cancellation through inbox acceptance.
-   * @returns the accepted replacement message identity.
-   */
-  @Remote('steer')
-  async steer(request: SubagentSteerRequest, signal: AbortSignal): Promise<SubagentSteerReceipt> {
-    const { parent, childSessionId, source } = this.browserPromptContext('subagent.steer', request)
+    const parent = this.ctx.get('agents')?.get(parentSessionId)
+    if (parent === undefined) {
+      throw new RemoteError(
+        'subagent/parent-unavailable',
+        `parent session "${parentSessionId}" is not live`,
+        { parentSessionId },
+      )
+    }
+    const source: BrowserPromptSource = {
+      kind: 'user',
+      rpcId: request.requestId,
+      ...(canonicalTimeZone === undefined ? {} : { clientTimeZone: canonicalTimeZone }),
+    }
     try {
+      // Admission precedes delivery: image parts become durable references
+      // here, so the child inbox only ever accepts Host-persisted attachments.
+      let content: ContentBlock[]
+      if (request.content.every((part): part is { readonly type: 'text'; readonly text: string } => part.type === 'text')) {
+        content = request.content.map(part => ({ type: 'text', text: part.text }))
+      } else {
+        const attachments = this.ctx.get('attachments')
+        if (attachments === undefined) throw new Error('subagent image prompt requires an attachment store')
+        content = await attachments.admitPromptContent(request.content)
+      }
       return {
-        messageId: await this.redirect(parent, childSessionId, [...request.content], {
+        messageId: await this[deliverSubagentPrompt](
+          parent,
+          childSessionId,
+          content,
           source,
           signal,
-          cause: { kind: 'user' },
-        }),
+          delivery,
+        ),
       }
     } catch (error: unknown) {
       return rejectPrompt(error, childSessionId, signal)
@@ -530,9 +472,9 @@ export class SubagentRuntime extends TypertRemoteService {
    * @param parentSessionId - durable direct parent whose authority is claimed.
    * @param mode - required continuable-address discriminator.
    * @returns acknowledgement that the cancel signal was admitted, not that the target is quiescent.
-   * @throws {TypertRemoteFailure} `bad-request` for an empty id,
-   *   `subagent-unauthorized` when the address does not own the live target,
-   *   otherwise `internal`.
+   * @throws {RemoteError} `gateway/bad-request` for an empty id,
+   *   `subagent/unauthorized` when the address does not own the live target,
+   *   otherwise `gateway/internal`.
    */
   @Remote('interruptByParent')
   interruptByParent(
@@ -545,13 +487,14 @@ export class SubagentRuntime extends TypertRemoteService {
       this.interrupt(childSessionId, { kind: 'user', parentSessionId })
     } catch (error: unknown) {
       if (error instanceof SubagentError && error.code === 'UNAUTHORIZED') {
-        return rejectControl(
-          'subagent-unauthorized',
+        throw new RemoteError(
+          'subagent/unauthorized',
           'subagent does not belong to this parent',
           { childSessionId },
+          { cause: error },
         )
       }
-      return rejectControl('internal', 'subagent interrupt failed', {})
+      throw new RemoteError('gateway/internal', 'subagent interrupt failed', {}, { cause: error })
     }
     return { accepted: true }
   }
@@ -604,6 +547,8 @@ export class SubagentRuntime extends TypertRemoteService {
    * fulfills; a rejection therefore has no run for the caller to dispose and
    * emits no run lifecycle events. Post-publication turn and infrastructure
    * failures settle through the returned run.
+   * A catalog append failure disposes the run and handles its result rejection;
+   * the caller receives the catalog error even if disposal also fails.
    * @param name - the provider to use.
    * @param request - child label, prompt, parent, signal, and optional capabilities.
    * @returns the published holder-owned run.
@@ -619,7 +564,25 @@ export class SubagentRuntime extends TypertRemoteService {
       ...request.label !== undefined ? { label: request.label } : {},
     })
     const resolved: ResolvedSubagentStartRequest = { ...request, descriptor }
-    return observeRun(this.emitLifecycle, name, request.parent, await provider.start(resolved))
+    const run = await provider.start(resolved)
+    const child = run.localAgent?.session
+    if (child !== undefined) {
+      try {
+        establishCatalogChild(request.parent.session, child.header, descriptor)
+      } catch (error: unknown) {
+        // No caller receives this run; the catalog error owns the failed start.
+        void run.result.catch(() => undefined)
+        try {
+          await run.dispose()
+        } catch (cleanupError: unknown) {
+          this.ctx.logger.warn(
+            `subagent: disposal after catalog append failure also failed: ${String(cleanupError)}`,
+          )
+        }
+        throw error
+      }
+    }
+    return observeRun(this.emitLifecycle, name, request.parent, run)
   }
 
   /**
@@ -640,42 +603,6 @@ export class SubagentRuntime extends TypertRemoteService {
       )
     }
     return provider.prepareContinuable(request)
-  }
-
-  /** Validate one browser message address and resolve its live parent. */
-  private browserPromptContext(
-    method: 'subagent.prompt' | 'subagent.steer',
-    request: SubagentPromptRequest,
-  ): { readonly parent: Agent; readonly childSessionId: SessionId; readonly source: BrowserPromptSource } {
-    const { parentSessionId, childSessionId, clientTimeZone } = request
-    validateControlRequest(method, request)
-    const canonicalTimeZone = clientTimeZone === undefined
-      ? undefined
-      : canonicalClientTimeZone(clientTimeZone)
-    if (clientTimeZone !== undefined && canonicalTimeZone === undefined) {
-      return rejectControl(
-        'invalid-time-zone',
-        'clientTimeZone must be UTC or a valid IANA Area/Location name',
-        { value: clientTimeZone },
-      )
-    }
-    const parent = this.ctx.get('agents')?.get(parentSessionId)
-    if (parent === undefined) {
-      return rejectControl(
-        'subagent-parent-unavailable',
-        `parent session "${parentSessionId}" is not live`,
-        { parentSessionId },
-      )
-    }
-    return {
-      parent,
-      childSessionId,
-      source: {
-        kind: 'user',
-        rpcId: request.requestId,
-        ...(canonicalTimeZone === undefined ? {} : { clientTimeZone: canonicalTimeZone }),
-      },
-    }
   }
 
   /** Look up a provider for dispatch or fail loud. */

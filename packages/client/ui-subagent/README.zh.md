@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-client-ui-subagent` 是 Web 客户端的 subagent 对话功能：用户从父会话的页头浏览并打开 subagent 对话，通过按原因区分的只读编辑器状态续接对话，并用 `@` source 引用运行中的 child。用户从父会话的页头浏览完整的 subagent 来源后代谱系——每一行显示 mode、运行活动、token 用量与活跃轮次耗时——并能以子会话的确切地址打开任意深度。one-shot child 始终打开一个把 transcript 说明为已完成执行记录的只读编辑器；可继续 child 通过普通编辑器排队较后轮次或重定向其活跃轮次。普通侧边栏会省略带 subagent origin 的会话行，因此父级页头目录是它们的导航入口。
+使用本包可浏览父会话下的每个 subagent 对话、打开任意后代，并查看其是否正在运行以及 token 用量和活跃轮次耗时。已完成的 one-shot 对话会作为只读执行记录打开。可继续对话在运行期间按提交顺序接收后续提示词，并独立提供 Stop。普通会话侧边栏会省略 subagent 对话，因此父会话页头目录是它们的导航入口。独立的 `@` source 会把运行中 child 的 label 插入用户消息，但不会把它解析成继续执行地址。
 
 ## 目录
 
@@ -33,7 +33,7 @@ kind: "package-reference"
 
 ### 续接对话
 
-确切 parent 存活时，可继续 child 保留普通输入 chrome：child 运行期间输入和 Send 保持可用。繁忙时 Enter 设置选择 queue 或 steer 投递；Ctrl/Cmd-Enter 组合键选择另一种 mode。Queue 添加较后的 FIFO 轮次。Steer 调用 `subagents/steer`，在保留 inbox 的情况下取消活跃轮次，并把替换轮次放在已排队的普通轮次之前。独立的 Stop 经由 `subagents/interruptByParent` 路由。确切 parent 不可用且 child 未在运行的可继续 child 会选用说明恢复路径的只读编辑器；此类 child 仍在运行期间，selector 会让位给普通编辑器——输入区与 Send 被禁用，但独立的 Stop 保持可用。
+确切 parent 存活时，可继续 child 保留普通输入 chrome：child 运行期间输入和 Send 保持可用，因为每条后续消息都会进入 child 的 FIFO inbox，而独立的 Stop 经由 `subagents/interruptByParent` 路由。确切 parent 不可用且 child 未在运行的可继续 child 会选用说明恢复路径的只读编辑器；此类 child 仍在运行期间，selector 会让位给普通编辑器——输入区与 Send 被禁用，但独立的 Stop 保持可用。
 
 ### `@` 引用 source
 
@@ -59,7 +59,7 @@ token 用量总计为四个互不重叠的 `tokenUsage` 桶之和。耗时会累
 
 ### 编辑器选举
 
-one-shot child 始终选用只读编辑器。可继续 child 仅在其确切 parent 不可用且 child 未在运行时选用只读编辑器；否则普通编辑器的会话会经 `subagents/prompt` 路由 queue 提示词，经 `subagents/steer` 路由 steer 提示词。本包绝不接收宿主上下文，也不调用面向模型的工具。
+one-shot child 始终选用只读编辑器。可继续 child 仅在其确切 parent 不可用且 child 未在运行时选用只读编辑器；否则普通编辑器的会话会经 `subagents/prompt` 路由提示词。本包绝不接收宿主上下文，也不调用面向模型的工具。
 
 </details>
 
@@ -85,7 +85,7 @@ one-shot child 始终选用只读编辑器。可继续 child 仅在其确切 par
 
 #### 模型看到的内容
 
-只有 `@` 引用 source 会影响模型输入文本：pick 的候选以字面文本 `@label` 进入普通用户消息，没有专用内容块或宿主侧解析。浏览目录、导航 child 与查看持久化 transcript 都不会添加提示词 section。已接收的 queue 内容成为普通 FIFO 用户消息；已接收的 steer 内容会经宿主 subagent 适配器替换活跃的普通轮次。
+只有 `@` 引用 source 会影响模型输入：pick 的候选以字面文本 `@label` 进入普通用户消息，没有专用内容块或宿主侧解析。浏览目录、导航 child 与查看持久化 transcript 都不会添加提示词 section；已接收的继续交互内容会经宿主 subagent 适配器成为普通 FIFO 用户消息。
 
 #### Token 影响
 
@@ -102,7 +102,7 @@ one-shot child 始终选用只读编辑器。可继续 child 仅在其确切 par
 
 这些限制定义目录能显示什么、`@` 引用意味着什么；它们是当前包约束。
 
-- **目录没有持久化结果**：活动状态与计时无法区分完成、失败或取消，且 UI 不公开 Activation 身份；stop 与 steer 控制仅应用于运行中的可继续 child。
+- **目录没有持久化结果**：活动状态与计时无法区分完成、失败或取消，且 UI 不公开 Activation 身份；停止能力仅限编辑器上针对运行中可继续 child 的当前轮次 Stop。
 - **`@` 引用仍是显示标题文本**：重复或改名后的 label 会有歧义，因此它们刻意不获得继续执行语义。
 
 <a id="dev-note"></a>
@@ -114,3 +114,5 @@ one-shot child 始终选用只读编辑器。可继续 child 仅在其确切 par
 无。
 
 </details>
+
+**运行时不变式：** 不发布伴生入口。插件只注册一个 slash source，HMR 测试覆盖释放；它不发出 Cordis 事件，也不持有跨插件可变状态。

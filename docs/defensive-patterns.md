@@ -2,7 +2,7 @@
 
 English | [中文](defensive-patterns.zh.md)
 
-These rules prevent known lifecycle, concurrency, subprocess, and teardown defects. Test equivalents for real entry paths, observed results, and resource ownership are in [testing.md](testing.md).
+Hard-won bug-class rules: each pattern below is a class of defect that actually shipped or nearly shipped here, stated as the rule that prevents its recurrence. Read this before writing lifecycle, concurrency, subprocess, or teardown code. Test-tier counterparts (real entry path, world-verification, resource ownership) are in [testing.md](testing.md).
 
 ## Report orthogonal outcomes independently
 
@@ -16,13 +16,9 @@ When an implementation receives several representations of one outcome, normaliz
 
 `agent.followup()` has no per-message completion or result; a background job's completion races turn boundaries; `reader.close()` fires for both EOF and disposal. Never treat `agent/status` or `whenIdle()` as the result of one follow-up: several queued follow-ups, steering, and injected work may share one `running` interval, while cancellation or disposal can discard unstarted items. An automation caller that truly owns a run must define its interval explicitly—for example, from its message's durable inbox receipt through the next whole-agent `idle`—and describe any selected output as interval-wide rather than causally attributed to that message. The guard cuts both ways: if the awaited transition can never occur, the wait hangs, so handle the "nothing to wait for" branch explicitly.
 
-## Commit durable intent before effects
-
-Commit state before external work. Run durable mailboxes without holding locks across `await`, fence callbacks by generation and operation, and record stops before cancellation. The [native DAG scheduler](subsystems/dag.md) applies this rule.
-
 ## Dispose must reach quiescence, not just request it
 
-A teardown that returns before killed or aborted work stops leaves orphans. Await child exit, and close listener and notification registries before termination so late completions stay silent.
+A teardown that issues kills/aborts but returns before the work stops leaves orphans. Make cleanup async and await the children's exit (kill → await `done`), and close listener/notification registries BEFORE killing so late completions stay silent.
 
 ## Contain callback exceptions in the dispatcher
 

@@ -15,9 +15,6 @@ interface CdpMessage {
   readonly error?: { message: string }
 }
 
-const CDP_CALL_TIMEOUT_MS = 15_000
-const INSPECTOR_TEST_TIMEOUT_MS = 30_000
-
 class TestCdpClient {
   private nextId = 0
   private readonly pending = new Map<number, (message: CdpMessage) => void>()
@@ -46,7 +43,7 @@ class TestCdpClient {
       const timer = setTimeout(() => {
         this.pending.delete(id)
         reject(new Error(`CDP call timed out: ${method}`))
-      }, CDP_CALL_TIMEOUT_MS)
+      }, 5_000)
       this.pending.set(id, (message) => {
         clearTimeout(timer)
         this.pending.delete(id)
@@ -64,7 +61,7 @@ class TestCdpClient {
   }
 }
 
-describe('experimental Inspector real Worker', { timeout: INSPECTOR_TEST_TIMEOUT_MS }, () => {
+describe('experimental Inspector real Worker', () => {
   let inspector: InspectorHandle | undefined
   let cdp: TestCdpClient | undefined
   let secondCdp: TestCdpClient | undefined
@@ -370,12 +367,27 @@ describe('experimental Inspector real Worker', { timeout: INSPECTOR_TEST_TIMEOUT
     client = await InspectorClientFixture.start(inspector.endpoint.client, { label: 'Console Client' })
     cdp = await TestCdpClient.connect(inspector.endpoint.webSocketDebuggerUrl)
     secondCdp = await TestCdpClient.connect(inspector.endpoint.webSocketDebuggerUrl)
+    await vi.waitFor(async () => {
+      const response = await cdp!.call('DSHInspector.getSources')
+      expect(recordArray(response.result?.sources).some(source => source.kind === 'client')).toBe(true)
+    })
+    // The MessagePort can deliver log requests before ingest receives Console subscriptions.
+    await client.setIngestPaused(true)
     await Promise.all([cdp.call('Runtime.enable'), secondCdp.call('Runtime.enable')])
     const firstContext = await clientContext(cdp)
     const secondContext = await clientContext(secondCdp)
     const value = { owner: 'client-console' }
     const marker = 'client-console-event'
-    await client.log(value, marker)
+    const logged = (async () => {
+      // Both subscriptions precede this request on the same ingest WebSocket.
+      // A Client response, unlike Runtime.enable, acknowledges their delivery.
+      expect((await cdp.call('Runtime.evaluate', {
+        contextId: firstContext,
+        expression: 'void 0',
+      })).error).toBeUndefined()
+      await client.log(value, marker)
+    })()
+    await Promise.all([logged, client.setIngestPaused(false)])
     let firstEvent: CdpMessage | undefined
     let secondEvent: CdpMessage | undefined
     await vi.waitFor(() => {
@@ -383,7 +395,7 @@ describe('experimental Inspector real Worker', { timeout: INSPECTOR_TEST_TIMEOUT
       secondEvent = consoleEvent(secondCdp!, secondContext, marker)
       expect(firstEvent).toBeDefined()
       expect(secondEvent).toBeDefined()
-    }, { timeout: CDP_CALL_TIMEOUT_MS })
+    })
     const firstObjectId = asRecord(recordArray(firstEvent!.params?.args)[0]).objectId
     const secondObjectId = asRecord(recordArray(secondEvent!.params?.args)[0]).objectId
     expect(firstObjectId).toBeTypeOf('string')
@@ -401,6 +413,16 @@ describe('experimental Inspector real Worker', { timeout: INSPECTOR_TEST_TIMEOUT
     expect((await cdp.call('Runtime.discardConsoleEntries')).error).toBeUndefined()
     expect((await cdp.call('Runtime.getProperties', { objectId: firstObjectId })).error).toBeDefined()
     expect((await secondCdp.call('Runtime.getProperties', { objectId: secondObjectId })).error).toBeUndefined()
+
+    await client.setIngestPaused(true)
+    await client.close()
+    client = undefined
+    await vi.waitFor(() => {
+      for (const [connection, contextId] of [[cdp!, firstContext], [secondCdp!, secondContext]] as const) {
+        expect(connection.events.some(event => event.method === 'Runtime.executionContextDestroyed'
+          && event.params?.executionContextId === contextId)).toBe(true)
+      }
+    })
   })
 
   it('projects a chunked Client bundle as read-only Debugger source', async () => {

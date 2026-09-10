@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it, vi } from 'vitest'
+import { describe, expect, expectTypeOf, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { type Agent } from '@deepseek-ai/dsh-agent'
 
@@ -12,14 +12,14 @@ import SubagentRuntime, {
   assertSubagentMaxDepth,
   type ResolvedSubagentStartRequest,
   type SubagentCapabilities,
-  type SubagentOwnerController,
   type SubagentProvider,
   type SubagentResult,
   type SubagentRun,
   type SubagentRunEndInfo,
   type SubagentStartRequest,
 } from '@deepseek-ai/dsh-subagent'
-import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { Session, SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 
 function fakeParent(id = 'parent-1'): Agent {
   return { id: SessionId(id) } as unknown as Agent
@@ -65,11 +65,32 @@ class StubProvider implements SubagentProvider {
 
 async function service(): Promise<{ ctx: Context; subagents: SubagentRuntime }> {
   const ctx = new Context()
+  // The registry is a required injection of SubagentRuntime (its projection
+  // units register in the constructor).
+  await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(SubagentRuntime)
   return { ctx, subagents: ctx.subagents }
 }
 
 describe('SubagentRuntime', () => {
+  it('releases its catalog projection binding with the service fiber', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionProjectionRegistry)
+    const fiber = await ctx.plugin(SubagentRuntime)
+    const parent = Session.create(SessionId('catalog-parent'))
+    parent.append('subagent/catalog', {
+      version: 0,
+      childId: SessionId('catalog-child'),
+      childCreatedAt: 1,
+      mode: 'one-shot',
+    })
+    expect(ctx.sessionProjections.snapshot(parent).values.subagentCatalog).toHaveLength(1)
+
+    await fiber.dispose()
+
+    expect(ctx.sessionProjections.stateOf(parent, 'subagentCatalog')).toBeUndefined()
+  })
+
   it('registers, lists, looks up, starts, and removes providers', async () => {
     const { ctx, subagents } = await service()
     const added: string[] = []
@@ -154,11 +175,11 @@ describe('SubagentRuntime', () => {
       request: baseRequest(),
       signal: new AbortController().signal,
     })).rejects.toMatchObject({ code: 'CONTINUATION_UNAVAILABLE' })
-    await expect(subagents.followup(
+    await expect(subagents.sendMessage(
       fakeParent(),
       SessionId('child'),
       [{ type: 'text', text: 'hello' }],
-      { source: { kind: 'user' }, signal: new AbortController().signal },
+      { signal: new AbortController().signal },
     )).rejects.toMatchObject({ code: 'CONTINUATION_UNAVAILABLE' })
   })
 
@@ -249,6 +270,45 @@ describe('SubagentRuntime', () => {
     expect(lifecycle).not.toHaveBeenCalled()
   })
 
+  it.each([false, true])('handles a rejected local result after catalog failure (disposal fails: %s)', async (failsDisposal) => {
+    const { ctx, subagents } = await service()
+    onTestFinished(() => ctx.fiber.dispose())
+    const parentSession = Session.create(SessionId('catalog-parent'))
+    const childSession = Session.create(SessionId('catalog-child'))
+    const parent = { id: parentSession.id, session: parentSession } as Agent
+    const localAgent = { id: childSession.id, session: childSession } as Agent
+    const result = Promise.withResolvers<SubagentResult>()
+    const cleanupFailure = new Error('dispose also failed')
+    const warnings = vi.spyOn(ctx.logger, 'warn')
+    const dispose = vi.fn(async () => {
+      result.reject(new Error('run infrastructure failed'))
+      // Cross Node's unhandled-rejection checkpoint while disposal is pending.
+      await new Promise<void>(resolve => setImmediate(resolve))
+      if (failsDisposal) throw cleanupFailure
+    })
+    subagents.registerProvider({
+      name: 'catalog-failure',
+      capabilities: NO_CAPS,
+      inheritsParentContext: false,
+      start: () => Promise.resolve({
+        id: childSession.id,
+        localAgent,
+        result: result.promise,
+        dispose,
+      }),
+    })
+    const catalogFailure = new Error('catalog unavailable')
+    const append = vi.spyOn(parentSession, 'append').mockImplementation(() => {
+      throw catalogFailure
+    })
+
+    await expect(subagents.start('catalog-failure', baseRequest({ parent })))
+      .rejects.toBe(catalogFailure)
+    expect(append).toHaveBeenCalledOnce()
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(warnings).toHaveBeenCalledTimes(failsDisposal ? 1 : 0)
+  })
+
   it('emits an enriched end event and maps result rejection to error telemetry', async () => {
     const { ctx, subagents } = await service()
     const completed = new StubProvider('completed', NO_CAPS, {
@@ -315,25 +375,6 @@ describe('SubagentRuntime', () => {
     expect(warnings.some(message => message.includes('<unrenderable thrown value>'))).toBe(true)
   })
 
-  it('validates owner-controller names, duplicates, and stale disposal', async () => {
-    const { subagents } = await service()
-    const controller = {} as SubagentOwnerController
-    const replacement = {} as SubagentOwnerController
-
-    expect(() => { subagents.registerOwnerController('', controller) })
-      .toThrow(expect.objectContaining({ code: 'INVALID_OWNER' }))
-    const dispose = subagents.registerOwnerController('dag', controller)
-    expect(() => { subagents.registerOwnerController('dag', controller) })
-      .toThrow(expect.objectContaining({ code: 'DUPLICATE_OWNER' }))
-
-    const ownerControllers = (subagents as unknown as {
-      ownerControllers: Map<string, SubagentOwnerController>
-    }).ownerControllers
-    ownerControllers.set('dag', replacement)
-    dispose()
-    expect(ownerControllers.get('dag')).toBe(replacement)
-  })
-
   it('SubagentError participates in the harness error taxonomy', () => {
     const error = new SubagentError('boom', 'NO_PROVIDER')
     expect(error).toBeInstanceOf(HarnessError)
@@ -372,7 +413,6 @@ describe('subagent descriptors', () => {
       agentReasoningEffort: ReasoningEffortId('high'),
       persona: 'reviewer',
       toolFilter: { allow: ['read'], deny: ['bash'] },
-      settlementDelivery: 'adaptive' as const,
     }
     expect(snapshotSubagentDescriptor({
       mode: 'continuable',
@@ -392,7 +432,6 @@ describe('subagent descriptors', () => {
         provider: 'spawn',
         label: 'l',
         toolFilter: { allow: ['read'] },
-        settlementDelivery: 'adaptive',
       }),
     ])).toMatchObject({ toolFilter: { allow: ['read'] } })
     expect(foldSubagentDescriptor([
@@ -402,7 +441,6 @@ describe('subagent descriptors', () => {
         provider: 'spawn',
         label: 'l',
         toolFilter: { deny: ['bash'] },
-        settlementDelivery: 'adaptive',
       }),
     ])).toMatchObject({ toolFilter: { deny: ['bash'] } })
     expect(foldSubagentDescriptor([
@@ -523,37 +561,6 @@ describe('subagent descriptors', () => {
       label: 'l',
       toolFilter: { deny: [7] },
     }, 'toolFilter.deny must be an array of strings'],
-    ['invalid settlement delivery', {
-      version: SUBAGENT_DESCRIPTOR_VERSION,
-      mode: 'continuable',
-      provider: 'spawn',
-      label: 'l',
-      settlementDelivery: 'wake',
-    }, 'settlementDelivery is invalid'],
-    ['non-object owner', {
-      version: SUBAGENT_DESCRIPTOR_VERSION,
-      mode: 'continuable',
-      provider: 'spawn',
-      label: 'l',
-      settlementDelivery: 'none',
-      owner: [],
-    }, 'owner must be an object'],
-    ['incomplete owner', {
-      version: SUBAGENT_DESCRIPTOR_VERSION,
-      mode: 'continuable',
-      provider: 'spawn',
-      label: 'l',
-      settlementDelivery: 'none',
-      owner: { controller: 'dag' },
-    }, 'owner requires controller and metadata'],
-    ['empty owner controller', {
-      version: SUBAGENT_DESCRIPTOR_VERSION,
-      mode: 'continuable',
-      provider: 'spawn',
-      label: 'l',
-      settlementDelivery: 'none',
-      owner: { controller: '', metadata: {} },
-    }, 'owner.controller must be a non-empty string'],
   ])('rejects a malformed persisted descriptor: %s', (_case, data, detail) => {
     expect(() => foldSubagentDescriptor([event(data)])).toThrow(detail)
   })

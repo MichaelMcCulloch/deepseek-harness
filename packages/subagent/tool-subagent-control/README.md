@@ -1,5 +1,5 @@
 ---
-description: "Global send_message, steer_agent, interrupt_agent, and list_agents tools for users and maintainers composing or debugging continuable-child control."
+description: "Global send_message, interrupt_agent, and list_agents tools for users and maintainers composing or debugging continuable-child control."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-tool-subagent-control` adds the global control tools for continuable children: `send_message` delivers a follow-up message that becomes the child's next turn, `steer_agent` interrupts and replaces current work, `interrupt_agent` stops a child's current turn while keeping its queue and descendants intact, and `list_agents` (from the separately loadable `list-agents` plugin) lists continuable children by durable id and label. The tools are global, so any number of delegation tools never duplicates them. These tools cover only the parent-to-child direction; the child-to-parent direction belongs to the independently installed `dsh-tool-subagent-report`. No tool's presence decides whether a delegation tool starts continuable work.
+`dsh-tool-subagent-control` adds the global control tools for continuable children: `send_message` steers between a direct parent and child, `interrupt_agent` stops a child's current turn while keeping its inbox and descendants intact, and `list_agents` (from the separately loadable `list-agents` plugin) lists continuable children by durable id and label. Parents and continuable children inherit the same `send_message` definition and ordering, so model communication adds no child-only tool schema. No tool's presence decides whether a delegation tool starts continuable work.
 
 ## Table of Contents
 
@@ -25,11 +25,11 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount this package in any composition with continuable children the model should message, steer, interrupt, or list. The root plugin needs only the subagent service; the list tool is a separate plugin a deployment can omit.
+Mount this package in any composition with continuable children the model should message, interrupt, or list. The root plugin needs only the subagent service; the list tool is a separate plugin a deployment can omit.
 
 ### Minimal configuration
 
-Load the subagent service, a backend, the delegation tool, and this package. Adding the separate list plugin exposes all four tools:
+Load the subagent service, a backend, the delegation tool, and this package. Adding the separate list plugin exposes all three tools:
 
 ```yaml
 - name: '@deepseek-ai/dsh-subagent'
@@ -42,15 +42,11 @@ Load the subagent service, a backend, the delegation tool, and this package. Add
 - name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
 ```
 
-This package takes no configuration: the root plugin provides `send_message`, `steer_agent`, and `interrupt_agent`, and the list plugin provides `list_agents`.
+This package takes no configuration: the root plugin provides `send_message` and `interrupt_agent`, and the list plugin provides `list_agents`.
 
 ### send_message
 
-Sends a message that becomes the child's next FIFO turn: a working child finishes its current turn first, so a message cannot redirect work already underway. The call returns only acceptance (the accepted message's stable `messageId`), never the child's reply — the child's transcript by its id is the source of what it did. A failure — an unauthorized or unknown child, a descriptor-less child that cannot be resumed, or rejected admission — states the message was not delivered.
-
-### steer_agent
-
-Interrupts the child's active turn with its pending inbox preserved, inserts one replacement ordinary turn before queued ordinary turns, and wakes the child. The call returns the accepted replacement `messageId`, not its result. For a DAG-owned child, the authorized request first passes through the DAG stop-and-steer state transition; generic children use the continuation manager directly.
+Sends a message to an Agent named by `agent_id`: any exact live Agent may target its direct continuable child, while a resident continuable child may also target its direct parent. A working target receives the message at its nearest step boundary through Steer; an idle target starts a turn, and a cold direct child resumes through the continuation lifecycle. The call returns only acceptance (the accepted message's stable `messageId`), never a reply. A failure — an unsupported target, unavailable parent, unknown child, descriptor-less child that cannot be resumed, or rejected admission — states the message was not delivered.
 
 ### interrupt_agent
 
@@ -72,11 +68,11 @@ This section explains what the tools delegate to the subagent service; the obser
 
 ### Design concept
 
-Thin adapters over `ctx.subagents.followup()`, `redirect()`, `interrupt()`, and the list projections; the tools perform no lifecycle routing. Residency, cold resume, owner delegation, and authorization belong to the service, and the tools pass the exact live calling agent (`exec.agent`) as the authority the service verifies against the target's recorded lineage.
+Thin adapters over `ctx.subagents.sendMessage()`, `interrupt()`, and the list projections; the tools perform no lifecycle routing. Residency, cold resume, and authorization belong to the service, and the tools pass the exact live calling agent (`exec.agent`) as both sender and authority.
 
 ### Delivery and signal ownership
 
-The tool forwards its execution signal, which owns admission only until inbox acceptance. Once the child accepts a message, the accepted turn cannot be cancelled through this tool. Every message is recorded with the coordinator source `{ kind: 'coordinator', senderSessionId: parent.id }`, which the service retains but never treats as authority.
+The tool forwards its execution signal, which owns admission only until inbox acceptance. Once the target accepts a message, it cannot be cancelled through this tool. Every message is framed as `Agent <sender-id> sent a message:` and recorded with `{ kind: 'agent-message', form: 'relay', senderSessionId: sender.id }`; the service derives that attribution and never treats it as authority.
 
 ### Listing projection
 
@@ -86,9 +82,9 @@ The tool forwards its execution signal, which owns admission only until inbox ac
 
 | File | Role |
 |---|---|
-| [`src/index.ts`](src/index.ts) | `send_message`, `steer_agent`, and `interrupt_agent` registration |
+| [`src/index.ts`](src/index.ts) | `send_message` and `interrupt_agent` registration |
 | [`src/list-agents.ts`](src/list-agents.ts) | `list_agents` registration: scopes, status refinement, projection |
-| [`src/invariant.ts`](src/invariant.ts) | Invariant companion |
+| — | No runtime invariant companion is published; this model-facing adapter has no independent lifecycle stream; delivery and activation relations are owned by the subagent service it calls. |
 
 </details>
 
@@ -101,8 +97,7 @@ Read these pages when the package-level contract is not enough; they move from t
 
 - [Subagent subsystem](../../../docs/subsystems/subagent.md) — continuable children, activations, inbox, interrupt, and follow-up authority.
 - [dsh-tool-subagent](../tool-subagent/README.md) — the delegation tool that starts continuable children.
-- [dsh-tool-subagent-report](../tool-subagent-report/README.md) — the child-to-parent report channel.
-- [Generated tool catalog](../../../docs/tool-catalog.md#deepseek-aidsh-tool-subagent-control) — the four tool schemas.
+- [Generated tool catalog](../../../docs/tool-catalog.md#deepseek-aidsh-tool-subagent-control) — the three tool schemas.
 
 -----
 
@@ -113,7 +108,7 @@ Read these pages when the package-level contract is not enough; they move from t
 
 #### What the model sees
 
-The generated [schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tool-subagent-control): `send_message` and `steer_agent` take `subagent_id` and `message`; `interrupt_agent` takes `agent_id`; `list_agents` takes the optional `scope` enum.
+The generated [schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tool-subagent-control): `send_message` takes `agent_id` and `message`; `interrupt_agent` takes `agent_id`; `list_agents` takes the optional `scope` enum.
 
 #### Token effect
 
@@ -141,11 +136,11 @@ Append-only; each result follows the reusable request prefix.
 
 #### What the model sees
 
-`message queued as the next turn for subagent <subagent_id>` on acceptance; the canonical output carries the accepted `messageId`. A failure — an unauthorized or unknown child, a descriptor-less child that cannot be resumed, or admission rejected — is an errored result whose message states the message was not delivered.
+`message delivered to agent <agent_id>` on acceptance; the canonical output carries the accepted `messageId`. A failure — a non-adjacent target, unavailable parent, unknown child, descriptor-less child that cannot be resumed, or admission rejected — is an errored result whose message states the message was not delivered.
 
 #### Token effect
 
-One short acknowledgement per call; the child's response never returns through this call. A separately granted `report` may append selected content to parent history.
+One short acknowledgement per call; the target's response never returns through this call. A child uses the same tool with its initial task's parent id to append selected content to parent history.
 
 #### KV Cache effect
 
@@ -172,8 +167,8 @@ Append-only; each result follows the reusable request prefix.
 
 These limits define what the control tools cannot observe or steer; they are current package constraints.
 
-- **A queued message has no independent result** — acceptance returns only its inbox `messageId`; the child's work lands in the durable child Session and is never collected through this tool. A child granted `report` may send selected content back separately, but that message is not this call's result.
-- **Send and steer are intentionally distinct** — `send_message` always opens a later FIFO turn; only `steer_agent` interrupts and replaces current work.
+- **A delivered message has no independent result** — acceptance returns only its inbox `messageId`; later target work lands in that target's durable Session and is never collected through this tool. A reply is another explicitly addressed `send_message`, not this call's result.
+- **Only supported adjacent Agents can communicate** — every sender may target a direct continuable child, only a sender with a resident continuable Activation may target its direct parent, and that parent must remain live; siblings and deeper descendants are not message targets, and only direct-child delivery supports cold activation.
 - **Listing is a snapshot, not a delivery promise** — it may race publication, disposal, or a later message, and another process may activate a child this process reports as `ready`; cross-process accuracy requires a shared lease. `interrupt_agent` performs the authoritative live-lineage check itself, so discovery staleness cannot grant authority.
 - **No pagination or deletion** — the complete stably ordered set is returned, and persisted children remain listed for as long as their sessions remain in persistence; a service-level bound or delete operation is a later product decision.
 

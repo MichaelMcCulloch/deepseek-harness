@@ -56,7 +56,6 @@ Every package lives in exactly one group; new packages join existing groups, and
 | [`attachment/`](attachment/README.md) | Durable attachment identity, validation, local content-addressed storage |
 | [`spill/`](spill/README.md) | Spill capability family: storage seam, local impl, tool-result spill policy |
 | [`todo/`](todo/README.md) | The model-facing `todo_write` tool |
-| [`dag/`](dag/README.md) | Durable dependency-graph orchestration, local Git execution, and model tools |
 | [`plan/`](plan/README.md) | Plan collaboration state with a direct entry command and reviewed exit |
 | [`preset/`](preset/README.md) | Per-session agent composition from preset `cordis.yml` files |
 | [`guard/`](guard/README.md) | Loop-hygiene guards: advisory repeat-call reminders + the `tools/execute` deadline enforcer |
@@ -75,7 +74,6 @@ Every package lives in exactly one group; new packages join existing groups, and
 | [`boot/`](boot/README.md) | Shared app-bin boot glue |
 | [`host/`](host/README.md) | Web-GUI host half: API gateway + HTTP route server |
 | [`client/`](client/README.md) | Web-GUI browser half: shell, wire, object services, slots, `ui-*` plugins |
-| [`examples/`](examples/README.md) | Reusable composition bundles for tests and custom deployments |
 | [`test-support/`](test-support/README.md) | Support infrastructure (testkits, invariants, replay, Loader smokes) |
 | [`runtime-diagnostics/`](runtime-diagnostics/README.md) | Runtime diagnostics: package-owned invariant checks and reports |
 | [`util/`](util/README.md) | Low-level zero-dependency utilities shared across groups (`Branded<B>`, home/path helpers, timeout, retention) |
@@ -85,7 +83,7 @@ Every package lives in exactly one group; new packages join existing groups, and
 <a id="release-expectations"></a>
 ## Release expectations
 
-Most groups are product — stable API. The exceptions: `e2b/` is a POC, `experimental/` is unreleased, and `examples/`, `test-support/`, `runtime-diagnostics/`, and `util/` are support with lower compatibility expectations.
+Most groups are product — stable API. The exceptions: `e2b/` is a POC, `experimental/` is unreleased, and `test-support/`, `runtime-diagnostics/`, and `util/` are support with lower compatibility expectations.
 
 -----
 
@@ -94,7 +92,7 @@ Most groups are product — stable API. The exceptions: `e2b/` is a POC, `experi
 
 The dependency graph is generated: [docs/module-graph.md](../docs/module-graph.md) (`pnpm run gen-module-graph`, freshness-gated in CI).
 
-**Extension plugins depend on Service Definitions, never concrete providers.** `dsh-agent-loop` is swappable; UI, hook, and tool plugins use `dsh-agent`. Composition bundles, including `dsh-agent-spine-demo`, may depend on spine plugins. Capabilities separate Service Definition / Service Provider / Consumer roles when they evolve independently; see [capability seams](../.agents/notes/implemented/architecture/2026-06-13-capability-seams.md).
+**Extension plugins depend on Service Definitions, never concrete providers.** `dsh-agent-loop` is swappable; UI, hook, and tool plugins use `dsh-agent`. Composition bundles may depend on spine plugins. Capabilities separate Service Definition / Service Provider / Consumer roles when they evolve independently; see [capability seams](../.agents/notes/implemented/architecture/2026-06-13-capability-seams.md).
 
 -----
 
