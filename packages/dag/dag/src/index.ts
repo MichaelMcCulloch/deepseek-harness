@@ -1204,6 +1204,7 @@ export class DagService extends Service implements SubagentOwnerController {
       throw new DagStateError('child has no durable DAG owner metadata', 'dag-child-owner-missing')
     }
     const metadata = ownerMetadata(descriptor.data.owner)
+    // proxy-exempt: `dispatcher` names the Agent that dispatches DAG nodes, not a fetch transport option.
     return { dispatcher: this.liveDispatcher(metadata.dispatcherSessionId), metadata }
   }
 
