@@ -376,7 +376,7 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
   const staged = new WeakMap<SessionEvent, { readonly session: Session; readonly state: DagState | null }>()
   const seed = (session: Session): DagState | null => {
     let state: DagState | null = null
-    for (const event of session.events) state = applyEvent(state, event, fail)
+    for (const event of session.snapshotEvents()) state = applyEvent(state, event, fail)
     states.set(session, state)
     return state
   }

@@ -15,7 +15,9 @@ const run = (cwd: string, ...args: string[]): string => execFileSync('git', args
   stdio: ['ignore', 'pipe', 'pipe'],
 }).trim()
 
-describe('local DAG Git effects', () => {
+// Local Git runs through ctx.subprocess; each spawned command costs a full
+// process-scope launch, so the suite needs headroom over the default timeout.
+describe('local DAG Git effects', { timeout: 60_000 }, () => {
   let temporary = ''
   let root = ''
   let home = ''

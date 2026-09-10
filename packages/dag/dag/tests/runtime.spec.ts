@@ -76,7 +76,7 @@ function fakeAgent(
 ): Agent {
   return {
     inbox: { nextTurn, nextStep },
-    session: { events },
+    session: { snapshotEvents: () => events },
   } as unknown as Agent
 }
 

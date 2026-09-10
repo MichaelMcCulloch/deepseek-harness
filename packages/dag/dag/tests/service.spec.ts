@@ -11,7 +11,6 @@ import { LlmAdapter, MessageId, freezeMessage } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SubagentRuntime, { SubagentError } from '@deepseek-ai/dsh-subagent'
 import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
@@ -85,13 +84,12 @@ async function setup(adapter: LlmAdapter): Promise<TestHarness> {
   await ctx.plugin(JsonlSessionPersistence, { root: sessions })
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(TestSessionQuery)
-  await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(SubagentRuntime)
   await ctx.plugin(SubagentSpawn, { providerName: 'spawn' })
   await ctx.plugin(LocalSubprocessRuntime)
   const dagFiber = await ctx.plugin(DagService, { dshHome: home, subagentProvider: 'spawn' })
   ctx.llm.registerAdapter(['mock'], adapter)
-  const dispatcher = ctx.agentLoop.create(
+  const dispatcher = await ctx.agentLoop.create(
     SessionId('dag-dispatcher'),
     { provider: 'mock', model: 'mock' },
     { cwd: root },
@@ -108,7 +106,6 @@ async function resumeHarness(temporary: string, adapter: LlmAdapter): Promise<Te
   await ctx.plugin(JsonlSessionPersistence, { root: join(temporary, 'sessions') })
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(TestSessionQuery)
-  await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(SubagentRuntime)
   await ctx.plugin(SubagentSpawn, { providerName: 'spawn' })
   await ctx.plugin(LocalSubprocessRuntime)
@@ -180,6 +177,16 @@ function appendUndeliveredFailure(harness: TestHarness, prefix: string): DagNoti
   return notice
 }
 
+/**
+ * Drain the post-commit flush and notice-delivery pass a write scheduled, so a
+ * test that injects a notice itself does not race that pass into a second copy.
+ */
+async function settleServiceDelivery(harness: TestHarness): Promise<void> {
+  await harness.ctx.sessions.flush(harness.dispatcher.session)
+  await Promise.resolve()
+  await Promise.allSettled([...serviceField<Set<Promise<void>>>(harness.ctx.dag, 'flushTasks')])
+}
+
 function stateWhen(ctx: Context, dispatcher: Agent, predicate: (state: DagState) => boolean): Promise<DagState> {
   const current = ctx.dag.state(dispatcher)
   if (current !== null && predicate(current)) return Promise.resolve(current)
@@ -203,10 +210,27 @@ function childCreated(ctx: Context, dispatcher: Agent): Promise<Agent> {
 }
 
 function turnStarted(ctx: Context, agent: Agent, turn: number): Promise<void> {
-  if (agent.session.events.some(event => event.type === 'turn/start' && event.data.turn === turn)) return Promise.resolve()
+  if (agent.session.snapshotEvents().some(event => event.type === 'turn/start' && event.data.turn === turn)) return Promise.resolve()
   return new Promise<void>((resolve) => {
     const dispose = ctx.on('session/event', (session, event) => {
       if (session !== agent.session || event.type !== 'turn/start' || event.data.turn !== turn) return
+      void dispose()
+      resolve()
+    }, { global: true })
+  })
+}
+
+/**
+ * Wait until one admitted child prompt is a durable user message, which is when
+ * the child's active turn can report completion or a block.
+ */
+function turnPromptDelivered(ctx: Context, agent: Agent, messageId: MessageId): Promise<void> {
+  const logged = (): boolean => agent.session.snapshotEvents()
+    .some(event => event.type === 'user/message' && event.data.id === messageId)
+  if (logged()) return Promise.resolve()
+  return new Promise<void>((resolve) => {
+    const dispose = ctx.on('session/event', (session, event) => {
+      if (session !== agent.session || event.type !== 'user/message' || event.data.id !== messageId) return
       void dispose()
       resolve()
     }, { global: true })
@@ -320,7 +344,9 @@ function appendOwnerInProgress(harness: TestHarness, owner: ReturnType<typeof ap
   return started
 }
 
-describe('native DAG service', () => {
+// Local Git runs through ctx.subprocess; each spawned command costs a full
+// process-scope launch, so the suite needs headroom over the default timeout.
+describe('native DAG service', { timeout: 60_000 }, () => {
   it('reports an empty board and rejects missing nodes and stale agent objects', async () => {
     const { ctx, dispatcher } = await setup(new GatedAdapter([]))
     expect(ctx.dag.status(dispatcher)).toBeNull()
@@ -377,7 +403,7 @@ describe('native DAG service', () => {
 
     expect(written.revision).toBe(1)
     expect(ctx.dag.state(dispatcher)?.revision).toBe(1)
-    expect(dispatcher.session.events.filter(event => event.type === 'dag/state')).toHaveLength(1)
+    expect(dispatcher.session.snapshotEvents().filter(event => event.type === 'dag/state')).toHaveLength(1)
     await Promise.resolve()
     expect(commits).toEqual([1])
     expect(() => ctx.dag.write(dispatcher, { nodes: [node()], if_revision: 0 }))
@@ -438,7 +464,7 @@ describe('native DAG service', () => {
     if (!(failure instanceof DagStateError)) throw new Error('nested append did not return a DAG state error')
     expect(failure.code).toBe('dag-revision-conflict')
     expect(failure.message).toContain('current revision is 1')
-    expect(dispatcher.session.events.filter(event => event.type === 'dag/state')).toHaveLength(1)
+    expect(dispatcher.session.snapshotEvents().filter(event => event.type === 'dag/state')).toHaveLength(1)
   })
 
   it('permits one cancellable waiter for each dispatcher', async () => {
@@ -487,7 +513,7 @@ describe('native DAG service', () => {
     const flush = ctx.sessions.flush.bind(ctx.sessions)
     let released = false
     vi.spyOn(ctx.sessions, 'flush').mockImplementation(async (session) => {
-      const state = [...dispatcher.session.events].reverse().find(event => event.type === 'dag/state')?.data.state
+      const state = [...dispatcher.session.snapshotEvents()].reverse().find(event => event.type === 'dag/state')?.data.state
       if (!released && state?.nodes[0]?.commands.some(command => command.state === 'running')) {
         entered.resolve(undefined)
         await release.promise
@@ -497,7 +523,7 @@ describe('native DAG service', () => {
     ctx.dag.write(dispatcher, { nodes: [node()] })
     ctx.dag.dispatch(dispatcher, [DagNodeId('a')])
     await entered.promise
-    const before = [...dispatcher.session.events].reverse().find(event => event.type === 'dag/state')?.data.state
+    const before = [...dispatcher.session.snapshotEvents()].reverse().find(event => event.type === 'dag/state')?.data.state
     if (before === undefined) throw new Error('test DAG state is missing')
 
     const disposed = ctx.fiber.dispose()
@@ -505,7 +531,7 @@ describe('native DAG service', () => {
     released = true
     release.resolve(undefined)
     await disposed
-    const after = [...dispatcher.session.events].reverse().find(event => event.type === 'dag/state')?.data.state
+    const after = [...dispatcher.session.snapshotEvents()].reverse().find(event => event.type === 'dag/state')?.data.state
 
     expect(after).toEqual(before)
     expect(after?.nodes[0]?.commands[0]?.state).toBe('running')
@@ -619,6 +645,9 @@ describe('native DAG service', () => {
       topology: [{ id: 'a', deps: [], status: 'in_progress' }],
       own: { id: 'a', status: 'in_progress' },
     })
+    const admitted = active.nodes[0]?.commands.at(-1)
+    if (admitted === undefined) throw new Error('test node has no admitted command')
+    await turnPromptDelivered(ctx, worker, MessageId(`${admitted.id}-message`))
     expect(() => ctx.dag.completeFrom(worker, ' ')).toThrow(/completion summary must be non-empty/)
     expect(() => ctx.dag.blockFrom(worker, ' ')).toThrow(/block reason must be non-empty/)
     const worktree = active.nodes[0]?.worktree
@@ -635,9 +664,9 @@ describe('native DAG service', () => {
     expect(final.nodes[0]?.completedCommit).toBe(git(worktree, 'rev-parse', 'HEAD'))
     expect(final.nodes[0]?.completedCommit).not.toBe(git(root, 'rev-parse', 'HEAD'))
     expect(notice.notices.map(row => row.kind)).toContain('wave-settled')
-    expect(dispatcher.session.events.some(event => event.type === 'agent/inbox/spliced'
+    expect(dispatcher.session.snapshotEvents().some(event => event.type === 'agent/inbox/spliced'
       && event.data.inserted.some(message => message.source.kind === 'dag-notice'))).toBe(true)
-    expect(dispatcher.session.events.some(event => event.type === 'user/message'
+    expect(dispatcher.session.snapshotEvents().some(event => event.type === 'user/message'
       && event.data.source.kind === 'subagent-settled')).toBe(false)
 
     release.resolve(undefined)
@@ -657,7 +686,7 @@ describe('native DAG service', () => {
     expect(state.nodes[0]?.commands.every(command => command.state === 'settled')).toBe(true)
     expect(state.activeCommandIds).toEqual([])
     expect(state.notices.some(row => row.kind === 'node-failed')).toBe(true)
-    expect(dispatcher.session.events.some(event => event.type === 'user/message'
+    expect(dispatcher.session.snapshotEvents().some(event => event.type === 'user/message'
       && event.data.source.kind === 'subagent-settled')).toBe(false)
   })
 
@@ -858,7 +887,7 @@ describe('native DAG service', () => {
         'dispatcher session has no cwd',
         {
           id: harness.dispatcher.id,
-          session: { header: {}, events: harness.dispatcher.session.events },
+          session: { header: {}, snapshotEvents: () => harness.dispatcher.session.snapshotEvents() },
         } as unknown as Agent,
       )
     } finally {
@@ -917,7 +946,7 @@ describe('native DAG service', () => {
       id: harness.dispatcher.id,
       session: {
         header: { ...harness.dispatcher.session.header, cwd: undefined },
-        events: harness.dispatcher.session.events,
+        snapshotEvents: () => harness.dispatcher.session.snapshotEvents(),
       },
     } as unknown as Agent
     Reflect.set(service, 'requireState', () => owner.state)
@@ -1057,7 +1086,7 @@ describe('native DAG service', () => {
     expect(missingFollowup).toHaveBeenCalledOnce()
 
     const existing = await preparedDelivery('existing')
-    existing.harness.ctx.agentLoop.create(
+    await existing.harness.ctx.agentLoop.create(
       existing.node.childSessionId!,
       { provider: 'mock', model: 'mock' },
       { cwd: existing.node.worktree! },
@@ -1068,7 +1097,7 @@ describe('native DAG service', () => {
     expect(existingFollowup).toHaveBeenCalledOnce()
 
     const recorded = await preparedDelivery('recorded')
-    const recordedChild = recorded.harness.ctx.agentLoop.create(
+    const recordedChild = await recorded.harness.ctx.agentLoop.create(
       recorded.node.childSessionId!,
       { provider: 'mock', model: 'mock' },
       { cwd: recorded.node.worktree! },
@@ -1242,7 +1271,7 @@ describe('native DAG service', () => {
       redirect,
     })).toThrow(expect.objectContaining({ code: 'dag-dispatcher-not-live' }))
 
-    const unrelated = harness.ctx.agentLoop.create(
+    const unrelated = await harness.ctx.agentLoop.create(
       SessionId('unowned-child'),
       { provider: 'mock', model: 'mock' },
       { cwd: harness.root },
@@ -1554,7 +1583,7 @@ describe('native DAG service', () => {
     const command = owner.node.commands[0]!
     const assertTurn = serviceMethod<[DagNodeSnapshot, Agent], unknown>(harness.ctx.dag, 'assertCurrentChildTurn')
     const child = (events: readonly unknown[]): Agent => ({
-      session: { events },
+      session: { snapshotEvents: () => events },
     }) as unknown as Agent
     const start = { type: 'turn/start', data: { turn: 1 } }
     const end = { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } }
@@ -1604,7 +1633,7 @@ describe('native DAG service', () => {
     const worker = await child
     await running
     await ctx.subagents.followup(dispatcher, worker.id, [{ type: 'text', text: 'Queued generic work.' }], {
-      source: { kind: 'coordinator', form: 'relay', senderSessionId: dispatcher.id },
+      source: { kind: 'agent-message', form: 'relay', senderSessionId: dispatcher.id },
       signal: new AbortController().signal,
     })
     const failed = stateWhen(ctx, dispatcher, state => state.nodes[0]?.status === 'failed')
@@ -1767,7 +1796,7 @@ describe('native DAG service', () => {
       worker.id,
       [{ type: 'text', text: 'Owner-routed replacement.' }],
       {
-        source: { kind: 'coordinator', form: 'relay', senderSessionId: dispatcher.id },
+        source: { kind: 'agent-message', form: 'relay', senderSessionId: dispatcher.id },
         messageId: MessageId('external-owner-steer'),
         cause: { kind: 'parent' },
         signal: new AbortController().signal,
@@ -1785,7 +1814,7 @@ describe('native DAG service', () => {
     expect(steerCommands).toHaveLength(1)
     expect(steerReceipts).toHaveLength(1)
     expect(acceptedId).toBe(MessageId(`${steerCommands[0]?.id}-message`))
-    expect(worker.session.events.some(event => event.type === 'user/message' && event.data.id === acceptedId)).toBe(true)
+    expect(worker.session.snapshotEvents().some(event => event.type === 'user/message' && event.data.id === acceptedId)).toBe(true)
 
     ctx.dag.stop(dispatcher, DagNodeId('a'), 'End the owner redirect test.')
     releaseReplacement.resolve(undefined)
@@ -2005,7 +2034,7 @@ describe('native DAG service', () => {
       },
     }).state
     harness.dispatcher.session.append('dag/state', { state: dispatched })
-    harness.ctx.agentLoop.create(
+    await harness.ctx.agentLoop.create(
       SessionId('reload-empty-dispatcher'),
       { provider: 'mock', model: 'mock' },
       { cwd: harness.root },
@@ -2031,8 +2060,7 @@ describe('native DAG service', () => {
   it('does not inject a duplicate notice after restart when the claimed message is durable', async () => {
     const first = await setup(new GatedAdapter([{ chunks: textResponse('notice claimed') }]))
     first.ctx.dag.write(first.dispatcher, { nodes: [node()] })
-    await first.ctx.sessions.flush(first.dispatcher.session)
-    await Promise.resolve()
+    await settleServiceDelivery(first)
     const notice = appendUndeliveredFailure(first, 'notice')
     first.dispatcher.inject(freezeMessage({
       id: MessageId(`dag-notice-${notice.id}`),
@@ -2054,7 +2082,7 @@ describe('native DAG service', () => {
     const second = await resumeHarness(first.temporary, new GatedAdapter([]))
     const delivered = await stateWhen(second.ctx, second.dispatcher,
       state => state.notices.some(row => row.id === notice.id && row.delivered))
-    const inserted = second.dispatcher.session.events.flatMap(event => event.type === 'agent/inbox/spliced'
+    const inserted = second.dispatcher.session.snapshotEvents().flatMap(event => event.type === 'agent/inbox/spliced'
       ? event.data.inserted.filter(message => message.source.kind === 'dag-notice' && message.source.noticeId === notice.id)
       : [])
 
@@ -2079,7 +2107,7 @@ describe('native DAG service', () => {
 
     harness.ctx.dag.write(harness.dispatcher, { nodes: [{ ...node(), status: 'failed' }] })
     await delivered
-    const inserted = harness.dispatcher.session.events.flatMap(event => event.type === 'agent/inbox/spliced'
+    const inserted = harness.dispatcher.session.snapshotEvents().flatMap(event => event.type === 'agent/inbox/spliced'
       ? event.data.inserted.filter(message => message.source.kind === 'dag-notice' && message.source.noticeId === notice.id)
       : [])
 
@@ -2114,8 +2142,7 @@ describe('native DAG service', () => {
   it('reinjects a notice after restart when its earlier inbox entry was cancelled', async () => {
     const first = await setup(new GatedAdapter([]))
     first.ctx.dag.write(first.dispatcher, { nodes: [node()] })
-    await first.ctx.sessions.flush(first.dispatcher.session)
-    await Promise.resolve()
+    await settleServiceDelivery(first)
     const notice = appendUndeliveredFailure(first, 'cancelled-notice')
     const messageId = MessageId(`dag-notice-${notice.id}`)
     first.dispatcher.inject(freezeMessage({
@@ -2131,7 +2158,7 @@ describe('native DAG service', () => {
 
     const second = await resumeHarness(first.temporary, new GatedAdapter([]))
     await stateWhen(second.ctx, second.dispatcher, state => state.notices.some(row => row.id === notice.id && row.delivered))
-    const inserted = second.dispatcher.session.events.flatMap(event => event.type === 'agent/inbox/spliced'
+    const inserted = second.dispatcher.session.snapshotEvents().flatMap(event => event.type === 'agent/inbox/spliced'
       ? event.data.inserted.filter(message => message.source.kind === 'dag-notice' && message.source.noticeId === notice.id)
       : [])
 

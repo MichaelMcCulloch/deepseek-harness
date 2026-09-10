@@ -11,6 +11,7 @@ import { MessageId, freezeMessage } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session, SessionId as SessionIdType } from '@deepseek-ai/dsh-session'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { SubagentError } from '@deepseek-ai/dsh-subagent'
 import type {
   SubagentOwnerBinding,
@@ -435,7 +436,7 @@ export class DagService extends Service implements SubagentOwnerController {
    * @param artifacts - Optional JSON result records.
    * @returns Accepted command receipt.
    */
-  completeFrom(child: Agent, summary: string, artifacts: readonly import('@deepseek-ai/dsh-session').JsonValue[] = []): DagCommandAccepted {
+  completeFrom(child: Agent, summary: string, artifacts: readonly JsonValue[] = []): DagCommandAccepted {
     const { dispatcher, metadata } = this.dispatcherFor(child)
     const node = this.assertBinding(dispatcher, metadata, child.id)
     this.assertCurrentChildTurn(node, child)
@@ -785,7 +786,7 @@ export class DagService extends Service implements SubagentOwnerController {
       if (nodeAtStart.childSessionId === undefined) throw new Error('steer requires an existing child')
       if (command.message === undefined) throw new Error('steer requires a replacement message')
       await this.ctx.subagents.redirect(dispatcher, nodeAtStart.childSessionId, [{ type: 'text', text: command.message }], {
-        source: { kind: 'coordinator', form: 'relay', senderSessionId: dispatcher.id },
+        source: { kind: 'agent-message', form: 'relay', senderSessionId: dispatcher.id },
         messageId: MessageId(`${command.id}-message`),
         cause: { kind: 'parent' },
         signal,
@@ -980,7 +981,7 @@ export class DagService extends Service implements SubagentOwnerController {
       version: 1,
       dispatcherSessionId: dispatcher.id,
       nodeId: node.id,
-    } satisfies Record<string, import('@deepseek-ai/dsh-session').JsonValue>
+    } satisfies Record<string, JsonValue>
     const owner: SubagentOwnerBinding = { controller: 'dag', metadata }
     const messageId = MessageId(`${command.id}-message`)
     const brief = this.nodePrompt(node, worktree, dependencyCommits, conflicts)
@@ -988,14 +989,14 @@ export class DagService extends Service implements SubagentOwnerController {
     const child = this.ctx.agents.get(childSessionId)
     if (child !== undefined && !messageRecorded(child, messageId)) {
       await this.ctx.subagents.followup(dispatcher, childSessionId, [{ type: 'text', text: prompt }], {
-        source: { kind: 'coordinator', form: 'relay', senderSessionId: dispatcher.id },
+        source: { kind: 'agent-message', form: 'relay', senderSessionId: dispatcher.id },
         messageId,
         signal,
       })
     } else if (child === undefined) {
       try {
         await this.ctx.subagents.followup(dispatcher, childSessionId, [{ type: 'text', text: prompt }], {
-          source: { kind: 'coordinator', form: 'relay', senderSessionId: dispatcher.id },
+          source: { kind: 'agent-message', form: 'relay', senderSessionId: dispatcher.id },
           messageId,
           signal,
         })
@@ -1198,7 +1199,7 @@ export class DagService extends Service implements SubagentOwnerController {
   /** Resolve the dispatcher and validate child metadata. */
   private dispatcherFor(child: Agent): { readonly dispatcher: Agent; readonly metadata: DagOwnerMetadata } {
     if (this.ctx.agents.get(child.id) !== child) throw new DagStateError('DAG child is not the exact live Agent', 'dag-child-not-live')
-    const descriptor = [...child.session.events].reverse().find(event => event.type === 'subagent/descriptor')
+    const descriptor = [...child.session.snapshotEvents()].reverse().find(event => event.type === 'subagent/descriptor')
     if (descriptor?.type !== 'subagent/descriptor' || descriptor.data.mode !== 'continuable' || descriptor.data.owner?.controller !== 'dag') {
       throw new DagStateError('child has no durable DAG owner metadata', 'dag-child-owner-missing')
     }
@@ -1227,7 +1228,7 @@ export class DagService extends Service implements SubagentOwnerController {
     if (current === undefined) {
       throw new DagStateError('DAG child turn has no current command binding', 'dag-stale-child-turn')
     }
-    const events = child.session.events
+    const events = child.session.snapshotEvents()
     const boundaryIndex = events.findLastIndex(event => event.type === 'turn/start' || event.type === 'turn/end')
     const boundary = events[boundaryIndex]
     if (boundary?.type !== 'turn/start') {
@@ -1278,8 +1279,9 @@ export class DagService extends Service implements SubagentOwnerController {
  * @returns Latest complete state, or null before the first declaration.
  */
 export function latestState(session: Session): DagState | null {
-  for (let index = session.events.length - 1; index >= 0; index--) {
-    const event = session.events[index]
+  const events = session.snapshotEvents()
+  for (let index = events.length - 1; index >= 0; index--) {
+    const event = events[index]
     if (event?.type === 'dag/state') return event.data.state
   }
   return null

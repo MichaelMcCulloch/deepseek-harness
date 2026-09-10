@@ -177,7 +177,7 @@ export function ownerMetadata(binding: SubagentOwnerBinding): DagOwnerMetadata {
 export function messageRecorded(agent: Agent, messageId: MessageId): boolean {
   return agent.inbox.nextTurn.some(message => message.id === messageId)
     || agent.inbox.nextStep.some(message => message.id === messageId)
-    || agent.session.events.some(event => event.type === 'user/message' && event.data.id === messageId)
+    || agent.session.snapshotEvents().some(event => event.type === 'user/message' && event.data.id === messageId)
 }
 
 /**
@@ -189,7 +189,7 @@ export function messageRecorded(agent: Agent, messageId: MessageId): boolean {
 export function noticeRecorded(agent: Agent, noticeId: DagNoticeId): boolean {
   const pending = [...agent.inbox.nextTurn, ...agent.inbox.nextStep]
   if (pending.some(message => message.source.kind === 'dag-notice' && message.source.noticeId === noticeId)) return true
-  return agent.session.events.some(event => event.type === 'user/message'
+  return agent.session.snapshotEvents().some(event => event.type === 'user/message'
     && event.data.source.kind === 'dag-notice'
     && event.data.source.noticeId === noticeId)
 }

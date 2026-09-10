@@ -1,7 +1,8 @@
 /** Durable and wire-safe types for native DAG orchestration. @module @deepseek-ai/dsh-dag/types */
 
 import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { JsonValue, SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 
 /** Identifies a declared DAG node. */
 export type DagNodeId = Branded<'DagNodeId'>

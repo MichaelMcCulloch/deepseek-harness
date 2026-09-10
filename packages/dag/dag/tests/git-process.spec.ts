@@ -68,7 +68,6 @@ class StubSubprocess extends SubprocessRuntime {
     const stdout = reader(result.stdout)
     const stderr = reader(result.stderr)
     return {
-      pid: 1,
       stdin: undefined,
       stdout: undefined,
       stderr: undefined,

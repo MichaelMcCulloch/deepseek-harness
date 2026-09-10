@@ -77,7 +77,7 @@ export type DagReducerCommand =
   | { readonly type: 'reset'; readonly nodeId: DagNodeId; readonly target: string }
   | { readonly type: 'block'; readonly nodeId: DagNodeId; readonly reason: string }
   | { readonly type: 'child-ended'; readonly nodeId: DagNodeId; readonly commandId: CommandId; readonly generation: number; readonly bindingGeneration: number; readonly operationId: OperationId; readonly reason: string }
-  | { readonly type: 'complete'; readonly nodeId: DagNodeId; readonly summary: string; readonly artifacts: readonly import('@deepseek-ai/dsh-session').JsonValue[] }
+  | { readonly type: 'complete'; readonly nodeId: DagNodeId; readonly summary: string; readonly artifacts: readonly import('@deepseek-ai/dsh-util-values').JsonValue[] }
   | { readonly type: 'command-running'; readonly nodeId: DagNodeId; readonly commandId: CommandId; readonly generation: number; readonly bindingGeneration: number; readonly operationId: OperationId }
   | { readonly type: 'git-prepared'; readonly nodeId: DagNodeId; readonly commandId: CommandId; readonly generation: number; readonly bindingGeneration: number; readonly operationId: OperationId; readonly evidence: DagStartEvidence }
   | { readonly type: 'start-succeeded'; readonly nodeId: DagNodeId; readonly commandId: CommandId; readonly generation: number; readonly bindingGeneration: number; readonly operationId: OperationId; readonly evidence: DagStartEvidence }
