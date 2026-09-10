@@ -15,7 +15,7 @@ import {
 } from './scaffold.ts'
 import { newEnglishPage, saveFailureShot } from './support.ts'
 
-const FIXTURE = fileURLToPath(new URL('../../../snapshots/session/dag-tool-transcript/session.jsonl', import.meta.url))
+const FIXTURE = fileURLToPath(new URL('../../../snapshots/session/dag-tool-transcript/session.v3.jsonl', import.meta.url))
 const SNAPSHOT_DIR = fileURLToPath(new URL('./expected/dag-board', import.meta.url))
 const UI_EXPECTED = fileURLToPath(new URL('./expected/dag-board/ui.expected.md', import.meta.url))
 const MODE = webSnapshotMode()

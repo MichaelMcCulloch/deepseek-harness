@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Use this package to browse every subagent conversation beneath a parent session, open any descendant, and see whether it is running together with its token use and active-turn duration. Completed one-shot conversations open as read-only execution records. Continuable conversations accept follow-up prompts in submission order while they run and provide Stop independently. The ordinary session sidebar omits subagent conversations, so the parent header catalog is their navigation entry point. The separate `@` source inserts a running child's label into a user message without resolving it into a continuation address.
+Use this package to browse every subagent conversation beneath a parent session, open any descendant, and see whether it is running together with its token use and active-turn duration. Completed one-shot conversations open as read-only execution records. Continuable conversations keep the ordinary composer while they run — follow-ups queue a later turn or steer the running one — and provide Stop independently. The ordinary session sidebar omits subagent conversations, so the parent header catalog is their navigation entry point. The separate `@` source inserts a running child's label into a user message without resolving it into a continuation address.
 
 ## Table of Contents
 
@@ -33,7 +33,7 @@ Rows display mode plus `running`/`inactive` activity and an optional log-backed 
 
 ### Continuing a conversation
 
-A continuable child with a live parent keeps the ordinary input chrome: typing and Send stay available while the child runs because every follow-up joins the child's FIFO inbox, and an independent Stop routes through `subagents/interruptByParent`. A continuable child whose exact parent is unavailable and which is not running elects a read-only composer explaining the recovery path; while such a child still runs, the selector yields to the ordinary composer with input and Send disabled but its independent Stop usable.
+A continuable child with a live parent keeps the ordinary input chrome: typing and Send stay available while the child runs. The busy-Enter setting chooses queue or steer delivery for the same Send action, and the Ctrl/Cmd-Enter chord selects the other mode. Queue submits the draft as a later FIFO turn. Steer submits the draft through the same `session/submit` call with mode `steer`, and the child claims it at its running turn's next step boundary. An independent Stop routes through `subagents/interruptByParent`. A continuable child whose exact parent is unavailable and which is not running elects a read-only composer explaining the recovery path; while such a child still runs, the selector yields to the ordinary composer with input and Send disabled but its independent Stop usable.
 
 ### The `@` reference source
 
@@ -59,7 +59,7 @@ Token totals sum the four disjoint `tokenUsage` buckets. Duration sums completed
 
 ### Composer election
 
-One-shot children always elect a read-only composer. A continuable child elects one only when its exact parent is unavailable and the child is not running; otherwise the ordinary composer's Session routes prompts through `subagents/prompt`. This package never receives host context or calls a model-facing tool.
+One-shot children always elect a read-only composer. A continuable child elects one only when its exact parent is unavailable and the child is not running; otherwise the ordinary composer's Session submits both deliveries through `session/submit`, with the mode the composer policy selected. This package never receives host context or calls a model-facing tool.
 
 </details>
 
@@ -85,7 +85,7 @@ These pages cover the conversation surface, the host seam, and the design notes.
 
 #### What the model sees
 
-Only the `@` reference source affects model input: a picked candidate reaches the ordinary user message as literal `@label`, without a dedicated block or host-side resolution. Catalog browsing, child navigation, and persisted transcript viewing add no prompt section; accepted continuation content becomes a normal FIFO user message through the host subagent adapter.
+Only the `@` reference source affects model input: a picked candidate reaches the ordinary user message as literal `@label`, without a dedicated block or host-side resolution. Catalog browsing, child navigation, and persisted transcript viewing add no prompt section; accepted continuation content enters the child as an ordinary user message, queued as a later FIFO turn or claimed at the running turn's next step boundary.
 
 #### Token effect
 
@@ -102,7 +102,7 @@ Append-only. This package never edits earlier request tokens.
 
 These limits define what the catalog can show and what `@` references mean; they are current package constraints.
 
-- **The catalog has no durable outcome** — activity and timing do not distinguish completion, failure, or cancellation, and the UI exposes no Activation identity; stopping is limited to the composer's current-turn Stop for a running continuable child.
+- **The catalog has no durable outcome** — activity and timing do not distinguish completion, failure, or cancellation, and the UI exposes no Activation identity; stop and steer controls apply only to a running continuable child.
 - **`@` references remain display-title text** — duplicate or renamed labels are ambiguous, so they intentionally do not acquire continuation semantics.
 
 <a id="dev-note"></a>

@@ -62,7 +62,7 @@ DAG 子级看到 scoped `dag_status`、`dag_node_complete` 与 `dag_node_block`�
 |---|---|
 | [`src/index.ts`](src/index.ts) | 调度器 schema、执行、rendering、状态与子级工具 factory |
 | [`src/child.ts`](src/child.ts) | owner-scoped 子级 setup、限制与提示词文本 |
-| [`src/invariant.ts`](src/invariant.ts) | 包 invariant companion |
+| — | 不发布 runtime invariant companion；每个工具都是 DAG 服务上的 effect-scoped 注册，持久状态由 DAG 服务拥有并校验。 |
 
 </details>
 

@@ -13,7 +13,7 @@ export const inject = ['tools', 'dag', 'subagents', 'systemPrompt']
 /** Register one scoped tool and prompt contribution for each DAG-owned child. */
 export function apply(ctx: Context): void {
   const dag = ctx.dag
-  ctx.subagents.registerContinuableSetup((childCtx, owner) => {
+  ctx.effect(() => ctx.subagents.registerContinuableSetup((childCtx, owner) => {
     if (owner?.controller !== 'dag') return () => {}
     const disposers = [
       childCtx.tools.restrict({ deny: DISPATCHER_TOOLS }),
@@ -29,5 +29,5 @@ export function apply(ctx: Context): void {
     return () => {
       for (const dispose of disposers.reverse()) dispose()
     }
-  })
+  }), 'tool-dag: owner-bound child setup')
 }

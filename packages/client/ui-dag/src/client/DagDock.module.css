@@ -11,7 +11,7 @@
   );
   max-width: calc(var(--dsh-composer-card-max-width) - 4 * var(--dsh-composer-dock-inset));
   margin: 0 auto;
-  border: 1px solid var(--dsw-alias-border-l1);
+  border: 0.5px solid var(--dsw-alias-border-l1);
   border-radius: 12px;
   background: var(--dsw-specific-tip);
   color: var(--dsw-alias-label-primary);

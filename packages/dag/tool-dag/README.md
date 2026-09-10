@@ -62,7 +62,7 @@ The dispatcher plugin registers the public tools and one model prompt section. T
 |---|---|
 | [`src/index.ts`](src/index.ts) | Dispatcher schemas, execution, rendering, status, and child tool factories |
 | [`src/child.ts`](src/child.ts) | Owner-scoped child setup, restrictions, and prompt text |
-| [`src/invariant.ts`](src/invariant.ts) | Package invariant companion |
+| — | No runtime invariant companion is published; every tool is an effect-scoped registration over the DAG service, which owns and validates all durable state. |
 
 </details>
 

@@ -11,7 +11,6 @@
     { "path": "../ui-renderer" },
     { "path": "../ui-session" },
     { "path": "../ui-slots" },
-    { "path": "../../dag/dag" },
-    { "path": "../../runtime-diagnostics/invariants" }
+    { "path": "../../dag/dag" }
   ]
 }

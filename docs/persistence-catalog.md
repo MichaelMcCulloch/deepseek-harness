@@ -407,7 +407,7 @@ Source: [`packages/compaction/compaction/src/types.ts:34`](../packages/compactio
 'dag/state': { readonly state: DagState }
 ```
 
-Source: [`packages/dag/dag/src/types.ts:228`](../packages/dag/dag/src/types.ts)
+Source: [`packages/dag/dag/src/types.ts:229`](../packages/dag/dag/src/types.ts)
 
 ### `deliverables/*`
 
@@ -818,7 +818,7 @@ Source: [`packages/subagent/subagent/src/catalog.ts:40`](../packages/subagent/su
 'subagent/descriptor': SubagentDescriptorData
 ```
 
-Source: [`packages/subagent/subagent/src/descriptor.ts:38`](../packages/subagent/subagent/src/descriptor.ts)
+Source: [`packages/subagent/subagent/src/descriptor.ts:39`](../packages/subagent/subagent/src/descriptor.ts)
 
 <a id="subagentmodel-selection-policy--log-only"></a>
 

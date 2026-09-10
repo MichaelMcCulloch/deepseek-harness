@@ -44,6 +44,7 @@ dock 只读取 `useProjection('dag')`。绝对 worktree 路径不在此 wire vie
 | [`src/client/DagDock.tsx`](src/client/DagDock.tsx) | projection adapter 与只读面板组件 |
 | [`src/client/locales.ts`](src/client/locales.ts) | 类型化英文与简体中文 dictionary |
 | [`src/client/DagDock.module.css`](src/client/DagDock.module.css) | dock、计数与节点列表布局 |
+| — | 不发布 runtime invariant companion；本包渲染的每个 projection 状态值都由宿主 DAG 包拥有并校验。 |
 
 </details>
 

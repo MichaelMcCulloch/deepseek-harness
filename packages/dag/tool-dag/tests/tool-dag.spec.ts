@@ -266,7 +266,8 @@ describe('owner-bound child tools', () => {
     ctx.provide('subagents', subagents)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime).await()
-    await ctx.plugin(childTool).await()
+    const childFiberPlugin = ctx.plugin(childTool)
+    await childFiberPlugin.await()
     expect(setup).toBeDefined()
 
     const child = owner('child-a')
@@ -304,6 +305,9 @@ describe('owner-bound child tools', () => {
     expect(dag.calls.every(call => call.args[0] === child)).toBe(true)
     expect(dag.calls[2]?.args[2]).toEqual([])
     dispose?.()
+
+    await childFiberPlugin.dispose()
+    expect(setup).toBeUndefined()
   })
 
   it('has no dispatcher control tool in its scoped set', () => {

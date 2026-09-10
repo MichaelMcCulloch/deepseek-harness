@@ -44,6 +44,7 @@ The host export has no runtime state. The client export registers locale diction
 | [`src/client/DagDock.tsx`](src/client/DagDock.tsx) | Projection adapter and read-only board component |
 | [`src/client/locales.ts`](src/client/locales.ts) | Typed English and Simplified Chinese dictionaries |
 | [`src/client/DagDock.module.css`](src/client/DagDock.module.css) | Dock, count, and node-list layout |
+| — | No runtime invariant companion is published; the host DAG package owns and validates every projected state value this package renders. |
 
 </details>
 

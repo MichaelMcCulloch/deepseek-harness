@@ -409,7 +409,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'dag/state': { readonly state: DagState }
 ```
 
-来源：[`packages/dag/dag/src/types.ts:228`](../packages/dag/dag/src/types.ts)
+来源：[`packages/dag/dag/src/types.ts:229`](../packages/dag/dag/src/types.ts)
 
 ### `deliverables/*`
 
@@ -820,7 +820,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'subagent/descriptor': SubagentDescriptorData
 ```
 
-来源：[`packages/subagent/subagent/src/descriptor.ts:38`](../packages/subagent/subagent/src/descriptor.ts)
+来源：[`packages/subagent/subagent/src/descriptor.ts:39`](../packages/subagent/subagent/src/descriptor.ts)
 
 <a id="subagentmodel-selection-policy--log-only"></a>
 
