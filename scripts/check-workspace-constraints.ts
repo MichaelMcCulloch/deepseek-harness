@@ -214,6 +214,8 @@ export function expectedDshPackageFiles(manifest: PackageManifest): readonly str
     // Keyed on the artifact path, not the subpath name: a package's ./client is
     // a browser-safe source channel, not a bundle.
     ...exportDefault(manifest, './client') === './lib/client.js' ? ['lib/client.js'] : [],
+    // A child-only Loader plugin ships as a separate bundle beside its parent tool plugin.
+    ...exportDefault(manifest, './child') === './lib/child.js' ? ['lib/child.js'] : [],
     // runtime's shell-held loader subpath ships as its own bundle beside the client half.
     ...exportDefault(manifest, './loader') === './lib/loader.js' ? ['lib/loader.js'] : [],
     // A store subpath ships its own bundle (single-entry builds; no shared chunk).

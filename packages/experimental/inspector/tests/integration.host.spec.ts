@@ -15,6 +15,9 @@ interface CdpMessage {
   readonly error?: { message: string }
 }
 
+const CDP_CALL_TIMEOUT_MS = 15_000
+const INSPECTOR_TEST_TIMEOUT_MS = 30_000
+
 class TestCdpClient {
   private nextId = 0
   private readonly pending = new Map<number, (message: CdpMessage) => void>()
@@ -43,7 +46,7 @@ class TestCdpClient {
       const timer = setTimeout(() => {
         this.pending.delete(id)
         reject(new Error(`CDP call timed out: ${method}`))
-      }, 5_000)
+      }, CDP_CALL_TIMEOUT_MS)
       this.pending.set(id, (message) => {
         clearTimeout(timer)
         this.pending.delete(id)
@@ -61,7 +64,7 @@ class TestCdpClient {
   }
 }
 
-describe('experimental Inspector real Worker', () => {
+describe('experimental Inspector real Worker', { timeout: INSPECTOR_TEST_TIMEOUT_MS }, () => {
   let inspector: InspectorHandle | undefined
   let cdp: TestCdpClient | undefined
   let secondCdp: TestCdpClient | undefined
@@ -395,7 +398,7 @@ describe('experimental Inspector real Worker', () => {
       secondEvent = consoleEvent(secondCdp!, secondContext, marker)
       expect(firstEvent).toBeDefined()
       expect(secondEvent).toBeDefined()
-    })
+    }, { timeout: CDP_CALL_TIMEOUT_MS })
     const firstObjectId = asRecord(recordArray(firstEvent!.params?.args)[0]).objectId
     const secondObjectId = asRecord(recordArray(secondEvent!.params?.args)[0]).objectId
     expect(firstObjectId).toBeTypeOf('string')

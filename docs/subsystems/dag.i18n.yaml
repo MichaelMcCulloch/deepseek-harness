@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/subsystems/dag.md
-dag.md: a3b5f21a396713aeb8cfb97d5462dd2f5ca2cd27
-dag.zh.md: f5eb760d78bf1bd40f8d82b6e6c09409d6736157
+dag.md: 66c52996ae2cfcbc0e20a2e2711e2ce9a5d0df77
+dag.zh.md: 80606ab55bc0ccfe2c073ee3107c404dd872a3e4

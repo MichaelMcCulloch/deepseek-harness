@@ -520,6 +520,64 @@ async startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart>
 async sendMessage( sender: Agent, targetId: SessionId, content: ContentBlock[], options: SubagentSendMessageOptions, ): Promise<MessageId>
 
 /**
+ * Queue one durable parent-to-child follow-up as the child's next FIFO turn.
+ * A resident child finishes its current turn first; an absent child
+ * cold-resumes from persistence, and an unknown one rejects. Supplying
+ * `messageId` makes the delivery idempotent: a caller recovering from a
+ * restart re-uses the identity it already recorded and the child never runs
+ * the same message twice.
+ * @param parent - exact live direct parent authorizing delivery.
+ * @param childId - durable direct-child session id.
+ * @param content - model-visible prompt blocks.
+ * @param options - durable attribution, optional stable message id, and caller cancellation.
+ * @returns the accepted durable message id.
+ * @throws {SubagentError} `UNAUTHORIZED` when the parent does not own the live
+ *   child, `NOT_RESUMABLE` when the target has no persisted continuation.
+ */
+async followup( parent: Agent, childId: SessionId, content: ContentBlock[], options: SubagentDeliveryOptions, ): Promise<MessageId>
+
+/**
+ * Interrupt one continuable child's active work and place replacement content
+ * before its queued ordinary turns. An absent child cold-resumes and accepts
+ * the replacement as its next turn. Authorization and residency routing match
+ * follow-up delivery; an owner-bound child delegates the already-authorized
+ * state transition to its registered controller before the Agent operation runs.
+ * @param parent - exact live direct parent authorizing delivery.
+ * @param childId - durable direct-child session id.
+ * @param content - replacement user-role content.
+ * @param options - durable attribution, optional stable message id, cancellation, and cause.
+ * @returns the accepted replacement's inbox id.
+ * @throws {SubagentError} `UNAUTHORIZED` when the parent does not own the live
+ *   child, `NOT_RESUMABLE` when no persisted continuation exists, and
+ *   `OWNER_CONTROLLER_UNAVAILABLE` when the durable owner is not mounted.
+ */
+async redirect( parent: Agent, childId: SessionId, content: ContentBlock[], options: SubagentRedirectOptions, ): Promise<MessageId>
+
+/**
+ * Register one durable owner namespace. The returned disposer revokes new
+ * owner operations immediately; children already bound to that name keep
+ * their binding and fail loud until the same controller name is registered
+ * again.
+ * @param name - non-empty durable controller name.
+ * @param controller - owner hooks; redirect admission can be asynchronous.
+ * @returns the exact Cordis effect disposer.
+ * @throws {SubagentError} `INVALID_OWNER` for an empty name, `DUPLICATE_OWNER`
+ *   when that name is already registered.
+ */
+registerOwnerController(name: string, controller: SubagentOwnerController): () => void
+
+/**
+ * Register one deployment capability composed into every continuable child's
+ * unpublished creation context. The contribution receives the durable owner
+ * binding so an owner namespace can install child-scoped behavior without
+ * teaching this service which capabilities exist.
+ * @param contribution - synchronous child-scope installer.
+ * @returns an idempotent registration undo.
+ * @throws {SubagentError} after attempting every installation when a disposer fails.
+ */
+registerContinuableSetup(contribution: ContinuableSetupContribution): () => void
+
+/**
  * Interrupt one live continuable child's current turn under a human parent
  * address or an exact live ancestor Agent. Fire-and-return: the cancel
  * signal is issued before this returns, but the target may keep running
@@ -629,6 +687,19 @@ listDescendants(rootSessionId: SessionId, signal?: AbortSignal): Promise<Subagen
  *   `subagent/delivery-unavailable`, `gateway/cancelled`, or `gateway/internal`.
  */
 @Remote('prompt') async prompt(request: SubagentPromptRequest, signal: AbortSignal): Promise<SubagentPromptReceipt>
+
+/**
+ * Remote face of {@link redirect} under one durable parent address: interrupt
+ * the child's active work and accept one replacement ordinary turn before its
+ * queued ordinary turns. The exact live direct parent remains the authority
+ * credential, and an owner-bound child's controller still commits its own
+ * state first.
+ * @param request - durable address, minted identity, content, and optional browser zone.
+ * @param signal - carrier cancellation through inbox acceptance.
+ * @returns the accepted replacement's inbox identity.
+ * @throws {RemoteError} the same failure vocabulary as {@link prompt}.
+ */
+@Remote('steer') async steer(request: SubagentSteerRequest, signal: AbortSignal): Promise<SubagentSteerReceipt>
 
 /**
  * Remote face of {@link interrupt} under one durable parent address. No

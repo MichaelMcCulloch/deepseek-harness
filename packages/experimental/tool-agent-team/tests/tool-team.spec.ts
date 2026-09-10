@@ -69,7 +69,7 @@ async function setup(script: ConstructorParameters<typeof MockAdapter>[0], legac
   const adapter = new MockAdapter(script)
   ctx.llm.registerAdapter(['mock'], adapter)
   const lead = await ctx.agentLoop.create(SessionId('tool-team-lead'), { provider: 'mock', model: 'mock' })
-  return { ctx, lead, fiber }
+  return { ctx, lead, fiber, adapter }
 }
 
 function execute(
@@ -412,12 +412,18 @@ describe('dsh-tool-team', () => {
   })
 
   it('reinstalls Team scope before a cold-resumed teammate request', async () => {
-    const { ctx, lead } = await setup([textResponse('first'), 'hang'])
+    const { ctx, lead, adapter } = await setup([
+      textResponse('first'),
+      textResponse('settlement received'),
+      'hang',
+    ])
     const spawned = await execute(ctx, lead, 'spawn_teammate', {
       name: 'cold-worker', description: 'cold worker', prompt: 'finish once',
     })
     const childId = spawnedChildId(spawned)
     await vi.waitFor(() => { expect(ctx.agents.get(childId)).toBeUndefined() }, { timeout: 5_000 })
+    await vi.waitFor(() => { expect(adapter.requests).toHaveLength(2) }, { timeout: 5_000 })
+    await lead.whenIdle()
 
     await ctx.agentTeams.sendMessage(lead, {
       target: 'cold-worker',

@@ -165,7 +165,7 @@ blockFrom(child: Agent, reason: string): DagCommandAccepted
  * @param artifacts - Optional JSON result records.
  * @returns Accepted command receipt.
  */
-completeFrom(child: Agent, summary: string, artifacts: readonly import('@deepseek-ai/dsh-session').JsonValue[] = []): DagCommandAccepted
+completeFrom(child: Agent, summary: string, artifacts: readonly JsonValue[] = []): DagCommandAccepted
 
 /**
  * Wait for an injected actionable notice after one revision.
