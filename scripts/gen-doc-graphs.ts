@@ -67,6 +67,7 @@ const GROUP_ORDER = [
   'core',
   'typert',
   'goal',
+  'dag',
   'experimental',
   'process',
   'bash',
@@ -461,6 +462,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     title: 'Same-session goal domain',
     mode: 'core',
     note: 'Folds revisioned objective state from the session log and keeps live continuation activation process-local.',
+  },
+  {
+    key: 'dag',
+    pkg: 'dag',
+    title: 'Durable DAG orchestration domain',
+    mode: 'core',
+    consumers: ['tool-dag'],
+    note: 'Commits complete revisioned graph snapshots before it schedules fenced Git, child, notice, and lifecycle effects.',
   },
   {
     key: 'e2b',

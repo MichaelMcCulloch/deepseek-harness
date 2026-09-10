@@ -38,7 +38,7 @@ Recovery checks pending inbox messages and claimed inbox session events for each
 
 A DAG child is a continuable subagent with an absolute worktree `cwd`, durable JSON owner metadata, and generic settlement delivery set to `none`. The subagent service still performs authorization. After authorization, the effect-scoped DAG owner controller handles stop, redirect, and turn settlement.
 
-`Agent.steer` stays non-interrupting. `Agent.redirect` cancels the active turn while it keeps the inbox, inserts replacement work before queued ordinary turns, and wakes the agent. The `steer_agent` model tool and `subagent.steer` Remote operation use redirect behavior. `send_message` remains a later FIFO turn. The generic continuation lock remains in use for non-DAG children.
+`Agent.steer` stays non-interrupting. `Agent.redirect` cancels the active turn while it keeps the inbox, inserts replacement work before queued ordinary turns, and wakes the agent. The service delivers a node prompt through `SubagentRuntime.followup()`, falling back to `SubagentRuntime.startContinuable()` when the child is not yet resumable, and replaces active work through `SubagentRuntime.redirect()`; every delivery carries a deterministic message id. The `steer_agent` model tool and the `subagent.steer` Remote operation use the same replacement behavior.
 
 ## Local Git execution
 
@@ -165,7 +165,7 @@ blockFrom(child: Agent, reason: string): DagCommandAccepted
  * @param artifacts - Optional JSON result records.
  * @returns Accepted command receipt.
  */
-completeFrom(child: Agent, summary: string, artifacts: readonly import('@deepseek-ai/dsh-session').JsonValue[] = []): DagCommandAccepted
+completeFrom(child: Agent, summary: string, artifacts: readonly JsonValue[] = []): DagCommandAccepted
 
 /**
  * Wait for an injected actionable notice after one revision.

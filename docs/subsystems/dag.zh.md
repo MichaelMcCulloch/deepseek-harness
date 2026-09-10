@@ -38,7 +38,7 @@
 
 DAG 子节点是可续跑子智能体，具有绝对 worktree `cwd`、持久 JSON 所有者元数据，且通用结算传递设为 `none`。子智能体服务仍然执行授权。授权后，效果范围内的 DAG 所有者控制器处理停止、重定向和轮次结算。
 
-`Agent.steer` 保持非中断行为。`Agent.redirect` 取消活动轮次并保留 inbox，将替换工作放在已排队普通轮次之前，然后唤醒智能体。`steer_agent` 模型工具和 `subagent.steer` Remote 操作使用重定向行为。`send_message` 仍是稍后执行的 FIFO 轮次。非 DAG 子节点继续使用通用续跑锁。
+`Agent.steer` 保持非中断行为。`Agent.redirect` 取消活动轮次并保留 inbox，将替换工作放在已排队普通轮次之前，然后唤醒智能体。该服务通过 `SubagentRuntime.followup()` 投递节点提示词，在子级尚不可恢复时回退到 `SubagentRuntime.startContinuable()`，并通过 `SubagentRuntime.redirect()` 替换活动工作；每次投递都携带确定性的消息 id。`steer_agent` 模型工具与 `subagent.steer` Remote 操作使用相同的替换行为。
 
 ## 本地 Git 执行
 
@@ -165,7 +165,7 @@ blockFrom(child: Agent, reason: string): DagCommandAccepted
  * @param artifacts - Optional JSON result records.
  * @returns Accepted command receipt.
  */
-completeFrom(child: Agent, summary: string, artifacts: readonly import('@deepseek-ai/dsh-session').JsonValue[] = []): DagCommandAccepted
+completeFrom(child: Agent, summary: string, artifacts: readonly JsonValue[] = []): DagCommandAccepted
 
 /**
  * Wait for an injected actionable notice after one revision.

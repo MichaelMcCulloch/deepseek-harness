@@ -133,7 +133,7 @@ persisted Session
        -> zero or more owned child Activations
 ```
 
-`SubagentRuntime.startContinuable()` reserves the stable child id, snapshots the versioned `subagent/descriptor` payload, asks the named provider for its detached `ContinuableCreateSpec`, creates the child Agent through a private activation-owner scope, establishes any continuable-parent ownership, and submits the initial prompt. It resolves with `{ childId, messageId }` when inbox acceptance yields the message id — without waiting for the turn to start or for the message to enter the Session log. Every failure before that acceptance rejects with neither id, disposing any created handle and rolling back the Activation and parent ownership.
+`SubagentRuntime.startContinuable()` reserves or accepts a caller-reserved stable child id and initial message id, snapshots the versioned `subagent/descriptor` payload, asks the named provider for its detached `ContinuableCreateSpec`, creates the child Agent through a private activation-owner scope, establishes any continuable-parent ownership, and submits the initial prompt. An optional `cwd` must be absolute; it is stored in child Session metadata and reused on cold resume. Optional durable owner metadata and the generic settlement-notice policy are stored in the descriptor. The call resolves with `{ childId, messageId }` when inbox acceptance yields the message id — without waiting for the turn to start or for the message to enter the Session log. Every failure before that acceptance rejects with neither id, disposing any created handle and rolling back the Activation and parent ownership.
 
 `SubagentRuntime.sendMessage()` is the sole model-authored message operation. It accepts the exact live sender plus a target id, permits only a direct parent or direct continuable child, derives sender attribution itself, and routes a direct-child target by Activation residency:
 
@@ -147,13 +147,15 @@ persisted Session
 
 The Agent inbox is the only queue. Every Agent message uses `Agent.steer()`: an idle target starts a turn, while a running target claims it at the nearest step boundary. The browser `subagent.prompt` Remote separately carries `delivery: 'queue' | 'steer'` through the same internal admission path; Queue opens a later FIFO turn, while Steer retains the Agent loop's best-effort nearest-step behavior and the message's human source. Successful delivery returns the accepted `MessageId`; the existing `agent/inbox/inserted`, `agent/inbox/claimed`, and `agent/inbox/discarded` events remain the message-lifecycle observations, and the continuation layer defines no second queue.
 
+Two continuation-layer operations sit beside that Agent-message path. `SubagentRuntime.followup()` calls `Agent.followup()`, so a resident child finishes its current turn and admits the message as a later FIFO turn; `SubagentRuntime.redirect()` calls `Agent.redirect()`, cancelling active work with the inbox preserved and inserting one replacement ordinary turn before queued ordinary turns. Both authorize by the same exact live direct parent, cold-resume an absent child, and return the accepted `MessageId`; an optional caller-supplied `messageId` makes a repeated delivery idempotent. The `steer_agent` control tool and the [DAG scheduler](dag.md) use redirect, and the DAG scheduler uses follow-up to deliver a newer turn to a child it owns. An owner-bound child routes redirect admission through its controller before the Agent operation runs.
+
 Authority comes from the exact live sender. Parent-to-child delivery requires the target's `SessionHeader.parentSession` to name the sender; child-to-parent delivery requires the sender's resident Activation to name the target. Siblings, ancestors beyond one edge, self-targets, stale Agent objects, and one-shot children are rejected. Each accepted message is framed as `Agent <sender-id> sent a message:` and records `AgentMessageSource`; provenance records the sender but grants no authority.
 
-For `startContinuable()`, `sendMessage()`, and browser prompt delivery, the caller signal owns lookup, materialization, and admission only until inbox acceptance. Afterwards the manager owns the Activation independently: later caller cancellation neither cancels the accepted turn nor disposes the child. The public subagent service exposes no caller-selected Agent-message scheduling; browser human Queue and Steer remain internal adapter choices.
+For `startContinuable()`, `sendMessage()`, `followup()`, `redirect()`, and browser prompt delivery, the caller signal owns lookup, materialization, and admission only until inbox acceptance. Afterwards the manager owns the Activation independently: later caller cancellation neither cancels the accepted turn nor disposes the child. The delegation control tools use the named operations rather than a caller-selected scheduling mode: `send_message` admits through `sendMessage()`, while `steer_agent` replaces current work through `redirect()`. Browser human Queue and Steer remain internal adapter choices.
 
 Live queue occurrence mutation remains in the Session domain. `session.updateQueue` admits ordinary Edit, Remove, and QueueDock Steer for a live subagent-owned Agent only when its current projected identity is continuable and its descriptor sequence is in that child's own non-seed suffix. The identity projection folds descriptors last-wins so a child descriptor supersedes descriptors retained from fork lineage; the own-suffix sequence check prevents a seed-only ancestor identity from authorizing mutation. One-shot, missing, unknown, corrupt, or cold children remain rejected, and queue mutation never cold-resumes a child. The target Session id is the human authority for these mutations, including pending `nextStep` steering or injected context. Steer requires a queued `MessageId` and an Agent that reports running when the command begins; cancellation after admission uses the Agent's accepted waking `nextTurn` fallback. Edit rewrites content under the same `MessageId`, and both Edit and Steer complete their Inbox work synchronously, so settlement observes only the final state. `agent/inbox/claimed` and `agent/inbox/discarded` wake the watcher to re-read whether any pending occurrence remains; this lets direct Agent delivery resume parked work and lets removing the last parked occurrence settle an idle child. The [human inbox-control Agent Note](../../.agents/notes/implemented/feature/2026-08-27-continuable-subagent-human-inbox-control.md) owns these semantics.
 
-`SubagentRuntime.interrupt(targetSessionId, authority)` is the one public stop: it authorizes synchronously, issues `Agent.cancel(cause, { keepInbox: true })` on the live target, and returns without awaiting quiescence. The Activation, its unclaimed pending inbox work, and published descendants are untouched; work already claimed into the interrupted turn is not requeued. Once the interrupted driver is idle, a waking send resumes the parked FIFO queue. An absent target — unknown, one-shot, or already settled — and a manager-less composition are accepted no-ops. For a live target, a mismatched parent address or caller outside its live ancestry rejects with `UNAUTHORIZED`; stale ancestor objects and self-targeting ancestor requests reject before target lookup.
+`SubagentRuntime.interrupt(targetSessionId, authority)` is the public stop: it authorizes synchronously and returns without awaiting quiescence. An ordinary child receives `Agent.cancel(cause, { keepInbox: true })`; an owner-bound child instead delegates the already-authorized request to its registered owner controller, which can commit owner state before it invokes the same cancel closure. The Activation, its unclaimed pending inbox work, and published descendants are untouched; work already claimed into the interrupted turn is not requeued. Once the interrupted driver is idle, a waking send resumes the parked FIFO queue. An absent target — unknown, one-shot, or already settled — and a manager-less composition are accepted no-ops. For a live target, a mismatched parent address or caller outside its live ancestry rejects with `UNAUTHORIZED`; stale ancestor objects and self-targeting ancestor requests reject before target lookup.
 
 ```ts type-equiv
 /**
@@ -199,7 +201,7 @@ interface ContinuableStart {
 }
 ```
 
-When a resident Activation settles, the manager delivers one notice to the child's durable direct parent describing how that epoch ended and carrying its final assistant content. That delivery is unconditional for every child whose id a caller received, happens before the ownership release that would let the parent be judged settled, and reaches a resident parent through the same waking Agent delivery as an Agent message. A parent whose own lineage is already tearing down receives it without a wake, because waking an idle Agent starts a turn rather than queueing work. Its provenance is a distinct kind so a transcript never presents a runtime account as something the child wrote.
+When a resident Activation settles, the generic settlement-notice policy decides whether the manager delivers one notice to the child's durable direct parent describing how that epoch ended and carrying its final assistant content. `adaptive`, the default, preserves the waking-or-quiet choice from parent state; `quiet` always injects the notice without waking or steering the parent; `none` delivers no generic notice, leaving an owner such as the [DAG scheduler](dag.md) to publish its own durable notice. A delivered notice happens before the ownership release that would let the parent be judged settled and reaches a resident parent through the same waking Agent delivery as an Agent message. A parent whose own lineage is already tearing down receives it without a wake, because waking an idle Agent starts a turn rather than queueing work. Its provenance is a distinct kind so a transcript never presents a runtime account as something the child wrote.
 
 ```ts type-equiv
 /**
@@ -260,7 +262,9 @@ interface ContinuableCreateSpec {
 }
 ```
 
-The descriptor (`SubagentDescriptorData` in [descriptor.ts](../../packages/subagent/subagent/src/descriptor.ts)) is a mode-discriminated durable identity for every session-backed subagent. Both modes carry the provider name. A `one-shot` descriptor optionally carries a caller-owned display `label`; a `continuable` descriptor requires the delegation `description` as its durable creation label and additionally snapshots resolved child `agentOptions.provider`/`model`/`reasoningEffort` and optional `persona`/`toolFilter` for cold resume. It never snapshots the merge-extensible `AgentOptions` object, so an unrelated extension value cannot break continuation and a later composition input is a deliberate version change. It omits `subagentDepth` (cold resume trusts the persisted header's `delegationDepth` as the monotone floor) and `outputSchema` (one run or Activation's result contract, not durable identity).
+The descriptor (`SubagentDescriptorData` in [descriptor.ts](../../packages/subagent/subagent/src/descriptor.ts)) is a mode-discriminated durable identity for every session-backed subagent. Both modes carry the provider name. A `one-shot` descriptor optionally carries a caller-owned display `label`; a `continuable` descriptor requires the delegation `description` as its durable creation label and additionally snapshots resolved child `agentOptions.provider`/`model`/`reasoningEffort`, optional `persona`/`toolFilter`, the generic settlement-notice policy, and an optional durable owner binding for cold resume. The absolute `cwd` belongs to child Session metadata rather than the descriptor. It never snapshots the merge-extensible `AgentOptions` object, so an unrelated extension value cannot break continuation and a later composition input is a deliberate version change. It omits `subagentDepth` (cold resume trusts the persisted header's `delegationDepth` as the monotone floor) and `outputSchema` (one run or Activation's result contract, not durable identity).
+
+An optional `SubagentOwnerBinding` names an effect-scoped owner controller and carries immutable JSON metadata that only that controller interprets. Authorization stays in the subagent service: a controller receives an already-authorized live child plus the cancel or redirect closure to run after its own state commits, so `redirect` admission can await an owner persistence barrier. The controller also observes each ordinary turn and the terminal Activation facts before generic parent-notice delivery. Removing a controller rejects new owner operations, while a child bound to that name keeps its durable binding and fails loud with `OWNER_CONTROLLER_UNAVAILABLE` until the same name is registered again. The continuable-setup registry receives the same binding, so an owner installs child-scoped tools and prompt sections on fresh and cold-resumed Activations alike.
 
 A local one-shot provider appends the descriptor inside the child's initial turn before its first request. The continuation manager appends the descriptor after any provider-supplied lineage and before the initial prompt is admitted; `Session.inheritedEventCount` remains the fork-lineage boundary: resume-time descriptor authority reads the child's own suffix, while the list-serving identity projection folds `subagent/descriptor` last-wins so the child's own descriptor overrides a fork-seeded ancestor's. A seeded cold list skips a cache hint until an authoritative observation supplies that exact cut. The event is log-only: no `surfaceOp`, never in model history, and retained across compaction by the append-only log. Malformed current-version descriptors are corrupt; unsupported versions cannot be classified by this runtime.
 
@@ -520,6 +524,64 @@ async startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart>
 async sendMessage( sender: Agent, targetId: SessionId, content: ContentBlock[], options: SubagentSendMessageOptions, ): Promise<MessageId>
 
 /**
+ * Queue one durable parent-to-child follow-up as the child's next FIFO turn.
+ * A resident child finishes its current turn first; an absent child
+ * cold-resumes from persistence, and an unknown one rejects. Supplying
+ * `messageId` makes the delivery idempotent: a caller recovering from a
+ * restart re-uses the identity it already recorded and the child never runs
+ * the same message twice.
+ * @param parent - exact live direct parent authorizing delivery.
+ * @param childId - durable direct-child session id.
+ * @param content - model-visible prompt blocks.
+ * @param options - durable attribution, optional stable message id, and caller cancellation.
+ * @returns the accepted durable message id.
+ * @throws {SubagentError} `UNAUTHORIZED` when the parent does not own the live
+ *   child, `NOT_RESUMABLE` when the target has no persisted continuation.
+ */
+async followup( parent: Agent, childId: SessionId, content: ContentBlock[], options: SubagentDeliveryOptions, ): Promise<MessageId>
+
+/**
+ * Interrupt one continuable child's active work and place replacement content
+ * before its queued ordinary turns. An absent child cold-resumes and accepts
+ * the replacement as its next turn. Authorization and residency routing match
+ * follow-up delivery; an owner-bound child delegates the already-authorized
+ * state transition to its registered controller before the Agent operation runs.
+ * @param parent - exact live direct parent authorizing delivery.
+ * @param childId - durable direct-child session id.
+ * @param content - replacement user-role content.
+ * @param options - durable attribution, optional stable message id, cancellation, and cause.
+ * @returns the accepted replacement's inbox id.
+ * @throws {SubagentError} `UNAUTHORIZED` when the parent does not own the live
+ *   child, `NOT_RESUMABLE` when no persisted continuation exists, and
+ *   `OWNER_CONTROLLER_UNAVAILABLE` when the durable owner is not mounted.
+ */
+async redirect( parent: Agent, childId: SessionId, content: ContentBlock[], options: SubagentRedirectOptions, ): Promise<MessageId>
+
+/**
+ * Register one durable owner namespace. The returned disposer revokes new
+ * owner operations immediately; children already bound to that name keep
+ * their binding and fail loud until the same controller name is registered
+ * again.
+ * @param name - non-empty durable controller name.
+ * @param controller - owner hooks; redirect admission can be asynchronous.
+ * @returns the exact Cordis effect disposer.
+ * @throws {SubagentError} `INVALID_OWNER` for an empty name, `DUPLICATE_OWNER`
+ *   when that name is already registered.
+ */
+registerOwnerController(name: string, controller: SubagentOwnerController): () => void
+
+/**
+ * Register one deployment capability composed into every continuable child's
+ * unpublished creation context. The contribution receives the durable owner
+ * binding so an owner namespace can install child-scoped behavior without
+ * teaching this service which capabilities exist.
+ * @param contribution - synchronous child-scope installer.
+ * @returns an idempotent registration undo.
+ * @throws {SubagentError} after attempting every installation when a disposer fails.
+ */
+registerContinuableSetup(contribution: ContinuableSetupContribution): () => void
+
+/**
  * Interrupt one live continuable child's current turn under a human parent
  * address or an exact live ancestor Agent. Fire-and-return: the cancel
  * signal is issued before this returns, but the target may keep running
@@ -629,6 +691,19 @@ listDescendants(rootSessionId: SessionId, signal?: AbortSignal): Promise<Subagen
  *   `subagent/delivery-unavailable`, `gateway/cancelled`, or `gateway/internal`.
  */
 @Remote('prompt') async prompt(request: SubagentPromptRequest, signal: AbortSignal): Promise<SubagentPromptReceipt>
+
+/**
+ * Remote face of {@link redirect} under one durable parent address: interrupt
+ * the child's active work and accept one replacement ordinary turn before its
+ * queued ordinary turns. The exact live direct parent remains the authority
+ * credential, and an owner-bound child's controller still commits its own
+ * state first.
+ * @param request - durable address, minted identity, content, and optional browser zone.
+ * @param signal - carrier cancellation through inbox acceptance.
+ * @returns the accepted replacement's inbox identity.
+ * @throws {RemoteError} the same failure vocabulary as {@link prompt}.
+ */
+@Remote('steer') async steer(request: SubagentSteerRequest, signal: AbortSignal): Promise<SubagentSteerReceipt>
 
 /**
  * Remote face of {@link interrupt} under one durable parent address. No
