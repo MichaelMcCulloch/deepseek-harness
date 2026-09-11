@@ -1,6 +1,8 @@
 /** Builtin image metadata and keyed document-body registration. */
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from '../index.ts'
+// Type-only: the declaration merges behind ctx.locale, ctx.slots, and ctx.documentPreviews.
+import type {} from '@deepseek-ai/dsh-client-locale/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { DocumentPreviewDefinition } from '../document/registry.ts'
 import { ImageBody } from './ImageBody.tsx'
 import { en, zh } from './locales.ts'

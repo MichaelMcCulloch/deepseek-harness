@@ -5,7 +5,7 @@
 
 import { constants as bufferConstants } from 'node:buffer'
 import { createZstdDecompress } from 'node:zlib'
-import type { ZstdFrameDecoder, ZstdFrameRange } from './zstd.ts'
+import type { ZstdFrameDecoder, ZstdFrameRange } from './types.ts'
 
 const DECODE_CHUNK_SIZE = 1024 * 1024
 

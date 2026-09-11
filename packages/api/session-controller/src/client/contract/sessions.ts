@@ -11,7 +11,7 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { AgentContext } from '../scope.ts'
 import type { SessionSearchResultItem } from '../sessions/manager.ts'
-import type { SessionBinding, SessionListState } from '../sessions/service.ts'
+import type { SessionBinding, SessionListState } from '../sessions/state.ts'
 import type { SessionFace } from './session.ts'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 

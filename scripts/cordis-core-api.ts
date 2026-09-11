@@ -4,15 +4,23 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import ts from 'typescript'
 import { checkParams, checkReturns, parseJsDoc, parseTags, pointer, rawJsDoc, reportViolations } from './jsdoc.ts'
-import { cordisModuleBody } from './cordis-walk.ts'
 
 const root = resolve(import.meta.dirname, '..')
 const FENCE = 'ts cordis-catalog'
 
+/**
+ * The vendored core module holding the merged recursive kernel. Cordis declares
+ * its whole recursive cluster — the context, its base services, the fiber,
+ * plugin registry, reflection, logger, and shared helpers — in one module, so
+ * every `context-merge` section reads that file's same-file `Context` interface.
+ */
+const CORDIS_CORE_SOURCE = 'vendor/cordis/src/context.ts'
+
 /** One declaration group rendered on a Cordis core API page. */
 type CordisCoreApiSection =
   | { kind: 'class'; file: string; symbol: string; prefix?: string; heading?: string }
-  | { kind: 'context-merge'; file: string; heading?: string }
+  /** `members` is the exact `Context` member list this page documents, in page order. */
+  | { kind: 'context-merge'; file: string; heading?: string; members: string[] }
   | { kind: 'decl'; file: string; symbol: string }
 
 /** One generated Cordis core API page. */
@@ -30,8 +38,8 @@ export const CORDIS_CORE_API_PAGES: CordisCoreApiPage[] = [
     title: 'Context',
     intro: 'The context is the core Cordis object: every service, event, and lifecycle API is reached through `ctx`. Event methods are documented on [Events](events.md), effects and the current fiber on [Fiber](fiber.md), and plugin loading on [Registry](registry.md).',
     sections: [
-      { kind: 'class', file: 'vendor/cordis/src/context.ts', symbol: 'Context', prefix: 'ctx.' },
-      { kind: 'context-merge', file: 'vendor/cordis/src/reflect.ts', heading: 'Service store and mixins' },
+      { kind: 'class', file: CORDIS_CORE_SOURCE, symbol: 'Context', prefix: 'ctx.' },
+      { kind: 'context-merge', file: CORDIS_CORE_SOURCE, heading: 'Service store and mixins', members: ['get', 'set', 'provide', 'accessor', 'mixin'] },
     ],
   },
   {
@@ -39,9 +47,9 @@ export const CORDIS_CORE_API_PAGES: CordisCoreApiPage[] = [
     title: 'Events',
     intro: 'The event-dispatch API mixed into every context. Harness event declarations and their dispatch modes are generated into each owning [subsystem page](../subsystems/core.md).',
     sections: [
-      { kind: 'context-merge', file: 'vendor/cordis/src/events.ts' },
-      { kind: 'decl', file: 'vendor/cordis/src/events.ts', symbol: 'EventOptions' },
-      { kind: 'decl', file: 'vendor/cordis/src/events.ts', symbol: 'DispatchMode' },
+      { kind: 'context-merge', file: CORDIS_CORE_SOURCE, members: ['parallel', 'emit', 'serial', 'bail', 'waterfall', 'on', 'once'] },
+      { kind: 'decl', file: CORDIS_CORE_SOURCE, symbol: 'EventOptions' },
+      { kind: 'decl', file: CORDIS_CORE_SOURCE, symbol: 'DispatchMode' },
     ],
   },
   {
@@ -49,13 +57,13 @@ export const CORDIS_CORE_API_PAGES: CordisCoreApiPage[] = [
     title: 'Fiber',
     intro: 'A fiber is one loaded plugin instance: its lifecycle state, validated config, and registered effects. `ctx.fiber` is the current fiber, and `ctx.effect()` delegates to it.',
     sections: [
-      { kind: 'context-merge', file: 'vendor/cordis/src/fiber.ts' },
-      { kind: 'class', file: 'vendor/cordis/src/fiber.ts', symbol: 'Fiber', heading: 'The Fiber class' },
-      { kind: 'decl', file: 'vendor/cordis/src/fiber.ts', symbol: 'Effect' },
-      { kind: 'decl', file: 'vendor/cordis/src/fiber.ts', symbol: 'Disposable' },
-      { kind: 'decl', file: 'vendor/cordis/src/fiber.ts', symbol: 'EffectMeta' },
-      { kind: 'decl', file: 'vendor/cordis/src/fiber.ts', symbol: 'CordisError' },
-      { kind: 'decl', file: 'vendor/cordis/src/fiber.ts', symbol: 'ValidationError' },
+      { kind: 'context-merge', file: CORDIS_CORE_SOURCE, members: ['effect', 'fiber'] },
+      { kind: 'class', file: CORDIS_CORE_SOURCE, symbol: 'Fiber', heading: 'The Fiber class' },
+      { kind: 'decl', file: CORDIS_CORE_SOURCE, symbol: 'Effect' },
+      { kind: 'decl', file: CORDIS_CORE_SOURCE, symbol: 'Disposable' },
+      { kind: 'decl', file: CORDIS_CORE_SOURCE, symbol: 'EffectMeta' },
+      { kind: 'decl', file: CORDIS_CORE_SOURCE, symbol: 'CordisError' },
+      { kind: 'decl', file: CORDIS_CORE_SOURCE, symbol: 'ValidationError' },
     ],
   },
   {
@@ -63,9 +71,9 @@ export const CORDIS_CORE_API_PAGES: CordisCoreApiPage[] = [
     title: 'Registry',
     intro: 'Plugin loading and dependency injection.',
     sections: [
-      { kind: 'context-merge', file: 'vendor/cordis/src/registry.ts' },
-      { kind: 'decl', file: 'vendor/cordis/src/registry.ts', symbol: 'Plugin' },
-      { kind: 'decl', file: 'vendor/cordis/src/registry.ts', symbol: 'Inject' },
+      { kind: 'context-merge', file: CORDIS_CORE_SOURCE, members: ['inject', 'plugin'] },
+      { kind: 'decl', file: CORDIS_CORE_SOURCE, symbol: 'Plugin' },
+      { kind: 'decl', file: CORDIS_CORE_SOURCE, symbol: 'Inject' },
     ],
   },
   {
@@ -73,7 +81,7 @@ export const CORDIS_CORE_API_PAGES: CordisCoreApiPage[] = [
     title: 'Service',
     intro: 'The base class for context services. A subclass loaded as a plugin registers itself as `ctx.<name>`.',
     sections: [
-      { kind: 'class', file: 'vendor/cordis/src/service.ts', symbol: 'Service' },
+      { kind: 'class', file: CORDIS_CORE_SOURCE, symbol: 'Service' },
     ],
   },
 ]
@@ -88,6 +96,16 @@ interface MemberDoc {
   returns: string | null
   source: string
 }
+
+/**
+ * Members whose documentation home is a `context-merge` section. The `class
+ * Context` section renders the remaining `Context` interface properties, so a
+ * member owned by a merge section is never repeated on the class page.
+ */
+const CONTEXT_MERGE_MEMBERS: ReadonlySet<string> = new Set(
+  CORDIS_CORE_API_PAGES.flatMap(page => page.sections.flatMap(section =>
+    section.kind === 'context-merge' ? section.members : [])),
+)
 
 interface RenderContext {
   scanRoot: string
@@ -236,28 +254,107 @@ function heritageMembers(
   }
 }
 
-function contextMergeMembers(ctx: RenderContext, rel: string): MemberDoc[] {
-  const { sf } = load(ctx, rel)
-  const body = cordisModuleBody(sf)
-  if (body === null) throw new Error(`cordis-core-api: ${rel} has no Context module merge.`)
-  const groups = new Map<string, (ts.MethodSignature | ts.PropertySignature | ts.MethodDeclaration)[]>()
-  for (const statement of body.statements) {
-    if (!ts.isInterfaceDeclaration(statement) || statement.name.text !== 'Context') continue
-    heritageMembers(statement, sf, groups)
-    for (const member of statement.members) {
-      if (!ts.isMethodSignature(member) && !ts.isPropertySignature(member)) continue
-      if (ts.isComputedPropertyName(member.name)) continue
-      const name = member.name.getText(sf)
-      const group = groups.get(name) ?? []
-      group.push(member)
-      groups.set(name, group)
-    }
-  }
-  return [...groups.entries()].map(([name, group]) =>
-    memberDoc(ctx, `ctx.${name} (${rel})`, name, group, rel))
+/** The core module's same-file `Context` interface declaration. */
+function contextInterface(sf: ts.SourceFile): ts.InterfaceDeclaration | undefined {
+  return sf.statements.find(
+    (statement): statement is ts.InterfaceDeclaration =>
+      ts.isInterfaceDeclaration(statement) && statement.name.text === 'Context',
+  )
 }
 
-function classMembers(ctx: RenderContext, rel: string, className: string): {
+/**
+ * Every `Context` member the core module declares: the members of its same-file
+ * `Context` interface plus those inherited through a `Pick<...>` heritage clause.
+ * @param sf - the Cordis core module's source file.
+ * @returns member name → declaring nodes, in declaration order.
+ */
+function contextMemberGroups(sf: ts.SourceFile): Map<string, (ts.MethodSignature | ts.PropertySignature | ts.MethodDeclaration)[]> {
+  const declaration = contextInterface(sf)
+  if (declaration === undefined) throw new Error('cordis-core-api: the Cordis core module declares no Context interface.')
+  const groups = new Map<string, (ts.MethodSignature | ts.PropertySignature | ts.MethodDeclaration)[]>()
+  heritageMembers(declaration, sf, groups)
+  for (const member of declaration.members) {
+    if (!ts.isMethodSignature(member) && !ts.isPropertySignature(member)) continue
+    if (ts.isComputedPropertyName(member.name)) continue
+    const name = member.name.getText(sf)
+    const group = groups.get(name) ?? []
+    group.push(member)
+    groups.set(name, group)
+  }
+  return groups
+}
+
+/**
+ * Render the `Context` members one page owns, in that page's order.
+ *
+ * A requested name the merged declaration does not carry is an error: the page
+ * table, not the renderer, decides what each page documents, so a renamed or
+ * removed member must fail here rather than quietly drop a section.
+ *
+ * @param ctx - render cache and violation sink.
+ * @param rel - the Cordis core module holding the merged declaration.
+ * @param members - the member names this page documents, in page order.
+ * @returns one rendered entry per requested member.
+ */
+function contextMergeMembers(ctx: RenderContext, rel: string, members: string[]): MemberDoc[] {
+  const { sf } = load(ctx, rel)
+  const groups = contextMemberGroups(sf)
+  return members.map((name) => {
+    const group = groups.get(name)
+    if (group === undefined) {
+      throw new Error(`cordis-core-api: the Context interface in ${rel} declares no '${name}' member; fix the page's member list.`)
+    }
+    return memberDoc(ctx, `ctx.${name} (${rel})`, name, group, rel)
+  })
+}
+
+/**
+ * Prove every merged `Context` method has exactly one documenting page.
+ *
+ * A method of the merged declaration that no `context-merge` section lists
+ * would otherwise vanish from the reference, and a name listed by two sections
+ * would be rendered twice. Both fail here, so the page table stays exhaustive.
+ *
+ * @param scanRoot - repository root the core module is read from.
+ */
+function assertContextMergesCovered(scanRoot: string): void {
+  const ctx: RenderContext = { scanRoot, cache: new Map(), violations: [] }
+  const { sf } = load(ctx, CORDIS_CORE_SOURCE)
+  const declaration = contextInterface(sf)
+  if (declaration === undefined) throw new Error(`cordis-core-api: ${CORDIS_CORE_SOURCE} declares no Context interface.`)
+  const documented = new Map<string, string>()
+  for (const page of CORDIS_CORE_API_PAGES) {
+    for (const section of page.sections) {
+      if (section.kind !== 'context-merge') continue
+      for (const name of section.members) {
+        const owner = documented.get(name)
+        if (owner !== undefined) {
+          throw new Error(`cordis-core-api: ctx.${name} is documented by both ${owner} and ${page.out}.`)
+        }
+        documented.set(name, page.out)
+      }
+    }
+  }
+  const undocumented = declaration.members
+    .filter((member): member is ts.MethodSignature => ts.isMethodSignature(member) && !ts.isComputedPropertyName(member.name))
+    .map(member => member.name.getText(sf))
+    .filter(name => !documented.has(name))
+  if (undocumented.length > 0) {
+    throw new Error(`cordis-core-api: the merged Context declares ${undocumented.map(name => `ctx.${name}`).join(', ')} but no page lists them; add each to a context-merge section.`)
+  }
+}
+
+/**
+ * Render the members of one class, including the property signatures a
+ * same-file `Context`-style interface contributes.
+ *
+ * @param ctx - render cache and violation sink.
+ * @param rel - source file holding the class.
+ * @param className - the class (and optional same-named interface) to render.
+ * @param excluded - interface property names documented by another section.
+ * @returns the class prose, its instance members, statics, and source pointer.
+ */
+function classMembers(ctx: RenderContext, rel: string, className: string, excluded: ReadonlySet<string>): {
   doc: string
   instance: MemberDoc[]
   statics: MemberDoc[]
@@ -293,6 +390,7 @@ function classMembers(ctx: RenderContext, rel: string, className: string): {
   for (const member of declaration?.members ?? []) {
     if (!ts.isPropertySignature(member) || ts.isComputedPropertyName(member.name)) continue
     const name = member.name.getText(sf)
+    if (excluded.has(name)) continue
     const group = instance.get(name) ?? []
     group.push(member)
     instance.set(name, group)
@@ -405,9 +503,9 @@ export function renderCordisCoreApiPage(
   for (const section of page.sections) {
     if (section.kind !== 'decl' && section.heading !== undefined) lines.push(`## ${section.heading}`, '')
     if (section.kind === 'context-merge') {
-      for (const member of contextMergeMembers(ctx, section.file)) lines.push(...renderMember('ctx.', member))
+      for (const member of contextMergeMembers(ctx, section.file, section.members)) lines.push(...renderMember('ctx.', member))
     } else if (section.kind === 'class') {
-      const cls = classMembers(ctx, section.file, section.symbol)
+      const cls = classMembers(ctx, section.file, section.symbol, CONTEXT_MERGE_MEMBERS)
       if (cls.doc !== '') lines.push(...prose(cls.doc), '')
       lines.push(sourceLink(cls.source), '')
       const prefix = section.prefix ?? `${section.symbol.toLowerCase()}.`
@@ -427,7 +525,13 @@ export function renderCordisCoreApiPage(
   return `${lines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd()}\n`
 }
 
-/** Render every detailed Cordis core API page. */
+/**
+ * Render every detailed Cordis core API page, after proving the page table
+ * documents every method of the merged `Context` declaration exactly once.
+ * @param scanRoot - repository root the vendor declarations are read from.
+ * @returns output path → page content.
+ */
 export function renderCordisCoreApiPages(scanRoot: string = root): Map<string, string> {
+  assertContextMergesCovered(scanRoot)
   return new Map(CORDIS_CORE_API_PAGES.map(page => [page.out, renderCordisCoreApiPage(page, scanRoot)]))
 }

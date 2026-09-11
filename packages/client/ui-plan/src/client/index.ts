@@ -18,10 +18,11 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-plan-mode/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
-import { PlanChip } from './PlanModeControl.tsx'
+import { PlanChip, type PlanChipInjected } from './PlanModeControl.tsx'
 import { en, zh, type PlanKey } from './locales.ts'
 
 export type { PlanKey } from './locales.ts'
+export type { PlanChipInjected } from './PlanModeControl.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -32,15 +33,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** Dictionary namespace owned by this plugin. */
 const NS = 'plan'
-
-/** Injected business face of the composer plan seat. */
-export interface PlanChipInjected {
-  /**
-   * Leave plan mode by executing /plan off.
-   * @returns null on admitted execution; a user-visible failure line otherwise.
-   */
-  exitPlanMode: () => Promise<string | null>
-}
 
 /** Required services: the seat's slot registry, commands Remote, and locale registry. */
 export const inject = ['slots', 'remote', 'remote.commands', 'locale']

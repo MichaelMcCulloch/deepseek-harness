@@ -1,6 +1,8 @@
 /** Code preview metadata and body registered through the public document extension points. */
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from '../index.ts'
+// Type-only: the declaration merges behind ctx.locale and ctx.slots.
+import type {} from '@deepseek-ai/dsh-client-locale/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { CodeBody } from './CodeBody.tsx'
 import { CODE_EXTENSIONS } from './languages.ts'
 import { en, zh } from './locales.ts'

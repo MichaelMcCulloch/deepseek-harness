@@ -25,10 +25,10 @@ import type { RightbarOwnerProps } from '@deepseek-ai/dsh-client-ui-layout/clien
 // The locale plugin's own merge carries the shared `common` vocabulary that the
 // lookup chain consults after this namespace misses.
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type { PaneId, TabRecord } from '@deepseek-ai/dsh-client-ui-dockkit'
-import type { SlotHookFactory } from '@deepseek-ai/dsh-client-ui-slots'
-import type { TabHookContext } from '../tab-info.ts'
+import type { PaneId, TabId, TabRecord } from '@deepseek-ai/dsh-client-ui-dockkit'
+import type { KeyedSnapshotSelectorHook, PropsStore, SlotHookFactory } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SidebarRightKey } from '../locales.ts'
+import type { createSidebarRightStore } from '../stores.ts'
 import type { SidebarRightNavigationParams, SidebarRightResourceParams, SidebarRightTabParamsFor } from './params.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -85,6 +85,17 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      */
     'sidebar.right.tab.menu.item': { kind: 'list'; scope: 'session'; owner: SidebarRightTabMenuOwnerProps }
   }
+}
+
+/** Stable dispatch identity and framework hooks; never passed as tab component props. */
+export interface TabHookContext {
+  readonly tabId: TabId
+  readonly title: boolean
+  readonly fullscreen: boolean
+  readonly signal: AbortSignal
+  readonly actions: SidebarRightTabActions
+  readonly useStore: PropsStore<ReturnType<typeof createSidebarRightStore>>['useStore']
+  readonly useTabNavigation: KeyedSnapshotSelectorHook<SidebarRightTabNavigation>
 }
 
 /** Where a tab was last navigated to: what the `open` that created or revealed it carried. */

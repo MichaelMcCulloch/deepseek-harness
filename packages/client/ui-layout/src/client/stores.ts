@@ -3,11 +3,11 @@
  * The registration supplies a fresh store and binds its actions to ctx.layout.
  */
 import { defineStore, type EngineStoreHandle } from '@deepseek-ai/dsh-client-store'
-import type { MainPanelId } from './service.ts'
 import {
   clampWidth, RIGHTBAR_DEFAULT_RATIO, RIGHTBAR_MAX_RATIO, RIGHTBAR_MIN,
   SIDEBAR_AUTO_COLLAPSE, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN,
 } from './columns.ts'
+import type { MainPanelId } from './panel-id.ts'
 
 /**
  * Transient layout preferences. Responsive concessions never rewrite widths;

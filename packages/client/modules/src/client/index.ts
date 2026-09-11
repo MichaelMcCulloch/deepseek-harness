@@ -11,18 +11,18 @@
  * @module @deepseek-ai/dsh-client-modules/client
  */
 import type { Context } from '@deepseek-ai/cordis'
-import { ClientModuleSystem } from './system.ts'
+import { ClientModuleSystem, type ClientModuleLoaderTarget } from './system.ts'
 import { parseBootManifest } from './manifest.ts'
 import type {
-  ClientBootstrapModule, ClientModuleCreateOptions, ClientModuleLoaderTarget,
+  ClientBootstrapModule, ClientModuleCreateOptions,
 } from './manifest.ts'
 
 export { ClientModuleSystem }
+export type { ClientModuleLoaderTarget, ClientModuleSystemOptions, DshWindow } from './system.ts'
 export { parseBootManifest, stripClientSuffix } from './manifest.ts'
 export type {
   BootManifest, BootModuleRow, BootPluginRow, ClientBootstrapModule, ClientBundleRegistration,
-  ClientModuleCreateOptions, ClientModuleLoader, ClientModuleLoaderTarget, ClientModuleRecord,
-  ClientModuleSystemOptions, DshWindow,
+  ClientModuleCreateOptions, ClientModuleLoader, ClientModuleRecord,
   WebBootEntry, WebBootGraph,
 } from './manifest.ts'
 

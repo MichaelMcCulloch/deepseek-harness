@@ -6,10 +6,10 @@ import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
 import { keyedObservableHook } from '@deepseek-ai/dsh-client-ui-renderer/src/client/bindings.tsx'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
-import type { UseSidebarRightTabInfo } from '../src/client/contract/slots.ts'
+import type { TabHookContext, UseSidebarRightTabInfo } from '../src/client/contract/slots.ts'
 import { createSidebarRightStore } from '../src/client/stores.ts'
 import { TabDomain, type TabOccurrence } from '../src/client/tab-domain.ts'
-import { tabInfoFactory, type TabHookContext } from '../src/client/tab-info.ts'
+import { tabInfoFactory } from '../src/client/tab-info.ts'
 
 const SESSION = 's-info' as SessionId
 const ADDRESS = 'dsh-resource://file/session/s-info/a.txt'

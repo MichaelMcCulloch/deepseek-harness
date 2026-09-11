@@ -13,19 +13,15 @@
  * records nothing and notifies nobody.
  */
 import type {
-  DockMode, DockZone, FloatRect, LayoutOp, LayoutState, PaneId, PaneNode, SplitId, TabId, TabRecord,
+  DockMode, DockZone, FloatRect, LayoutOp, LayoutState, Mint, PaneId, PaneNode, SplitId, TabId, TabRecord,
 } from '../contract/types.ts'
 import { canSplit, clampSizes, FLOAT_DEFAULT_SIZE, zoneSplit } from './constraints.ts'
 import type { TabFactory } from './initial.ts'
 import { applyOp } from './operations.ts'
 import { dockPaneIds, findTabPane, firstDockPaneId, getNode, getPane, getTab } from './tree.ts'
 
-/** Mints ids for the operations a planner produces: the one place a string becomes an id. */
-export interface Mint {
-  (prefix: 'tab'): TabId
-  (prefix: 'pane' | 'float'): PaneId
-  (prefix: 'split'): SplitId
-}
+// Declared in contract/types.ts beside the ids it mints; stays in this module's vocabulary.
+export type { Mint }
 
 /** Distance each newly floated panel steps down and right from the last. */
 const FLOAT_CASCADE_STEP = 24

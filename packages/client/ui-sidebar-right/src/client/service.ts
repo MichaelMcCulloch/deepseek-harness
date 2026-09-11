@@ -31,12 +31,20 @@ import type { FloatRect, PaneId, TabId, TabRecord } from '@deepseek-ai/dsh-clien
 import { activeDockPaneId, canSplit, dockPaneIds, findTabPane, getPane } from '@deepseek-ai/dsh-client-ui-dockkit'
 import type { BoundActions } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { SidebarRightNavigationParams, SidebarRightResourceParams, SidebarRightTabParamsFor } from './contract/params.ts'
+import type { SidebarRightNavigationParams } from './contract/params.ts'
 import { pageAddress } from './contract/seed.ts'
 import type { SidebarRightTabClaim, SidebarRightTabRegistry } from './tab-registry.ts'
 import type { SidebarRightState, SurfaceState } from './stores.ts'
 import type { createSidebarRightStore } from './stores.ts'
-import { TabDomain, type PinResource } from './tab-domain.ts'
+import {
+  TabDomain,
+  type PinResource,
+  type SidebarRightOpenResourceOptions,
+  type SidebarRightOpenTabOptions,
+  type SidebarRightPlacement,
+} from './tab-domain.ts'
+
+export type { SidebarRightOpenResourceOptions, SidebarRightOpenTabOptions, SidebarRightPlacement }
 
 /** The seat's bound action set. */
 export type SurfaceActions = BoundActions<ReturnType<typeof createSidebarRightStore>>
@@ -102,33 +110,6 @@ export interface SidebarRightBinding {
    * whether two working halves would fit. Unmeasured panes fit.
    */
   readonly canSplitPane: (paneId: PaneId) => boolean
-}
-
-/** Where an open lands; every field is optional and the defaults are the common case. */
-export interface SidebarRightPlacement {
-  /** Land a new tab in this pane instead of the active docked one. */
-  readonly paneId?: PaneId
-  /** Take this tab's place — its pane and its strip slot — and close it in the same step. */
-  readonly replaceTab?: TabId
-  /**
-   * Resource tabs reveal an existing (kind, contentId) by default; `false`
-   * permits duplicates. Pages always deduplicate within the target pane.
-   */
-  readonly revealIfOpened?: boolean
-}
-
-/** How a caller wants a resource opened. */
-export interface SidebarRightOpenResourceOptions extends SidebarRightPlacement {
-  /** Name the opening type instead of letting the registry rank claims; its `canOpen` still applies. */
-  readonly kind?: string
-  /** The resource's navigation parameters, typed by resource type; delivered as `navigation.params`. */
-  readonly params?: SidebarRightResourceParams
-}
-
-/** How a caller wants a page type opened. */
-export interface SidebarRightOpenTabOptions<K extends string = string> extends SidebarRightPlacement {
-  /** That kind's navigation parameters, typed by kind; delivered as `navigation.params`. */
-  readonly params?: SidebarRightTabParamsFor<K>
 }
 
 /** The scheme every resource address carries; anything else is not a resource this face opens. */

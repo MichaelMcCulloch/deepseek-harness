@@ -9,11 +9,9 @@
  * store's declared action set, shared with the root registration.
  */
 import type { BoundActions } from '@deepseek-ai/dsh-client-ui-slots'
-import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { createLayoutStore } from './stores.ts'
-
-/** Identity shared by a sidebar panel entry and its main-slot occupant. */
-export type MainPanelId = Branded<'MainPanelId'>
+import type { MainPanelId } from './panel-id.ts'
+export type { MainPanelId }
 
 /** Root-scoped navigation state exposed to panel-aware components. */
 export interface PanelInfo {

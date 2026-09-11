@@ -32,7 +32,7 @@ inject(deps: Inject, callback: Plugin.Function<void>): Fiber & PromiseLike<Fiber
 
 **返回** fiber；对其执行 await 会在加载完成后结束等待。
 
-[源码](../../vendor/cordis/src/registry.ts#L176)
+[源码](../../vendor/cordis/src/context.ts#L459)
 
 ### ctx.plugin(plugin, ...args)
 
@@ -55,7 +55,7 @@ plugin<P extends Plugin>(plugin: P, ...args: Spread<GetPluginConfig<P>>): Fiber 
 
 **返回** fiber；对其执行 await 会在加载完成后结束等待（如果发生配置错误或启动错误，则会被拒绝）。
 
-[源码](../../vendor/cordis/src/registry.ts#L185)
+[源码](../../vendor/cordis/src/context.ts#L468)
 
 ## Plugin
 
@@ -120,7 +120,7 @@ namespace Plugin {
 }
 ```
 
-[源码](../../vendor/cordis/src/registry.ts#L92)
+[源码](../../vendor/cordis/src/context.ts#L2290)
 
 ## Inject
 
@@ -151,4 +151,4 @@ namespace Inject {
 }
 ```
 
-[源码](../../vendor/cordis/src/registry.ts#L19)
+[源码](../../vendor/cordis/src/context.ts#L2217)

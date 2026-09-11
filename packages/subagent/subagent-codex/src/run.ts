@@ -29,8 +29,11 @@ import type {
 } from '@deepseek-ai/dsh-subprocess'
 import {
   CodexAppServerWire,
+  type CodexPermissionMode,
   type CodexWireFailureFacts,
 } from './wire.ts'
+
+export type { CodexPermissionMode } from './wire.ts'
 
 /** Default POSIX grace between subprocess termination tiers. */
 export const DEFAULT_DISPOSE_GRACE_MS = 3_000
@@ -51,12 +54,6 @@ const CODEX_PACKAGE_BIN = resolve(
   dirname(codexPackageJsonPath),
   codexPackageManifest.bin.codex,
 )
-
-/** Profile-selectable non-interactive Codex permission mode. */
-export type CodexPermissionMode =
-  | 'never'
-  | 'approve-for-me'
-  | 'dangerously-bypass-approvals-and-sandbox'
 
 /** Native non-interactive Codex modes mapped to official `thread/start` fields. */
 export const CODEX_PERMISSION_MODES = [

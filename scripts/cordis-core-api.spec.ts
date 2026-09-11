@@ -46,4 +46,26 @@ describe('Cordis core API generation', () => {
     }
     expect(() => renderCordisCoreApiPage(page, root)).toThrow('class Service')
   })
+
+  it('rejects a context-merge section claiming a member the merged Context does not declare', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-cordis-core-api-'))
+    roots.push(root)
+    mkdirSync(join(root, 'vendor/cordis/src'), { recursive: true })
+    writeFileSync(join(root, 'vendor/cordis/src/context.ts'), 'export interface Context {\n  /** Declared. */\n  mixin(name: string): void\n}\n')
+    const page: CordisCoreApiPage = {
+      out: 'docs/cordis-api/context.md',
+      title: 'Context',
+      intro: 'Context API.',
+      sections: [{ kind: 'context-merge', file: 'vendor/cordis/src/context.ts', members: ['absent'] }],
+    }
+    expect(() => renderCordisCoreApiPage(page, root)).toThrow("declares no 'absent' member")
+  })
+
+  it('rejects a merged Context method that no page documents', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-cordis-core-api-'))
+    roots.push(root)
+    mkdirSync(join(root, 'vendor/cordis/src'), { recursive: true })
+    writeFileSync(join(root, 'vendor/cordis/src/context.ts'), 'export interface Context {\n  /** Documented by no page. */\n  orphan(): void\n}\n')
+    expect(() => renderCordisCoreApiPages(root)).toThrow('no page lists them')
+  })
 })

@@ -43,7 +43,7 @@ interface ImageAttachmentAccess {
 }
 ```
 
-Source: [`packages/llm/llm/src/message.ts`](../../packages/llm/llm/src/message.ts)
+Source: [`packages/llm/llm/src/types.ts`](../../packages/llm/llm/src/types.ts)
 
 A `Message` is one identified, immutable role/source/content value. Model-produced assistant messages name the provider and model that produced them and carry optional adapter-private replay data in their source:
 

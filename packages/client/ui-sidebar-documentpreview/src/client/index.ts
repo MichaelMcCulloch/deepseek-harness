@@ -48,13 +48,6 @@ export type { TextPage, TextState, TextStore, TextTabState } from './store.ts'
 export type { DocumentContent, DocumentPreviewProps, DocumentTextPage } from './document/contract.ts'
 export type { DocumentLoadMode, DocumentPreviewDefinition } from './document/registry.ts'
 
-declare module '@deepseek-ai/cordis' {
-  interface Context {
-    /** File-extension renderer registrations, independent from their keyed document bodies. */
-    documentPreviews: DocumentPreviewRegistry
-  }
-}
-
 /** This package's copy namespace. */
 const NS = 'sidebarDocumentPreview'
 

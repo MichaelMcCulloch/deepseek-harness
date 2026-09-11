@@ -39,7 +39,7 @@ export {
 export type {
   InstructionFile,
   LoadedInstructionFile,
-} from './files.ts'
+} from './types.ts'
 export { renderWorkspaceContext } from './render.ts'
 export type { RenderedWorkspaceContext, TruncatedInstruction } from './render.ts'
 

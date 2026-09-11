@@ -25,7 +25,19 @@ import { snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
-import type { SubagentOwnerBinding, SubagentSettlementDelivery } from './types.ts'
+import type {
+  ContinuableSubagentDescriptorData,
+  OneShotSubagentDescriptorData,
+  SubagentDescriptorData,
+  SubagentOwnerBinding,
+  SubagentSettlementDelivery,
+} from './types.ts'
+
+export type {
+  ContinuableSubagentDescriptorData,
+  OneShotSubagentDescriptorData,
+  SubagentDescriptorData,
+} from './types.ts'
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
@@ -47,53 +59,6 @@ declare module '@deepseek-ai/dsh-session/types' {
  * an implicit extra field.
  */
 export const SUBAGENT_DESCRIPTOR_VERSION = 4
-
-/** Fields shared by every supported `subagent/descriptor` payload. */
-interface SubagentDescriptorBase {
-  /** Descriptor format version ({@link SUBAGENT_DESCRIPTOR_VERSION}). */
-  readonly version: number
-  /** Whether the child is a terminal one-shot run or a resumable conversation. */
-  readonly mode: 'one-shot' | 'continuable'
-  /** The `ctx.subagents` provider name that established the child. */
-  readonly provider: string
-}
-
-/** A session-backed subagent that cannot be cold-resumed after its run. */
-export interface OneShotSubagentDescriptorData extends SubagentDescriptorBase {
-  readonly mode: 'one-shot'
-  /**
-   * The initial delegation's short `description`, kept as the child's durable
-   * creation label so enumeration can identify the conversation without
-   * replaying parent tool results or exposing the child prompt.
-   */
-  readonly label?: string
-}
-
-/** A session-backed subagent whose declared composition supports cold resume. */
-export interface ContinuableSubagentDescriptorData extends SubagentDescriptorBase {
-  readonly mode: 'continuable'
-  /** The initial delegation's short `description`, used for durable enumeration. */
-  readonly label: string
-  /** Resolved child `agentOptions.provider`, when one was declared. */
-  readonly agentProvider?: string
-  /** Resolved child `agentOptions.model`, when one was declared. */
-  readonly agentModel?: string
-  /** Resolved child `agentOptions.reasoningEffort`, when one was declared. */
-  readonly agentReasoningEffort?: ReasoningEffortId
-  /** Per-child persona that shadows the deployment persona on resume. */
-  readonly persona?: string
-  /** Child tool scoping reapplied on resume. */
-  readonly toolFilter?: ToolRestriction
-  /** Generic settlement notice policy reapplied on every activation. */
-  readonly settlementDelivery: SubagentSettlementDelivery
-  /** Optional durable capability ownership. */
-  readonly owner?: SubagentOwnerBinding
-}
-
-/** The supported durable subagent identity and optional continuation composition. */
-export type SubagentDescriptorData =
-  | OneShotSubagentDescriptorData
-  | ContinuableSubagentDescriptorData
 
 /** Fields shared by descriptor snapshot inputs. */
 interface SubagentDescriptorInputBase {

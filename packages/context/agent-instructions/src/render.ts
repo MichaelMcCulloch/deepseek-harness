@@ -5,7 +5,7 @@
  */
 
 import { basename, dirname } from 'node:path'
-import type { InstructionFile, LoadedInstructionFile } from './files.ts'
+import type { InstructionFile, LoadedInstructionFile } from './types.ts'
 
 const SYSTEM_REMINDER_OPEN = '<system-reminder>'
 const SYSTEM_REMINDER_CLOSE = '</system-reminder>'

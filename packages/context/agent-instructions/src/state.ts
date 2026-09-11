@@ -18,8 +18,8 @@ import {
   probeScopeInstruction,
   readScopeInstruction,
   relativeDisplay,
-  type LoadedInstructionFile,
 } from './files.ts'
+import type { LoadedInstructionFile } from './types.ts'
 import {
   candidateScopeKey,
   decodeScopeKey,

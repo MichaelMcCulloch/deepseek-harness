@@ -3,8 +3,22 @@
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
-import type { FileUploads } from './index.ts'
 import type { FileUploadValue } from './types.ts'
+
+/** Host upload service face this route consumes, so it imports no service module. */
+interface FileUploadStreamingService {
+  /**
+   * Persist raw chunks for one Session without aggregating the upload.
+   * @param request - Session identity, ordered bytes, cancellation, and optional display name.
+   * @returns the staged receipt and durable file reference.
+   */
+  uploadStream(request: {
+    readonly sessionId: SessionId
+    readonly data: AsyncIterable<Uint8Array>
+    readonly signal?: AbortSignal
+    readonly name?: string
+  }): Promise<FileUploadValue>
+}
 
 type FileUploadHttpResult =
   | { readonly ok: true; readonly value: FileUploadValue }
@@ -19,7 +33,10 @@ type FileUploadHttpResult =
  * @param request - authenticated HTTP request from Connection.
  * @returns JSON result using HTTP status 200 after request validation.
  */
-export async function handleFileUploadHttp(service: FileUploads, request: Request): Promise<Response> {
+export async function handleFileUploadHttp(
+  service: FileUploadStreamingService,
+  request: Request,
+): Promise<Response> {
   if (request.method !== 'POST') {
     return new Response(null, { status: 405, headers: { allow: 'POST' } })
   }

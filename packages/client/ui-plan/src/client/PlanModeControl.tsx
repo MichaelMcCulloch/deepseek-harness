@@ -4,8 +4,16 @@ import { IconCloseFill14 } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: pulls the ui-conversation SlotMap merge (the input.plan seat and
 // its {locked} owner share).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type { PlanChipInjected } from './index.ts'
 import css from './PlanModeControl.module.css'
+
+/** Injected business face of the composer plan seat. */
+export interface PlanChipInjected {
+  /**
+   * Leave plan mode by executing /plan off.
+   * @returns null on admitted execution; a user-visible failure line otherwise.
+   */
+  exitPlanMode: () => Promise<string | null>
+}
 
 /** Full plan-seat component props: runtime share (standard kit + locked owner prop) & injected share & the locale seat. */
 export type PlanChipProps =

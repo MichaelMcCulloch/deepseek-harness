@@ -43,7 +43,7 @@ import { assertSubagentMaxDepth } from './depth.ts'
 import { foldSubagentDescriptor, snapshotSubagentDescriptor } from './descriptor.ts'
 import { establishCatalogChild } from './catalog.ts'
 import { SubagentError } from './error.ts'
-import { isAdjacentAgentSendMessageTool } from './internal.ts'
+import { isAdjacentAgentSendMessageTool } from './markers.ts'
 import type { ActivationObserver } from './lifecycle.ts'
 import type { SubagentOwnerController } from './owner-controller.ts'
 import type {

@@ -20,71 +20,18 @@ import { SessionSeq, type SessionId } from '@deepseek-ai/dsh-session/types'
 import { workspaceTitleOf } from '@deepseek-ai/dsh-util-workspace-path'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import { SESSION_SEARCH_RESULT_LIMIT } from '../../types.ts'
-import type { SessionJob as JobView } from '../../types.ts'
-import type { SessionProjectionMap } from '@deepseek-ai/dsh-session-projection/types'
 import {
   createSnapshotStore, type SnapshotStore,
 } from '@deepseek-ai/dsh-client-store'
 import type { RemoteFailure, RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
-import type { SessionEventSource } from '../contract/events.ts'
 import type { SessionFace } from '../contract/session.ts'
 import type { AgentContext, ISessions } from '../contract/sessions.ts'
 import { createScope, scopeOf as scopeTagOf } from '../scope.ts'
 import { SessionManager } from './manager.ts'
+import type { SessionSearchResultItem } from './manager.ts'
 import type { SessionRemotes } from './remotes.ts'
-import type { SessionListPhase, SessionSearchResultItem, SubagentCatalogSnapshot } from './manager.ts'
 import type { Session } from './session.ts'
-
-/** Session list row projected from the host list RPC plus live stream increments. */
-export interface SessionSummary {
-  id: SessionId
-  /** Latest durable log-backed title, absent until the host projects one. */
-  title?: string
-  /** Human-facing label: durable title, project basename, then session id. */
-  displayTitle: string
-  cwd?: string
-  parentId?: SessionId
-  /** Coarse durable origin for navigation filtering; not a continuation capability. */
-  origin?: 'subagent'
-  running: boolean
-  /** Finished while not selected and not yet opened — the sidebar's green "done" reminder. Absent = false. */
-  completed?: boolean
-  /**
-   * Empty-log bit (host summary derivation mirror). New Session reuses a blank
-   * one targeting the same workspace. Filtering stays with the consumer: the
-   * store carries every row, while the Workspace browser shows only the
-   * selected blank entry.
-   */
-  blank: boolean
-  updatedAt: number
-  /** Current host-computed projection values retained by the object layer. */
-  projectionValues?: Readonly<Partial<SessionProjectionMap>>
-}
-
-/**
- * Session list store shape. `current` rides the same snapshot (arbitrated:
- * the single useSessions standard hook reads list and selection together —
- * sidebar highlighting and current-session consumers share one fact source).
- */
-export interface SessionListState {
-  /** Host-list order; addressed breadcrumb-only rows are excluded. */
-  ids: SessionId[]
-  /** Host rows plus the current addressed subagent route used by navigation. */
-  byId: Record<SessionId, SessionSummary>
-  current: SessionId | undefined
-  /** Arrival lifecycle projected 1:1 from the manager snapshot (see SessionListPhase): empty-with-ready means "truly no sessions". */
-  phase: SessionListPhase
-  /** Direct durable catalogs keyed by their selected parent address. */
-  subagentsByParent: Readonly<Record<SessionId, SubagentCatalogSnapshot>>
-  /**
-   * Background jobs each session can see, mirrored last-wins from Session
-   * Controller's control baseline and `jobs` frames. A missing key is an empty
-   * set, so consumers read absence rather than a sentinel.
-   */
-  jobsBySession: Readonly<Record<SessionId, readonly JobView[]>>
-  /** Current session's catalog-derived address, absent on ordinary navigation. */
-  currentAddress: SubagentAddress | undefined
-}
+import type { SessionBinding, SessionListState, SessionSummary } from './state.ts'
 
 /** Persisted navigation cell: address survives refresh for correct history routing. */
 interface SessionSelection {
@@ -124,15 +71,9 @@ export class SessionForkError extends Error {
   }
 }
 
-/** Identity-stable logical binding for one materialized Client Session. */
-export interface SessionBinding {
-  readonly sessionId: SessionId
-  /** The outward session face only — feature code never sees the concrete class. */
-  readonly session: SessionFace
-  /** Contiguous event window reserved for Conversation assembly. */
-  readonly eventSource: SessionEventSource
-  readonly ctx: AgentContext
-}
+// Client Session store vocabulary lives in ./state.ts; re-exported here so
+// existing consumers keep their import site.
+export type { SessionBinding, SessionListState, SessionSummary } from './state.ts'
 
 // Scope primitives live in ../scope.ts (the client mirror of host
 // dsh-scope, keyed by Agent identity); re-exported here so existing

@@ -6,8 +6,7 @@
  * What the first tab *is* belongs to the embedder: pass a factory and this
  * module only decides where it sits.
  */
-import type { DockMode, LayoutState, PaneId, TabId, TabRecord } from '../contract/types.ts'
-import type { Mint } from './planner.ts'
+import type { DockMode, LayoutState, Mint, PaneId, TabId, TabRecord } from '../contract/types.ts'
 
 /** Monotonic id source; one instance belongs to one surface's sequence. */
 export interface IdMinter {

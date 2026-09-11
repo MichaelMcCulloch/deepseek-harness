@@ -19,19 +19,7 @@ import {
   USER_GLOBAL_DIRECTORY,
   USER_GLOBAL_FILE,
 } from './render.ts'
-
-/** An instruction candidate identified by absolute and model-facing paths. */
-export interface InstructionFile {
-  absolutePath: string
-  displayPath: string
-}
-
-/** An instruction file whose UTF-8 content was read successfully. */
-export interface LoadedInstructionFile extends InstructionFile {
-  content: string
-  /** Provider freshness token when the file was loaded through `ctx.fs`. */
-  version?: FsVersion
-}
+import type { InstructionFile, LoadedInstructionFile } from './types.ts'
 
 interface DiscoveredInstructionFile extends InstructionFile {
   target?: FsTarget

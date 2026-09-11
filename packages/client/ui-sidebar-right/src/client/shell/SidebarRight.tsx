@@ -46,8 +46,7 @@ import type { SidebarRightTabDefinition } from '../tab-registry.ts'
 import type { createSidebarRightStore, SurfaceState } from '../stores.ts'
 import { canCloseTab } from '../stores.ts'
 import type { TabOccurrence } from '../tab-domain.ts'
-import type { SidebarRightTabNavigation } from '../contract/slots.ts'
-import type { TabHookContext } from '../tab-info.ts'
+import type { SidebarRightTabNavigation, TabHookContext } from '../contract/slots.ts'
 import css from './SidebarRight.module.css'
 
 /** The store share the seat receives. */

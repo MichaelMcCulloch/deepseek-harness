@@ -1,21 +1,21 @@
 /**
  * The seam's consumer-facing contracts: request, result, and capability types
- * for {@link SubagentProvider}, plus the `subagent/start` and `subagent/end`
- * payloads that plugins and hosts observe. Internal control interfaces belong
- * with their implementation — the lifecycle observer in `./lifecycle.ts`, the
- * continuation host in `./continuation.ts` — so this module stays the published
- * surface rather than a bag of everything type-shaped.
+ * for {@link SubagentProvider}, plus the `subagent/start`, `subagent/end`, and
+ * durable `subagent/descriptor` payloads that plugins and hosts observe.
+ * Internal control interfaces belong with their implementation — the lifecycle
+ * observer in `./lifecycle.ts`, the continuation host in `./continuation.ts` —
+ * so this module stays the published surface rather than a bag of everything
+ * type-shaped.
  *
  * @module @deepseek-ai/dsh-subagent/types
  */
 
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { ContentBlock, MessageId } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, MessageId, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { ObjectJsonSchema, ToolRestriction } from '@deepseek-ai/dsh-tools'
-import type { SubagentDescriptorData } from './descriptor.ts'
 
 /** Identifies one accepted subagent run across its lifecycle event pair. */
 export type SubagentRunId = Branded<'SubagentRunId'>
@@ -101,6 +101,53 @@ export interface SubagentOwnerBinding {
   /** Controller-private durable JSON metadata. */
   readonly metadata: JsonValue
 }
+
+/** Fields shared by every supported `subagent/descriptor` payload. */
+interface SubagentDescriptorBase {
+  /** Descriptor format version ({@link SUBAGENT_DESCRIPTOR_VERSION}). */
+  readonly version: number
+  /** Whether the child is a terminal one-shot run or a resumable conversation. */
+  readonly mode: 'one-shot' | 'continuable'
+  /** The `ctx.subagents` provider name that established the child. */
+  readonly provider: string
+}
+
+/** A session-backed subagent that cannot be cold-resumed after its run. */
+export interface OneShotSubagentDescriptorData extends SubagentDescriptorBase {
+  readonly mode: 'one-shot'
+  /**
+   * The initial delegation's short `description`, kept as the child's durable
+   * creation label so enumeration can identify the conversation without
+   * replaying parent tool results or exposing the child prompt.
+   */
+  readonly label?: string
+}
+
+/** A session-backed subagent whose declared composition supports cold resume. */
+export interface ContinuableSubagentDescriptorData extends SubagentDescriptorBase {
+  readonly mode: 'continuable'
+  /** The initial delegation's short `description`, used for durable enumeration. */
+  readonly label: string
+  /** Resolved child `agentOptions.provider`, when one was declared. */
+  readonly agentProvider?: string
+  /** Resolved child `agentOptions.model`, when one was declared. */
+  readonly agentModel?: string
+  /** Resolved child `agentOptions.reasoningEffort`, when one was declared. */
+  readonly agentReasoningEffort?: ReasoningEffortId
+  /** Per-child persona that shadows the deployment persona on resume. */
+  readonly persona?: string
+  /** Child tool scoping reapplied on resume. */
+  readonly toolFilter?: ToolRestriction
+  /** Generic settlement notice policy reapplied on every activation. */
+  readonly settlementDelivery: SubagentSettlementDelivery
+  /** Optional durable capability ownership. */
+  readonly owner?: SubagentOwnerBinding
+}
+
+/** The supported durable subagent identity and optional continuation composition. */
+export type SubagentDescriptorData =
+  | OneShotSubagentDescriptorData
+  | ContinuableSubagentDescriptorData
 
 /**
  * Observe-only identifying detail for a published subagent run, carried by

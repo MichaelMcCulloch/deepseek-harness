@@ -12,7 +12,9 @@ import type {
   SubagentCatalog, SubagentInterruptReceipt, SubagentPromptReceipt, SubagentPromptRequest,
 } from '@deepseek-ai/dsh-subagent/client'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
-import type { SessionRemote } from '../transport.ts'
+
+/** Complete generated `ctx.remote.session` namespace. */
+export type SessionRemote = ClientRemote['session']
 
 /** Narrow Commands namespace consumed by a Client Session. */
 export interface SessionCommandsRemote {

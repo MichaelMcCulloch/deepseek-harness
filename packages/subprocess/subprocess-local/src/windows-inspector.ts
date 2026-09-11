@@ -12,7 +12,7 @@
 import { spawnSync } from 'node:child_process'
 import koffi from 'koffi'
 import type { SubprocessTerminalSignal } from '@deepseek-ai/dsh-subprocess'
-import type { ProcessIdentity, ProcessInspector, ProcessSnapshot } from './process-inspector.ts'
+import type { ProcessIdentity, ProcessInspector, ProcessSnapshot } from './types.ts'
 
 /** One Toolhelp32 process-table row. */
 export interface ProcessEntry {

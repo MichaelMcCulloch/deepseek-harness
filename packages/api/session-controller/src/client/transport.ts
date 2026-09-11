@@ -6,7 +6,6 @@ import {
   RemoteJournalStream,
   RemoteSnapshotStream,
   RemoteStreamCarrierError,
-  type ClientRemote,
   type RemoteJournalChange,
   type RemoteJournalFrame,
 } from '@deepseek-ai/dsh-api-gateway/client'
@@ -37,8 +36,7 @@ export {
 /** Pagination fields bound to an already-addressed Session journal. */
 export type ClientSessionPageRequest = Omit<SessionPageRequest, 'address' | 'throughSeq'>
 
-/** Complete generated `ctx.remote.session` namespace. */
-export type SessionRemote = ClientRemote['session']
+export type { SessionRemote } from './sessions/remotes.ts'
 
 /** Opening metadata carried only by a follow snapshot, never by loadOlder pages. */
 interface SessionJournalPage extends SessionPage {

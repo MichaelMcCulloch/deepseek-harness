@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-09-10-zero-import-cycles-in-the-module-graph.md
+2026-09-10-zero-import-cycles-in-the-module-graph.md: 05af20d956ed52ec1efd2176de153d66fcbffd79
+2026-09-10-zero-import-cycles-in-the-module-graph.zh.md: f1f18f359fee02dff5fb812c09adda41c7142144

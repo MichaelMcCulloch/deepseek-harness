@@ -11,6 +11,9 @@ import {
 import { promisify } from 'node:util'
 import { NodePrivateZstdFrameDecoder } from './zstd-private-decoder.ts'
 import { PublicZstdFrameDecoder } from './zstd-public-decoder.ts'
+import type { ZstdFrameDecoder, ZstdFrameRange } from './types.ts'
+
+export type { ZstdFrameDecoder, ZstdFrameRange } from './types.ts'
 
 const ZSTD_MAGIC = 0xFD2FB528
 const zstdCompressAsync = promisify(zstdCompress)
@@ -20,14 +23,6 @@ const CHECKSUM_OPTIONS: ZstdOptions = {
 }
 const INCOMPLETE_FRAME_OPTIONS: ZstdOptions = {
   finishFlush: constants.ZSTD_e_flush,
-}
-
-/** Byte range occupied by one structurally complete Zstandard frame. */
-export interface ZstdFrameRange {
-  /** Inclusive frame start. */
-  start: number
-  /** Exclusive frame end. */
-  end: number
 }
 
 /** Structural scan result for a concatenated Zstandard stream. */
@@ -119,20 +114,6 @@ export async function compressZstdFrame(input: Buffer | string): Promise<Buffer>
  */
 export async function decompressZstdFrame(input: Buffer): Promise<Buffer> {
   return zstdDecompressAsync(input)
-}
-
-/** Common lifecycle for interchangeable synchronous multi-frame decoders. */
-export interface ZstdFrameDecoder {
-  /**
-   * Decode and checksum complete frames in source order. Each yielded buffer
-   * remains valid only until the iterator advances to the next frame.
-   * @param source - concatenated Zstandard frame bytes.
-   * @param frames - structurally complete ranges within `source`.
-   * @returns one plaintext buffer per frame.
-   */
-  decode(source: Buffer, frames: readonly ZstdFrameRange[]): Generator<Buffer, void, void>
-  /** Release decoder-owned resources; repeated calls are harmless. */
-  close(): void
 }
 
 /**

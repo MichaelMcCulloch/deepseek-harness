@@ -28,15 +28,15 @@ import {
   existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync,
   symlinkSync, unlinkSync, writeFileSync,
 } from 'node:fs'
-import { basename, dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import * as yaml from 'js-yaml'
 import { withFileLock } from '@deepseek-ai/dsh-atomic-write'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
-import { applyEntryPatches, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
+import { applyEntryPatches, entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type { DshManifest, DshModuleFallbackManifest, ProfilePatchReload } from '@deepseek-ai/dsh-package-manifest'
 import { resolve as resolvePackage, type Package as ResolvePackageManifest } from 'resolve.exports'
-import { loadOverlayPatches } from './index.ts'
 
 /** Directory under the Harness home holding every profile. */
 export const PROFILES_DIR = 'profiles'
@@ -850,4 +850,97 @@ export function composeEntries(
     let index = 0
     warn(message.replace(/%C/g, () => JSON.stringify(args[index++])))
   })
+}
+
+// The include's YAML dialect (`!!js` scalars become expression nodes the
+// Loader interpolates against each entry's injection-ready context), imported
+// from the include itself so patch parsing and config dumping can never drift
+// from what the include mounts. Patch files share it so they may
+// reference `process.env`.
+const userPatchesSchema = entryListSchema
+
+/**
+ * Load an optional patch-list file: a top-level YAML array of loader patch
+ * entries (`@deepseek-ai/cordis-plugin-include`'s `PatchOptions`): id-targeted config
+ * overrides and `insert` lists, with `!!js` expressions allowed. A missing
+ * file means "no layer"; an unreadable, unparsable, or non-array file throws —
+ * a present patch file that cannot apply is a misconfiguration and must fail
+ * loud at boot, never be silently skipped.
+ * @param binName - the diagnostic prefix on the thrown error.
+ * @param file - absolute path of the patch file.
+ * @returns the parsed patches, or `undefined` when the file does not exist.
+ */
+export function loadOptionalPatches(binName: string, file: string): PatchOptions[] | undefined {
+  let content: string
+  try {
+    content = readFileSync(file, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return undefined
+    throw new Error(`${binName}: failed to read patches ${file}: ${String(error)}`)
+  }
+  return parsePatchList(binName, file, content, 'patches')
+}
+
+/**
+ * Load a required overlay patch list: a bundle's `cordis.patch.yml` or a
+ * `--patch <path>` overlay. Same file format as {@link loadOptionalPatches},
+ * but a missing file throws, because the caller named this file — its absence
+ * is a misconfiguration, not "no overlay".
+ * @param binName - the diagnostic prefix on the thrown error.
+ * @param file - absolute path of the overlay file.
+ * @returns the parsed patch list.
+ */
+export function loadOverlayPatches(binName: string, file: string): PatchOptions[] {
+  let content: string
+  try {
+    content = readFileSync(file, 'utf8')
+  } catch (error) {
+    throw new Error(`${binName}: failed to read overlay ${file}: ${String(error)}`)
+  }
+  return parsePatchList(binName, file, content, 'overlay')
+}
+
+/** Convert inserted filesystem paths to file URLs, anchoring relative paths beside the patch; keep assertion names literal. */
+function anchorInsertedPluginNames(patches: PatchOptions[], file: string): PatchOptions[] {
+  const base = dirname(resolve(file))
+  const visit = (entry: EntryOptions): void => {
+    if (typeof entry.name === 'string' && (isAbsolute(entry.name) || entry.name.startsWith('./') || entry.name.startsWith('../'))) {
+      entry.name = pathToFileURL(resolve(base, entry.name)).href
+    }
+    if (entry.group && Array.isArray(entry.config)) entry.config.forEach(visit)
+  }
+  for (const patch of patches) patch.insert?.forEach(visit)
+  return patches
+}
+/**
+ * Parse one loader patch list: a top-level YAML array of
+ * `@deepseek-ai/cordis-plugin-include` `PatchOptions` (id-targeted config overrides and
+ * `insert` lists, `!!js` expressions allowed). Every invalid field or value throws,
+ * because a patch file that cannot be applied at all is a misconfiguration; a
+ * single patch whose target row is absent stays a per-entry Loader warning, so
+ * one overlay shared across surfaces does not have to match every tree.
+ * @param binName - the diagnostic prefix on the thrown error.
+ * @param file - the source path, quoted in errors.
+ * @param content - the file's text.
+ * @param label - what to call this list in errors (`patches`, `overlay`).
+ * @returns the parsed patch list.
+ */
+function parsePatchList(
+  binName: string, file: string, content: string, label: string,
+): PatchOptions[] {
+  let parsed: unknown
+  try {
+    parsed = yaml.load(content, { schema: userPatchesSchema })
+  } catch (error) {
+    throw new Error(`${binName}: failed to parse ${label} ${file}: ${String(error)}`)
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${binName}: ${label} ${file} must be a top-level YAML array of loader patch entries`)
+  }
+  parsed.forEach((entry, index) => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      throw new Error(`${binName}: ${label} entry ${index + 1} in ${file} must be a mapping (a loader patch entry)`)
+    }
+  })
+  return anchorInsertedPluginNames(parsed as PatchOptions[], file)
 }

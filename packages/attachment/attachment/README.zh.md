@@ -78,9 +78,8 @@ kind: "package-reference"
 
 | 文件 | 职责 |
 |---|---|
-| [`src/index.ts`](src/index.ts) | 插件入口：抽象 `AttachmentStore` 服务与再导出 |
+| [`src/index.ts`](src/index.ts) | 插件入口：抽象 `AttachmentStore` 服务、wire 上传准入与再导出 |
 | [`src/types.ts`](src/types.ts) | 持久词汇：引用、限额、上传与存储载荷 |
-| [`src/admission.ts`](src/admission.ts) | 对编码图片和文件上传强制执行规范 base64 并委托存储 |
 | [`src/error.ts`](src/error.ts) | `AttachmentError` 类与 `isImageAdmissionError` 运行时子集 |
 | [`src/brand.ts`](src/brand.ts) | `AttachmentId` 带类型标记的不透明标识符 |
 | — | 不发布运行时不变式伴生入口；实现负责强制不可变存储检查。 |

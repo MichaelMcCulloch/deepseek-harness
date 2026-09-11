@@ -78,7 +78,7 @@ import type { SubagentDescendantListEntry, SubagentListEntry } from './list-chil
 import { snapshotSubagentDescriptor } from './descriptor.ts'
 import { subagentIdentityProjectionDefinition, subagentTimingProjectionDefinition } from './projection.ts'
 import { establishCatalogChild, subagentCatalogProjectionDefinition } from './catalog.ts'
-import { deliverSubagentPrompt } from './internal.ts'
+import { deliverSubagentPrompt } from './markers.ts'
 import SubagentActivationSetupRegistry from './activation-setup-registry.ts'
 import type { ContinuableSetupContribution } from './activation-setup-registry.ts'
 import type { SubagentOwnerController } from './owner-controller.ts'
