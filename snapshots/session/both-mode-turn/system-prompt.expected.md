@@ -81,6 +81,18 @@ interface ToolArgsMap {
     node_ids: string[];
     if_revision?: number;
   } & Record<string, JsonValue>;
+  /** Correct the declared fields of one node without re-sending the graph. Omitted fields keep their value; the node keeps its id, status, recorded Git facts, completed work, and dependents. */
+  dag_node_amend: {
+    node_id: string;
+    content?: string;
+    /** Must contain VALIDATION: and ACCEPTANCE: sections. */
+    brief?: string;
+    deps?: string[];
+    kind?: "task" | "integration";
+    policy?: "delegate" | "ours" | "theirs";
+    files?: string[];
+    if_revision?: number;
+  } & Record<string, JsonValue>;
   /** Inspect one node, including its durable child and local Git execution facts. */
   dag_node_inspect: {
     node_id: string;
@@ -96,13 +108,13 @@ interface ToolArgsMap {
     target: string;
     if_revision?: number;
   } & Record<string, JsonValue>;
-  /** Resume one blocked or interrupted node with new instructions. */
+  /** Resume one blocked, interrupted, or failed node with new instructions. */
   dag_node_resume: {
     node_id: string;
     message: string;
     if_revision?: number;
   } & Record<string, JsonValue>;
-  /** Interrupt and replace active node work. A suspended node returns through starting. */
+  /** Interrupt and replace active node work. A suspended or failed node returns through starting. */
   dag_node_steer: {
     node_id: string;
     message: string;
@@ -120,7 +132,7 @@ interface ToolArgsMap {
   dag_wait: {
     after_revision: number;
   } & Record<string, JsonValue>;
-  /** Declare or amend the complete dependency graph. Send every node on each call. Existing nodes must repeat their immutable fields and exact live status. */
+  /** Declare or amend the complete dependency graph. Send every node on each call. An existing node repeats its live status and may correct its declared fields; omitting a node drops it and removes it from every surviving dependent. Use dag_node_amend to correct one node without re-sending the graph. */
   dag_write: {
     nodes: ({
       id: string;
@@ -382,6 +394,11 @@ interface ToolOutputMap {
     revision: number;
     operationId: string;
   };
+  dag_node_amend: {
+    accepted: boolean;
+    revision: number;
+    operationId: string;
+  };
   dag_node_inspect: {
     text: string;
   };
@@ -425,6 +442,14 @@ interface ToolOutputMap {
       childSessionId?: string;
       branch?: string;
       worktree?: string;
+    }[];
+    amended: {
+      id: string;
+      fields: string[];
+    }[];
+    rewired: {
+      id: string;
+      removedDeps: string[];
     }[];
     conflicts: ({
       ids: string[];

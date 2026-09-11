@@ -119,6 +119,7 @@ function workflow(): Workflow {
     branch: 'branch-a',
     worktree: '/tmp/a',
     frozenWaveBase: baseCommit,
+    preparedFrom: baseCommit,
     preparedHead: preparedCommit,
     dependencyCommits: [],
     conflictedFiles: [],
@@ -212,6 +213,17 @@ describe('DAG invariant accepted histories', () => {
     DagInvariant.validateDagState(fault.failed, redispatched)
     const failedReset = step(fault.failed, { type: 'reset', nodeId: DagNodeId('a'), target: baseCommit })
     DagInvariant.validateDagState(fault.failed, failedReset)
+
+    const corrected = step(flow.declared, {
+      type: 'amend',
+      nodeId: DagNodeId('a'),
+      definition: { ...flow.declared.nodes[0]!, content: 'Corrected a' },
+      topologicalOrder: [DagNodeId('a')],
+    })
+    DagInvariant.validateDagState(flow.declared, corrected)
+    const failedNode = replaceFirst(flow.started, { ...flow.started.nodes[0]!, status: 'failed' })
+    DagInvariant.validateDagState(failedNode, step(failedNode, { type: 'resume', nodeId: DagNodeId('a'), message: 'Try again.' }))
+    DagInvariant.validateDagState(failedNode, step(failedNode, { type: 'steer', nodeId: DagNodeId('a'), message: 'Replace.' }))
 
     const reset = step(flow.declared, { type: 'reset', nodeId: DagNodeId('a'), target: baseCommit })
     DagInvariant.validateDagState(flow.declared, reset)
@@ -353,7 +365,7 @@ describe('DAG invariant node and mailbox validation', () => {
   it('rejects definition, lifecycle, and generation mutations', () => {
     const declared = initial()
     const node = declared.nodes[0]!
-    expectInvalid(declared, replaceFirst(advance(declared), { ...node, content: 'changed' }), /changed its definition/)
+    expectInvalid(declared, replaceFirst(advance(declared), { ...node, content: 'changed' }), /changed its definition without a declaration operation/)
     expectInvalid(declared, replaceFirst(advance(declared), { ...node, status: 'completed', completedCommit }), /illegal edge/)
     expectInvalid(declared, replaceFirst(advance(declared), { ...node, generation: 2, bindingGeneration: 2 }), /changed generations/)
 
@@ -410,6 +422,7 @@ describe('DAG invariant node and mailbox validation', () => {
     for (const [before, after] of [
       ['pending', 'starting'],
       ['failed', 'pending'],
+      ['failed', 'starting'],
       ['blocked', 'starting'],
       ['interrupted', 'starting'],
       ['starting', 'interrupted'],
@@ -474,6 +487,34 @@ describe('DAG invariant node and mailbox validation', () => {
     expectInvalid(flow.probed, replaceFirst(advance(flow.probed), {
       ...flow.probed.nodes[0]!, preparedHead: 'bad',
     }), /invalid prepared Git evidence/)
+    expectInvalid(flow.prepared, replaceFirst(advance(flow.prepared), {
+      ...flow.prepared.nodes[0]!, preparedFrom: 'bad',
+    }), /invalid pre-preparation Git evidence/)
+    expectInvalid(declared, replaceFirst(advance(declared), {
+      ...declared.nodes[0]!, preparedFrom: baseCommit,
+    }), /invalid pre-preparation Git evidence/)
+  })
+
+  it('corrects declarations only through write or amend operations', () => {
+    const flow = workflow()
+    const node = flow.prepared.nodes[0]!
+    const amended = (overrides: Partial<DagNodeSnapshot>): DagState => {
+      const counter = flow.prepared.operationCounter + 1
+      return advance({
+        ...flow.prepared,
+        operationCounter: counter,
+        receipts: [...flow.prepared.receipts, {
+          id: DagOperationId(`op-${counter}`),
+          cause: 'amend',
+          acceptedRevision: flow.prepared.revision + 1,
+          nodeIds: [node.id],
+        }],
+        nodes: [{ ...node, ...overrides }, ...flow.prepared.nodes.slice(1)],
+      })
+    }
+    DagInvariant.validateDagState(flow.prepared, amended({ content: 'Corrected a' }))
+    expectInvalid(flow.prepared, amended({ deps: [DagNodeId('b')] }), /changed dependencies after recording local Git preparation/)
+    expectInvalid(flow.prepared, amended({ content: 'Corrected a', status: 'in_progress' }), /does not match accepted amend operation/)
   })
 
   it('rejects duplicate, malformed, concurrent, and unfenced commands', () => {

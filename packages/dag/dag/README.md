@@ -52,7 +52,9 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 ### Node lifecycle
 
-New nodes start as `pending`. Dispatch moves a ready node through `starting` to `in_progress`. The child reports `completed` or `blocked`; effect or child failure records `failed`; stop records `interrupted` before cancellation. Blocked and interrupted nodes resume through `starting`. A failed node returns to `pending` only through redispatch. A completed node is terminal.
+New nodes start as `pending`. Dispatch moves a ready node through `starting` to `in_progress`. The child reports `completed` or `blocked`; effect or child failure records `failed`; stop records `interrupted` before cancellation. Blocked, interrupted, and failed nodes resume or are steered through `starting`; a failed node also returns to `pending` through redispatch. A completed node is terminal.
+
+A wrong declaration is corrected in place, so fixing one row never costs the rows that depend on it. `dag_write` re-sends the complete graph and amends every existing row whose declared fields changed; it also removes an omitted node from each surviving dependent's dependency list instead of requiring that dependent to be dropped, and reports both as amended and rewired rows. `dag_node_amend` changes one node's declared fields without re-sending the graph. Neither path changes an active node's declaration or the dependencies of a node that already recorded local Git preparation.
 
 Every dispatch, redispatch, resume, steer, stop, or reset operation increments the node generation when it invalidates earlier work. Effect callbacks must match the node binding generation, node generation, and operation id. A stale callback cannot change state.
 
@@ -60,7 +62,7 @@ Every dispatch, redispatch, resume, steer, stop, or reset operation increments t
 
 A dispatch wave first records its intent, then checks one porcelain-v2 root status. The root must be clean, on a symbolic local branch, and at a valid local HEAD. The wave freezes that branch and commit once. Node branches and worktrees start at the frozen commit under `<DSH_HOME>/dag/worktrees/v1/`; dependency commits merge in declared order by exact recorded commit id.
 
-Task-node completion requires a clean worktree, the expected branch, no active merge, a HEAD different from the frozen base, and every dependency commit as an ancestor. The service enforces declared file ownership before it accepts completion. Integration nodes use `ours`, `theirs`, or `delegate`; delegate mode records exact commits and conflicts for manual resolution. Reset accepts the frozen base, an exact commit, or an explicit local `refs/heads/*` ref. It preserves untracked files.
+Task-node completion requires a clean worktree, the expected branch, no active merge, and every dependency commit as an ancestor, plus either a HEAD different from the frozen base or a worktree that already carried commits when preparation started. Preparation records the pre-merge HEAD, so re-arming a node onto its own delivered work can complete with no new commit. The service enforces declared file ownership before it accepts completion, and rejects at declaration time a task node whose declared files a transitive dependency also declares. Integration nodes use `ours`, `theirs`, or `delegate`; delegate mode records exact commits and conflicts for manual resolution. Reset accepts the frozen base, an exact commit, or an explicit local `refs/heads/*` ref. It preserves untracked files.
 
 ### Immediate commands and waiting
 

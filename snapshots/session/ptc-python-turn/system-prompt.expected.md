@@ -137,6 +137,23 @@ class DagDispatchOutput(TypedDict):
     revision: int
     operationId: str
 
+class DagNodeAmendArgs(TypedDict):
+    node_id: str
+    content: NotRequired[str]
+    # Must contain VALIDATION: and ACCEPTANCE: sections.
+    brief: NotRequired[str]
+    deps: NotRequired[list[str]]
+    kind: NotRequired[Literal["task", "integration"]]
+    policy: NotRequired[Literal["delegate", "ours", "theirs"]]
+    files: NotRequired[list[str]]
+    if_revision: NotRequired[int]
+    # Additional keys beyond those declared are allowed.
+
+class DagNodeAmendOutput(TypedDict):
+    accepted: bool
+    revision: int
+    operationId: str
+
 class DagNodeInspectArgs(TypedDict):
     node_id: str
     # Additional keys beyond those declared are allowed.
@@ -230,6 +247,14 @@ class DagWriteOutputDropped(TypedDict):
     branch: NotRequired[str]
     worktree: NotRequired[str]
 
+class DagWriteOutputAmended(TypedDict):
+    id: str
+    fields: list[str]
+
+class DagWriteOutputRewired(TypedDict):
+    id: str
+    removedDeps: list[str]
+
 class DagWriteOutputConflicts(TypedDict):
     ids: list[str]
     files: list[str]
@@ -240,6 +265,8 @@ class DagWriteOutput(TypedDict):
     revision: int
     operationId: str
     dropped: list[DagWriteOutputDropped]
+    amended: list[DagWriteOutputAmended]
+    rewired: list[DagWriteOutputRewired]
     conflicts: list[DagWriteOutputConflicts]
 
 class EditArgs(TypedDict):
@@ -689,6 +716,8 @@ class Tools(Protocol):
         """Create one persisted same-session completion goal when the current direct human request is a long-running objective that should continue across autonomous goal rounds. You may infer that intent without requiring the user to say \"create a goal\". Do not use this for trivial single-turn work. Execution rejects non-human and subagent authority."""
     async def dag_dispatch(self, args: DagDispatchArgs) -> DagDispatchOutput:
         """Start distinct dependency-ready pending nodes. The response does not wait for Git or child creation."""
+    async def dag_node_amend(self, args: DagNodeAmendArgs) -> DagNodeAmendOutput:
+        """Correct the declared fields of one node without re-sending the graph. Omitted fields keep their value; the node keeps its id, status, recorded Git facts, completed work, and dependents."""
     async def dag_node_inspect(self, args: DagNodeInspectArgs) -> DagNodeInspectOutput:
         """Inspect one node, including its durable child and local Git execution facts."""
     async def dag_node_redispatch(self, args: DagNodeRedispatchArgs) -> DagNodeRedispatchOutput:
@@ -696,9 +725,9 @@ class Tools(Protocol):
     async def dag_node_reset(self, args: DagNodeResetArgs) -> DagNodeResetOutput:
         """Reset tracked worktree state to the frozen base, an exact commit, or a local refs/heads ref. Untracked files remain."""
     async def dag_node_resume(self, args: DagNodeResumeArgs) -> DagNodeResumeOutput:
-        """Resume one blocked or interrupted node with new instructions."""
+        """Resume one blocked, interrupted, or failed node with new instructions."""
     async def dag_node_steer(self, args: DagNodeSteerArgs) -> DagNodeSteerOutput:
-        """Interrupt and replace active node work. A suspended node returns through starting."""
+        """Interrupt and replace active node work. A suspended or failed node returns through starting."""
     async def dag_node_stop(self, args: DagNodeStopArgs) -> DagNodeStopOutput:
         """Commit interrupted state, then cancel the node child."""
     async def dag_status(self, args: dict[str, Any]) -> DagStatusOutput:
@@ -706,7 +735,7 @@ class Tools(Protocol):
     async def dag_wait(self, args: DagWaitArgs) -> DagWaitOutput:
         """Wait until a later actionable DAG notice has been injected. Use this after dispatch instead of status polling."""
     async def dag_write(self, args: DagWriteArgs) -> DagWriteOutput:
-        """Declare or amend the complete dependency graph. Send every node on each call. Existing nodes must repeat their immutable fields and exact live status."""
+        """Declare or amend the complete dependency graph. Send every node on each call. An existing node repeats its live status and may correct its declared fields; omitting a node drops it and removes it from every surviving dependent. Use dag_node_amend to correct one node without re-sending the graph."""
     async def edit(self, args: EditArgs) -> EditOutput:
         """Edit an existing UTF-8 text file by replacing literal text."""
     async def exit_plan_mode(self, args: ExitPlanModeArgs) -> ExitPlanModeOutput:

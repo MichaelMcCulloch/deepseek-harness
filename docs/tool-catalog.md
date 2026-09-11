@@ -25,7 +25,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-bash-persistent` | `bash` | `ctx.tools`, `ctx.terminals`, `an owning Agent at execution time` | `tool/call`, `PTY shell state`, `tool/result` | - | One owner-isolated persistent bash tool; deployment composition supplies the PTY backend and may override the model-facing environment description. |
 | `@deepseek-ai/dsh-tool-pwsh-persistent` | `pwsh` | `ctx.tools`, `ctx.terminals`, `an owning Agent at execution time` | `tool/call`, `PTY shell state`, `tool/result` | - | One owner-isolated persistent pwsh tool, the Windows counterpart of the persistent bash tool; deployment composition supplies a pwsh-dialect PTY backend and may override the model-facing environment description. |
 | `@deepseek-ai/dsh-tool-str-replace-editor` | `str_replace_editor` | `ctx.tools`, `ctx.fs` | `tool/call`, `fs/observed after view presence/absence, edit absence, or successful mutation`, `tool/result` | - | Standalone view/create/unique literal replace/line insert tool over the filesystem seam; it composes with any shell or terminal API. |
-| `@deepseek-ai/dsh-tool-dag` | `dag_dispatch`, `dag_node_block`, `dag_node_complete`, `dag_node_inspect`, `dag_node_redispatch`, `dag_node_reset`, `dag_node_resume`, `dag_node_steer`, `dag_node_stop`, `dag_status`, `dag_wait`, `dag_write` | `ctx.tools`, `ctx.dag`, `ctx.systemPrompt`, `an owning dispatcher or DAG child Agent` | `tool/call`, `dag/state for mutations`, `tool/result` | - | Dispatchers receive the graph controls. Owner-bound DAG children receive only dag_status, dag_node_complete, and dag_node_block; the catalog combines both scoped schema sets, while actual child composition removes every dispatcher control. |
+| `@deepseek-ai/dsh-tool-dag` | `dag_dispatch`, `dag_node_amend`, `dag_node_block`, `dag_node_complete`, `dag_node_inspect`, `dag_node_redispatch`, `dag_node_reset`, `dag_node_resume`, `dag_node_steer`, `dag_node_stop`, `dag_status`, `dag_wait`, `dag_write` | `ctx.tools`, `ctx.dag`, `ctx.systemPrompt`, `an owning dispatcher or DAG child Agent` | `tool/call`, `dag/state for mutations`, `tool/result` | - | Dispatchers receive the graph controls. Owner-bound DAG children receive only dag_status, dag_node_complete, and dag_node_block; the catalog combines both scoped schema sets, while actual child composition removes every dispatcher control. |
 | `@deepseek-ai/dsh-tool-fs` | `edit`, `read`, `read_image`, `write` | `ctx.tools`, `ctx.fs`, `ctx.systemPrompt`, `ctx.attachments (image-tool registration)`, `ctx.llm + an image-capable route (image-tool execution)` | `tool/call`, `fs/write-intent or fs/edit-intent for mutations`, `fs/observed after read presence/absence or successful file operation`, `durable attachment (read_image)`, `tool/result` | - | The read-before-write/edit policy is added by `@deepseek-ai/dsh-fs-observation-policy` (an `fs/*` event-gate plugin, no schema change); a deployment that loads these tools is expected to also load it. The image tool is not registered without `ctx.attachments`; its schema is route-independent, and execution refuses unless the exact routed model declares image input. |
 | `@deepseek-ai/dsh-tool-fs-search` | `glob`, `grep` | `ctx.tools`, `ctx.subprocess`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | glob and grep are unconditional discovery tools that spawn the packaged ripgrep binary (`@vscode/ripgrep`) through ctx.subprocess as ordinary foreground calls (never background jobs) — no host `rg` install and no shell layer. The catalog uses `sampleOverCapGlobResults: true`; deployments must choose that behavior explicitly. Capped results save the complete formatted list through the optional ctx.spillStore backend; returned locators are follow-up-readable/searchable when the backend exposes local paths in co-located deployments. |
 | `@deepseek-ai/dsh-tool-terminal` | `terminal_close`, `terminal_list`, `terminal_open`, `terminal_read`, `terminal_send`, `terminal_signal` | `ctx.tools`, `ctx.terminals`, `ctx.systemPrompt`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The six terminal tools are opt-in and complement one-shot shell/filesystem tools. `terminal_send(run_in_background: true)` registers with `ctx.jobs`; TUI, named key sequences, BEL, resize, auto-start, and cross-agent sharing are absent from the schema. |
@@ -735,6 +735,63 @@ Start distinct dependency-ready pending nodes. The response does not wait for Gi
 
 Source: [`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
 
+### `dag_node_amend`
+
+Correct the declared fields of one node without re-sending the graph. Omitted fields keep their value; the node keeps its id, status, recorded Git facts, completed work, and dependents.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "node_id": {
+      "type": "string"
+    },
+    "content": {
+      "type": "string"
+    },
+    "brief": {
+      "type": "string",
+      "description": "Must contain VALIDATION: and ACCEPTANCE: sections."
+    },
+    "deps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "task",
+        "integration"
+      ]
+    },
+    "policy": {
+      "type": "string",
+      "enum": [
+        "delegate",
+        "ours",
+        "theirs"
+      ]
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "if_revision": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "node_id"
+  ]
+}
+```
+
+Source: [`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)
+
 ### `dag_node_block`
 
 Suspend this DAG node with a clear reason when work cannot continue.
@@ -851,7 +908,7 @@ Source: [`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/inde
 
 ### `dag_node_resume`
 
-Resume one blocked or interrupted node with new instructions.
+Resume one blocked, interrupted, or failed node with new instructions.
 
 ```json
 {
@@ -878,7 +935,7 @@ Source: [`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/inde
 
 ### `dag_node_steer`
 
-Interrupt and replace active node work. A suspended node returns through starting.
+Interrupt and replace active node work. A suspended or failed node returns through starting.
 
 ```json
 {
@@ -964,7 +1021,7 @@ Source: [`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/inde
 
 ### `dag_write`
 
-Declare or amend the complete dependency graph. Send every node on each call. Existing nodes must repeat their immutable fields and exact live status.
+Declare or amend the complete dependency graph. Send every node on each call. An existing node repeats its live status and may correct its declared fields; omitting a node drops it and removes it from every surviving dependent. Use dag_node_amend to correct one node without re-sending the graph.
 
 ```json
 {

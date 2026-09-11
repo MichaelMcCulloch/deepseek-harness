@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DagNodeId } from '../src/ids.ts'
-import { sameDefinition, validateDagDeclaration } from '../src/validation.ts'
-import type { DagNodeDefinition, DagNodeInput, DagNodeSnapshot } from '../src/types.ts'
+import { changedDefinitionFields, rewireOmittedDependencies, validateDagDeclaration } from '../src/validation.ts'
+import type { DagNodeDefinition, DagNodeDefinitionField, DagNodeInput, DagNodeSnapshot } from '../src/types.ts'
 
 const valid = (overrides: Partial<DagNodeInput> = {}): DagNodeInput => ({
   id: 'a',
@@ -52,7 +52,7 @@ describe('DAG declaration validation', () => {
     expect(result.topologicalOrder).toEqual(['root', 'parallel', 'integration'])
   })
 
-  it('compares every immutable node definition field', () => {
+  it('reports every changed node definition field', () => {
     const definition = validateDagDeclaration([
       valid({ id: 'dependency' }),
       valid({ id: 'a', deps: ['dependency'], files: ['src/a.ts'] }),
@@ -66,19 +66,58 @@ describe('DAG declaration validation', () => {
       conflictedFiles: [],
       commands: [],
     }
-    expect(sameDefinition(node, definition)).toBe(true)
+    expect(changedDefinitionFields(node, definition)).toEqual([])
 
-    const differences: DagNodeDefinition[] = [
-      { ...definition, id: DagNodeId('b') },
-      { ...definition, content: 'Different' },
-      { ...definition, brief: 'VALIDATION: other.\nACCEPTANCE: other.' },
-      { ...definition, kind: 'integration' },
-      { ...definition, policy: 'ours' },
-      { ...definition, deps: [] },
-      { ...definition, deps: [DagNodeId('other')] },
-      { ...definition, files: [] },
-      { ...definition, files: ['src/other.ts'] },
+    const differences: readonly (readonly [DagNodeDefinition, readonly DagNodeDefinitionField[]])[] = [
+      [{ ...definition, content: 'Different' }, ['content']],
+      [{ ...definition, brief: 'VALIDATION: other.\nACCEPTANCE: other.' }, ['brief']],
+      [{ ...definition, kind: 'integration' }, ['kind']],
+      [{ ...definition, policy: 'ours' }, ['policy']],
+      [{ ...definition, deps: [] }, ['deps']],
+      [{ ...definition, deps: [DagNodeId('other')] }, ['deps']],
+      [{ ...definition, files: [] }, ['files']],
+      [{ ...definition, files: ['src/other.ts'] }, ['files']],
     ]
-    for (const changed of differences) expect(sameDefinition(node, changed)).toBe(false)
+    for (const [changed, fields] of differences) expect(changedDefinitionFields(node, changed)).toEqual(fields)
+    expect(changedDefinitionFields(node, {
+      ...definition,
+      content: 'Different',
+      deps: [DagNodeId('other')],
+      files: ['src/other.ts'],
+    })).toEqual(['content', 'deps', 'files'])
+  })
+
+  it('rejects a task node that claims files a transitive dependency already owns', () => {
+    expect(() => validateDagDeclaration([
+      valid({ id: 'dep', files: ['src/shared.ts'] }),
+      valid({ id: 'a', deps: ['dep'], files: ['src/shared.ts'] }),
+    ])).toThrow(/already owned by dependency "dep"/)
+
+    expect(() => validateDagDeclaration([
+      valid({ id: 'root', files: ['src/shared.ts'] }),
+      valid({ id: 'mid', deps: ['root'] }),
+      valid({ id: 'a', deps: ['mid'], files: ['src/shared.ts'] }),
+    ])).toThrow(/already owned by dependency "root"/)
+
+    expect(validateDagDeclaration([
+      valid({ id: 'dep', files: ['src/shared.ts'] }),
+      valid({ id: 'a', deps: ['dep'], files: ['src/a.ts'] }),
+      valid({ id: 'integration', deps: ['dep'], kind: 'integration', files: ['src/shared.ts'] }),
+      valid({ id: 'unowned', deps: ['dep'] }),
+    ]).definitions).toHaveLength(4)
+  })
+
+  it('rewires dependencies that name a node the durable graph already declared', () => {
+    const rewritten = rewireOmittedDependencies([
+      valid({ id: 'b', deps: ['dropped', 'kept', 'typo'] }),
+      valid({ id: 'kept' }),
+    ], new Set(['dropped', 'kept']))
+    expect(rewritten.rewired).toEqual([{ id: 'b', removedDeps: ['dropped'] }])
+    expect(rewritten.inputs[0]?.deps).toEqual(['kept', 'typo'])
+    expect(rewritten.inputs[1]).toEqual(valid({ id: 'kept' }))
+
+    const untouched = rewireOmittedDependencies([valid({ id: 'a', deps: ['b'] })], new Set())
+    expect(untouched.rewired).toEqual([])
+    expect(untouched.inputs[0]?.deps).toEqual(['b'])
   })
 })

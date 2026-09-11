@@ -522,6 +522,50 @@ describe('local DAG Git effects', { timeout: 60_000 }, () => {
     }, unrestrictedHead, signal)).resolves.toMatchObject({ targetCommit: unrestrictedHead })
   })
 
+  it('accepts a no-op task completion when the worktree already carried delivered work', async () => {
+    const base = run(root, 'rev-parse', 'HEAD')
+    const dependencyCommit = await dependency('rerun-dependency', { 'dependency.txt': 'dependency\n' })
+    const worktree = join(home, 'dag', 'worktrees', 'v1', 'session', 'g1', 'rerun-task')
+    const task = snapshot('rerun-task', {
+      deps: [DagNodeId('dependency')],
+      dependencyCommits: [dependencyCommit],
+    })
+    const first = await git.prepare(root, task, 'dsh/dag/session/g1/rerun-task', worktree, base, [dependencyCommit], signal)
+    expect(first.preparedFrom).toBe(base)
+    await writeFile(join(worktree, 'owned.txt'), 'delivered once\n')
+    run(worktree, 'add', 'owned.txt')
+    run(worktree, 'commit', '-m', 'deliver the task')
+    const delivered = run(worktree, 'rev-parse', 'HEAD')
+    await expect(git.validateCompletion({
+      ...task,
+      branch: first.branch,
+      worktree,
+      frozenWaveBase: base,
+      preparedFrom: first.preparedFrom,
+      preparedHead: first.head,
+    }, signal)).resolves.toBe(delivered)
+
+    const rearmed = await git.prepare(root, task, 'dsh/dag/session/g1/rerun-task', worktree, base, [dependencyCommit], signal)
+    expect(rearmed.preparedFrom).toBe(delivered)
+    expect(rearmed.head).toBe(delivered)
+    await expect(git.validateCompletion({
+      ...task,
+      branch: rearmed.branch,
+      worktree,
+      frozenWaveBase: base,
+      preparedFrom: rearmed.preparedFrom,
+      preparedHead: rearmed.head,
+    }, signal)).resolves.toBe(delivered)
+    await expect(git.validateCompletion({
+      ...task,
+      branch: rearmed.branch,
+      worktree,
+      frozenWaveBase: base,
+      preparedFrom: base,
+      preparedHead: rearmed.head,
+    }, signal)).rejects.toThrow(/commit after dependency preparation/)
+  })
+
   it('rejects missing and wrong-branch completion facts', async () => {
     await expect(git.validateCompletion(snapshot('missing-completion'), signal)).rejects.toThrow(/lacks frozen local Git/)
     const base = run(root, 'rev-parse', 'HEAD')

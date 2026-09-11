@@ -42,7 +42,7 @@ function inspected(): DagNodeSnapshot {
     id: DagNodeId('a'), content: 'Implement a', brief: 'VALIDATION: test.\nACCEPTANCE: commit.', deps: [], kind: 'task',
     policy: 'delegate', files: ['src/a.ts'], status: 'in_progress', generation: 1, bindingGeneration: 1,
     childSessionId: SessionId('child-a'), branch: 'dsh/dag/test/g1/a', worktree: '/tmp/dag/a', frozenWaveBase: '1'.repeat(40),
-    waveId: DagWaveId('wave-1'), preparedHead: '1'.repeat(40), dependencyCommits: [], conflictedFiles: [],
+    waveId: DagWaveId('wave-1'), preparedFrom: '1'.repeat(40), preparedHead: '1'.repeat(40), dependencyCommits: [], conflictedFiles: [],
     currentOperationId: DagOperationId('op-2'), settlement: { kind: 'completed', summary: 'Done.', artifacts: [] },
     completedCommit: '2'.repeat(40), commands: [],
   }
@@ -75,8 +75,11 @@ function fakeDag(options: FakeDagOptions = {}) {
         { id: DagNodeId('old'), childSessionId: SessionId('child-old'), branch: 'old-branch', worktree: '/tmp/old' },
         { id: DagNodeId('unstarted') },
       ],
+      amended: [{ id: DagNodeId('fixed'), fields: ['files'] }],
+      rewired: [{ id: DagNodeId('dependent'), removedDeps: [DagNodeId('old')] }],
       conflicts: [{ ids: [DagNodeId('a'), DagNodeId('b')], files: ['src/shared.ts'], reason: 'declared-files-overlap' }],
     }),
+    amend: record('amend', accepted),
     dispatch: record('dispatch', accepted),
     wait: record('wait', Promise.resolve({ revision: 5, notices: [], state: projection() })),
     status: record('status', options.status === undefined ? projection() : options.status),
@@ -147,6 +150,8 @@ describe('native DAG tools', () => {
         { id: 'old', childSessionId: 'child-old', branch: 'old-branch', worktree: '/tmp/old' },
         { id: 'unstarted' },
       ],
+      amended: [{ id: 'fixed', fields: ['files'] }],
+      rewired: [{ id: 'dependent', removedDeps: ['old'] }],
       conflicts: [{ ids: ['a', 'b'], files: ['src/shared.ts'], reason: 'declared-files-overlap' }],
     })
     expect(result.content.every(block => block.type === 'text')).toBe(true)
@@ -162,6 +167,7 @@ describe('native DAG tools', () => {
       childSessionId: 'child-a',
       worktree: '/tmp/dag/a',
       frozenWaveBase: '1111111111111111111111111111111111111111',
+      preparedFrom: '1111111111111111111111111111111111111111',
       bindingGeneration: 1,
       waveId: 'wave-1',
       completedCommit: '2222222222222222222222222222222222222222',
@@ -194,6 +200,9 @@ describe('native DAG tools', () => {
     const { ctx, calls: dagCalls } = await dispatcherBench()
     const invocations: [string, object][] = [
       ['dag_write', { nodes: [], if_revision: 3 }],
+      ['dag_node_amend', { node_id: 'a', files: ['src/a.ts'], kind: 'task', if_revision: 3 }],
+      ['dag_node_amend', { node_id: 'a', content: 'Corrected.' }],
+      ['dag_node_amend', { node_id: 'a', brief: 'VALIDATION: x.\nACCEPTANCE: y.', deps: [], policy: 'ours' }],
       ['dag_dispatch', { node_ids: ['a'], if_revision: 4 }],
       ['dag_dispatch', { node_ids: ['a'] }],
       ['dag_wait', { after_revision: 4 }],
@@ -211,8 +220,14 @@ describe('native DAG tools', () => {
     }
 
     expect(dagCalls.map(call => call.name)).toEqual([
-      'write', 'dispatch', 'dispatch', 'wait', 'status', 'redispatch', 'resume', 'steer', 'stop', 'stop', 'reset',
+      'write', 'amend', 'amend', 'amend', 'dispatch', 'dispatch', 'wait', 'status', 'redispatch', 'resume', 'steer', 'stop', 'stop', 'reset',
     ])
+    expect(dagCalls.filter(call => call.name === 'amend').map(call => call.args[2]))
+      .toEqual([
+        { files: ['src/a.ts'], kind: 'task', if_revision: 3 },
+        { content: 'Corrected.' },
+        { brief: 'VALIDATION: x.\nACCEPTANCE: y.', deps: [], policy: 'ours' },
+      ])
     expect(dagCalls.filter(call => call.name === 'dispatch').map(call => call.args[2]))
       .toEqual([{ if_revision: 4 }, {}])
     expect(dagCalls.filter(call => call.name === 'stop').map(call => call.args.slice(2)))

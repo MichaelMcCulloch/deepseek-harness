@@ -2,7 +2,15 @@
 
 import { posix, win32 } from 'node:path'
 import { DagNodeId } from './ids.ts'
-import type { DagIntegrationPolicy, DagNodeDefinition, DagNodeId as NodeId, DagNodeInput, DagNodeSnapshot } from './types.ts'
+import type {
+  DagIntegrationPolicy,
+  DagNodeDefinition,
+  DagNodeDefinitionField,
+  DagNodeId as NodeId,
+  DagNodeInput,
+  DagNodeSnapshot,
+  DagWriteResult,
+} from './types.ts'
 
 /** Stable declaration rejection. */
 export class DagDeclarationError extends Error {
@@ -101,23 +109,92 @@ export function validateDagDeclaration(inputs: readonly DagNodeInput[]): Validat
     }
   }
   if (order.length !== definitions.length) throw new DagDeclarationError('dependency graph must be acyclic')
+  requireDependencyFileOwnership(definitions)
   return { definitions, topologicalOrder: order }
 }
 
 /**
- * Confirm that an existing node repeats its immutable definition.
- * @param node - Existing durable node.
- * @param definition - Repeated candidate definition.
- * @returns Whether all immutable fields match.
+ * Reject a task node whose declared files also belong to a transitive dependency.
+ *
+ * A task worktree is prepared by merging every recorded dependency commit, so a
+ * file claimed on both sides is contested ownership that the runtime refuses at
+ * preparation. Rejecting the declaration turns that mid-wave Git failure into an
+ * immediate declaration error.
+ * @param definitions - Canonical definitions with every dependency present.
  */
-export function sameDefinition(node: DagNodeSnapshot, definition: DagNodeDefinition): boolean {
-  return node.id === definition.id
-    && node.content === definition.content
-    && node.brief === definition.brief
-    && node.kind === definition.kind
-    && node.policy === definition.policy
-    && node.deps.length === definition.deps.length
-    && node.deps.every((value, index) => value === definition.deps[index])
-    && node.files.length === definition.files.length
-    && node.files.every((value, index) => value === definition.files[index])
+function requireDependencyFileOwnership(definitions: readonly DagNodeDefinition[]): void {
+  const byId = new Map(definitions.map(node => [node.id, node]))
+  for (const node of definitions) {
+    if (node.kind !== 'task' || node.files.length === 0) continue
+    const visited = new Set<NodeId>()
+    const pending = [...node.deps]
+    while (pending.length > 0) {
+      const depId = pending.pop()
+      /* v8 ignore next -- the pending list only receives declared dependency identifiers. */
+      if (depId === undefined || visited.has(depId)) continue
+      visited.add(depId)
+      const dep = byId.get(depId)
+      /* v8 ignore next -- every dependency is present before this check runs. */
+      if (dep === undefined) continue
+      const shared = dep.files.filter(file => node.files.includes(file))
+      if (shared.length > 0) {
+        throw new DagDeclarationError(
+          `node ${JSON.stringify(node.id)} claims files already owned by dependency ${JSON.stringify(depId)}: ${shared.join(', ')}`,
+        )
+      }
+      pending.push(...dep.deps)
+    }
+  }
+}
+
+/**
+ * Drop dependencies that this declaration omits while the durable graph declared them.
+ *
+ * Dropping a node used to force every dependent to be dropped with it, because a
+ * surviving row may not name a missing dependency. Rewriting those rows instead
+ * keeps the dependents, their completed work, and their identity; the caller sees
+ * every removal in the write result. A dependency name the graph never declared is
+ * left alone so a typo still fails declaration validation.
+ * @param inputs - Complete declaration rows from the caller.
+ * @param known - Node ids the durable graph already declares.
+ * @returns Rewritten rows and the dependents whose dependency lists changed.
+ */
+export function rewireOmittedDependencies(
+  inputs: readonly DagNodeInput[],
+  known: ReadonlySet<string>,
+): { readonly inputs: readonly DagNodeInput[]; readonly rewired: readonly DagWriteResult['rewired'][number][] } {
+  const declared = new Set(inputs.map(node => node.id.trim()))
+  const rewired: DagWriteResult['rewired'][number][] = []
+  const rewritten = inputs.map((node) => {
+    const removed = node.deps.map(dep => dep.trim()).filter(dep => !declared.has(dep) && known.has(dep))
+    if (removed.length === 0) return node
+    rewired.push({ id: DagNodeId(node.id.trim()), removedDeps: removed.map(dep => DagNodeId(dep)) })
+    return {
+      ...node,
+      deps: node.deps.filter(dep => !removed.includes(dep.trim())),
+    }
+  })
+  return { inputs: rewritten, rewired }
+}
+
+/**
+ * List the declaration fields that differ between one durable node and a candidate definition.
+ * @param node - Existing durable node.
+ * @param definition - Candidate declaration for the same node id.
+ * @returns Changed fields in declaration order; empty when the two agree.
+ */
+export function changedDefinitionFields(
+  node: DagNodeSnapshot,
+  definition: DagNodeDefinition,
+): readonly DagNodeDefinitionField[] {
+  const fields: DagNodeDefinitionField[] = []
+  if (node.content !== definition.content) fields.push('content')
+  if (node.brief !== definition.brief) fields.push('brief')
+  if (node.deps.length !== definition.deps.length
+    || node.deps.some((value, index) => value !== definition.deps[index])) fields.push('deps')
+  if (node.kind !== definition.kind) fields.push('kind')
+  if (node.policy !== definition.policy) fields.push('policy')
+  if (node.files.length !== definition.files.length
+    || node.files.some((value, index) => value !== definition.files[index])) fields.push('files')
+  return fields
 }

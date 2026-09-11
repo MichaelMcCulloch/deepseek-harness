@@ -28,7 +28,7 @@ describe('gen-tool-catalog collectToolCatalog', () => {
     expect(names).toEqual([
       'ask_user_question', 'bash', 'bash', 'cordis_define', 'cordis_inspect_list',
       'cordis_inspect_query', 'cordis_inspect_self', 'cordis_run', 'cordis_stop',
-      'cordis_undefine', 'create_goal', 'dag_dispatch', 'dag_node_block', 'dag_node_complete',
+      'cordis_undefine', 'create_goal', 'dag_dispatch', 'dag_node_amend', 'dag_node_block', 'dag_node_complete',
       'dag_node_inspect', 'dag_node_redispatch', 'dag_node_reset', 'dag_node_resume', 'dag_node_steer',
       'dag_node_stop', 'dag_status', 'dag_wait', 'dag_write', 'edit', 'exit_plan_mode', 'get_goal', 'glob', 'grep',
       'interrupt_agent', 'interrupt_agent', 'job_kill', 'job_list', 'job_output',

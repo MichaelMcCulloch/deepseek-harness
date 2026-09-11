@@ -32,17 +32,18 @@ kind: "package-reference"
 | 工具 | 用途 |
 |---|---|
 | `dag_write` | 声明或修改完整图 |
+| `dag_node_amend` | 就地修正单个节点的已声明字段 |
 | `dag_dispatch` | 启动依赖已就绪的 pending 节点 |
 | `dag_wait` | 等待 revision 之后注入的可操作通知 |
 | `dag_status` | 读取一次完整安全面板 |
 | `dag_node_inspect` | 读取一个节点及其执行事实 |
 | `dag_node_redispatch` | 把 failed 节点返回 pending |
-| `dag_node_resume` | resume blocked 或 interrupted 节点 |
-| `dag_node_steer` | 取消并替换节点工作 |
+| `dag_node_resume` | resume blocked、interrupted 或 failed 节点 |
+| `dag_node_steer` | 取消并替换节点工作，或重启被暂停的节点 |
 | `dag_node_stop` | 先记录 interrupted，再取消节点工作 |
 | `dag_node_reset` | 把 tracked 工作 reset 到允许的本地目标 |
 
-`dag_write` 发送完整节点列表。新节点只能声明 `pending`。既有行重复其不可变定义与精确 live status。每个 brief 必须包含 `VALIDATION:` 与 `ACCEPTANCE:` 段。验证拒绝重复 id、cycle、缺失依赖、自依赖、不安全路径、无效 integration policy，以及移除活跃节点。文件与 contract-pin 重叠行仅为 advisory。
+`dag_write` 发送完整节点列表。新节点只能声明 `pending`；既有行重复其 live status，并可就地修正其已声明字段，且省略某个已声明节点也会把它从每个存活依赖节点的依赖列表中移除。`dag_node_amend` 无需重新发送图即可修正单个节点。每个 brief 必须包含 `VALIDATION:` 与 `ACCEPTANCE:` 段。验证拒绝重复 id、cycle、缺失依赖、自依赖、不安全路径、无效 integration policy、移除活跃节点、更改活动节点的声明、在已记录 Git 准备后更改依赖，以及声明了某个传递依赖也声明的文件的任务节点。其他文件与 contract-pin 重叠行仅为 advisory。
 
 ### 子级工具
 
@@ -84,7 +85,7 @@ DAG 子级看到 scoped `dag_status`、`dag_node_complete` 与 `dag_node_block`�
 
 #### 模型看到什么
 
-调度器看到十个公开工具和一条在 dispatch 后使用 `dag_wait` 的短规则。DAG 子级只看到其 scoped 状态、完成与阻塞工具，以及 stop 取消工作、steer 取消并替换工作的规则。
+调度器看到十一个公开工具和一条在 dispatch 后使用 `dag_wait` 的短规则。DAG 子级只看到其 scoped 状态、完成与阻塞工具，以及 stop 取消工作、steer 取消并替换工作的规则。
 
 #### Token 影响
 

@@ -143,6 +143,7 @@ const SDK_ASSERTIONS: Readonly<Record<string, SdkAssertions>> = {
     expectedTools: {
       bash: ['command'],
       dag_dispatch: ['node_ids'],
+      dag_node_amend: ['node_id'],
       dag_node_inspect: ['node_id'],
       dag_node_redispatch: ['node_id'],
       dag_node_reset: ['node_id', 'target'],

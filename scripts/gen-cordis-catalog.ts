@@ -424,6 +424,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   CreateGoalResult: 'goal.md',
   DagCommandAccepted: 'dag.md',
   DagCommitted: 'dag.md',
+  DagNodeAmendRequest: 'dag.md',
   DagNodeId: 'dag.md',
   DagNodeSnapshot: 'dag.md',
   DagProjection: 'dag.md',

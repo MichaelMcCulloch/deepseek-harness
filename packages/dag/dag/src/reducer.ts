@@ -2,11 +2,12 @@
 
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { DagCommandId, DagNoticeId, DagOperationId, DagWaveId } from './ids.ts'
-import { sameDefinition } from './validation.ts'
+import { changedDefinitionFields } from './validation.ts'
 import type {
   DagCommandId as CommandId,
   DagIntegrationPolicy,
   DagNodeDefinition,
+  DagNodeDefinitionField,
   DagNodeId,
   DagNodeInput,
   DagNodeSnapshot,
@@ -39,6 +40,7 @@ export interface DagStartEvidence {
   readonly branch: string
   readonly worktree: string
   readonly frozenWaveBase: string
+  readonly preparedFrom: string
   readonly preparedHead: string
   readonly dependencyCommits: readonly string[]
   readonly conflictedFiles: readonly string[]
@@ -69,6 +71,7 @@ export interface DagEffectFence {
 /** Every state transition accepted by the production reducer. */
 export type DagReducerCommand =
   | { readonly type: 'write'; readonly noticeNamespace: string; readonly nodes: readonly DagDeclaredNode[]; readonly topologicalOrder: readonly DagNodeId[] }
+  | { readonly type: 'amend'; readonly nodeId: DagNodeId; readonly definition: DagNodeDefinition; readonly topologicalOrder: readonly DagNodeId[] }
   | { readonly type: 'dispatch'; readonly nodeIds: readonly DagNodeId[]; readonly bindings: Readonly<Record<string, DagDispatchBinding>> }
   | { readonly type: 'redispatch'; readonly nodeId: DagNodeId }
   | { readonly type: 'resume'; readonly nodeId: DagNodeId; readonly message: string }
@@ -93,6 +96,7 @@ export interface DagReduceResult {
   readonly state: DagState
   readonly operationId?: OperationId
   readonly dropped?: DagWriteResult['dropped']
+  readonly amended?: DagWriteResult['amended']
   readonly conflicts?: DagWriteResult['conflicts']
 }
 
@@ -258,7 +262,8 @@ function startEvidenceMatches(node: DagNodeSnapshot, evidence: DagStartEvidence,
     && node.frozenWaveBase === evidence.frozenWaveBase
     && node.dependencyCommits.length === evidence.dependencyCommits.length
     && node.dependencyCommits.every((commit, index) => commit === evidence.dependencyCommits[index])
-    && (!prepared || (node.preparedHead === evidence.preparedHead
+    && (!prepared || ((node.preparedFrom ?? node.frozenWaveBase) === evidence.preparedFrom
+      && node.preparedHead === evidence.preparedHead
       && node.conflictedFiles.length === evidence.conflictedFiles.length
       && node.conflictedFiles.every((path, index) => path === evidence.conflictedFiles[index])))
 }
@@ -277,6 +282,49 @@ function validResetTarget(target: string, frozenWaveBase: string | undefined): b
     && !name.includes('@{')
     && !/[\u0000-\u0020\u007f~^:?*\[\\]/u.test(name)
     && name.split('/').every(component => !component.startsWith('.') && !component.endsWith('.lock'))
+}
+
+/** Apply one corrected declaration without touching the node's execution facts. */
+function applyDefinition(node: DagNodeSnapshot, definition: DagNodeDefinition): DagNodeSnapshot {
+  return {
+    ...node,
+    id: definition.id,
+    content: definition.content,
+    brief: definition.brief,
+    deps: definition.deps,
+    kind: definition.kind,
+    policy: definition.policy,
+    files: definition.files,
+  }
+}
+
+/** Return whether one node already recorded local Git evidence derived from its declared dependencies. */
+function hasPreparedDependencies(node: DagNodeSnapshot): boolean {
+  return node.frozenWaveBase !== undefined
+    || node.dependencyCommits.length > 0
+    || node.preparedHead !== undefined
+    || node.completedCommit !== undefined
+}
+
+/**
+ * Require that one field correction is legal for the node's live lifecycle state.
+ * Active nodes hold a child turn built from the old brief, and a node that already
+ * merged dependency commits at preparation time has fixed the commit list a
+ * dependency change would invalidate.
+ */
+function requireAmendable(node: DagNodeSnapshot, fields: readonly DagNodeDefinitionField[]): void {
+  if (node.status === 'starting' || node.status === 'in_progress' || node.status === 'blocked') {
+    throw new DagStateError(
+      `dag cannot change the declaration of ${JSON.stringify(node.id)} while it is ${node.status}; stop it first`,
+      'dag-definition-locked',
+    )
+  }
+  if (fields.includes('deps') && hasPreparedDependencies(node)) {
+    throw new DagStateError(
+      `node ${JSON.stringify(node.id)} cannot change dependencies after it recorded local Git preparation`,
+      'dag-dependency-frozen',
+    )
+  }
 }
 
 /** Return declared-file and contract-pin advisory rows. */
@@ -381,6 +429,7 @@ export function reduceDagState(current: DagState | null, command: DagReducerComm
         throw new DagStateError(`dag_write cannot remove active node ${JSON.stringify(node.id)}; stop it first`, 'dag-active-node-removal')
       }
     }
+    const amended: DagWriteResult['amended'][number][] = []
     const nodes = command.nodes.map(({ definition, status }) => {
       const old = previous.get(definition.id)
       if (old === undefined) {
@@ -395,13 +444,14 @@ export function reduceDagState(current: DagState | null, command: DagReducerComm
           commands: [],
         } satisfies DagNodeSnapshot
       }
-      if (!sameDefinition(old, definition)) {
-        throw new DagStateError(`existing node ${JSON.stringify(definition.id)} must repeat its immutable definition`, 'dag-definition-conflict')
-      }
       if (status !== old.status) {
         throw new DagStateError(`existing node ${JSON.stringify(definition.id)} must repeat live status ${old.status}`, 'dag-status-conflict')
       }
-      return old
+      const fields = changedDefinitionFields(old, definition)
+      if (fields.length === 0) return old
+      requireAmendable(old, fields)
+      amended.push({ id: definition.id, fields })
+      return applyDefinition(old, definition)
     })
     const state = completeState({
       version: DAG_STATE_VERSION,
@@ -415,9 +465,31 @@ export function reduceDagState(current: DagState | null, command: DagReducerComm
       receipts: [...current?.receipts ?? [], op.receipt],
       notices: current?.notices ?? [],
     })
-    return { state, operationId: op.id, dropped, conflicts: advisoryConflicts(command.nodes.map(row => row.definition)) }
+    return { state, operationId: op.id, dropped, amended, conflicts: advisoryConflicts(command.nodes.map(row => row.definition)) }
   }
   if (current === null) throw new DagStateError('DAG has no declaration', 'dag-not-declared')
+
+  if (command.type === 'amend') {
+    const node = requireNode(current.nodes, command.nodeId)
+    const fields = changedDefinitionFields(node, command.definition)
+    if (fields.length === 0) {
+      throw new DagStateError(`node ${JSON.stringify(node.id)} already matches the requested declaration`, 'dag-definition-unchanged')
+    }
+    requireAmendable(node, fields)
+    const op = operation(current, 'amend', [node.id])
+    return {
+      operationId: op.id,
+      amended: [{ id: node.id, fields }],
+      state: completeState({
+        ...current,
+        revision: current.revision + 1,
+        operationCounter: op.counter,
+        nodes: replaceNode(current.nodes, applyDefinition(node, command.definition)),
+        topologicalOrder: command.topologicalOrder,
+        receipts: [...current.receipts, op.receipt],
+      }),
+    }
+  }
 
   if (command.type === 'dispatch') {
     if (command.nodeIds.length === 0 || new Set(command.nodeIds).size !== command.nodeIds.length) {
@@ -443,6 +515,7 @@ export function reduceDagState(current: DagState | null, command: DagReducerComm
       const {
         settlement: _settlement,
         completedCommit: _completedCommit,
+        preparedFrom: _preparedFrom,
         preparedHead: _preparedHead,
         frozenWaveBase: _frozenWaveBase,
         dependencyCommits: _dependencyCommits,
@@ -503,7 +576,7 @@ export function reduceDagState(current: DagState | null, command: DagReducerComm
         && node.dependencyCommits.length === dependencyCommits.length
         && node.dependencyCommits.every((commit, index) => commit === dependencyCommits[index])
       if (preparationMatches) return node
-      const { preparedHead: _preparedHead, ...retained } = node
+      const { preparedHead: _preparedHead, preparedFrom: _preparedFrom, ...retained } = node
       return {
         ...retained,
         frozenWaveBase: command.head,
@@ -600,13 +673,13 @@ export function reduceDagState(current: DagState | null, command: DagReducerComm
     let message: string | undefined
     let target: string | undefined
     if (command.type === 'resume') {
-      if (node.status !== 'blocked' && node.status !== 'interrupted') throw new DagStateError(`node ${JSON.stringify(node.id)} cannot resume from ${node.status}`, 'dag-invalid-transition')
+      if (node.status !== 'blocked' && node.status !== 'interrupted' && node.status !== 'failed') throw new DagStateError(`node ${JSON.stringify(node.id)} cannot resume from ${node.status}`, 'dag-invalid-transition')
       if (command.message.trim().length === 0) throw new DagStateError('resume message must be non-empty', 'dag-invalid-message')
       status = 'starting'
       message = command.message.trim()
       settlement = undefined
     } else if (command.type === 'steer') {
-      if (node.status !== 'in_progress' && node.status !== 'blocked' && node.status !== 'interrupted') throw new DagStateError(`node ${JSON.stringify(node.id)} cannot steer from ${node.status}`, 'dag-invalid-transition')
+      if (node.status !== 'in_progress' && node.status !== 'blocked' && node.status !== 'interrupted' && node.status !== 'failed') throw new DagStateError(`node ${JSON.stringify(node.id)} cannot steer from ${node.status}`, 'dag-invalid-transition')
       if (command.message.trim().length === 0) throw new DagStateError('steer message must be non-empty', 'dag-invalid-message')
       status = node.status === 'in_progress' ? 'in_progress' : 'starting'
       message = command.message.trim()

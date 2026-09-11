@@ -78,7 +78,7 @@ describe('native DAG reducer', () => {
 
     const stale = step(production, {
       type: 'start-succeeded', nodeId: node.id, commandId: mailbox.id, generation: node.generation, bindingGeneration: mailbox.bindingGeneration, operationId: mailbox.operationId,
-      evidence: { branch: 'old', worktree: '/old', frozenWaveBase: '0'.repeat(40), preparedHead: '0'.repeat(40), dependencyCommits: [], conflictedFiles: [], childSessionId: SessionId('child-a') },
+      evidence: { branch: 'old', worktree: '/old', frozenWaveBase: '0'.repeat(40), preparedFrom: '0'.repeat(40), preparedHead: '0'.repeat(40), dependencyCommits: [], conflictedFiles: [], childSessionId: SessionId('child-a') },
     })
     expect(stale).toBe(production)
   })
@@ -221,7 +221,7 @@ describe('native DAG reducer', () => {
     })
     node = state.nodes[0]!
     command = node.commands[0]!
-    const evidence = { branch: 'branch-a', worktree: '/tmp/a', frozenWaveBase: '1'.repeat(40), preparedHead: '1'.repeat(40), dependencyCommits: [], conflictedFiles: [], childSessionId: SessionId('child-a') }
+    const evidence = { branch: 'branch-a', worktree: '/tmp/a', frozenWaveBase: '1'.repeat(40), preparedFrom: '1'.repeat(40), preparedHead: '1'.repeat(40), dependencyCommits: [], conflictedFiles: [], childSessionId: SessionId('child-a') }
     state = step(state, {
       type: 'git-prepared', nodeId: node.id, commandId: command.id, generation: node.generation, bindingGeneration: command.bindingGeneration, operationId: command.operationId,
       evidence,
@@ -306,6 +306,7 @@ describe('native DAG reducer', () => {
         branch: 'branch-a',
         worktree: '/tmp/a',
         frozenWaveBase: '1'.repeat(40),
+        preparedFrom: '1'.repeat(40),
         preparedHead: '1'.repeat(40),
         dependencyCommits: [],
         conflictedFiles: [],
@@ -402,7 +403,7 @@ describe('native DAG reducer', () => {
       bindingGeneration: retryCommand.bindingGeneration,
       operationId: retryCommand.operationId,
       evidence: {
-        branch: 'branch-a', worktree: '/tmp/a', frozenWaveBase: '1'.repeat(40), preparedHead: '1'.repeat(40),
+        branch: 'branch-a', worktree: '/tmp/a', frozenWaveBase: '1'.repeat(40), preparedFrom: '1'.repeat(40), preparedHead: '1'.repeat(40),
         dependencyCommits: [], conflictedFiles: [], childSessionId: SessionId('child-a'),
       },
     })
@@ -414,7 +415,7 @@ describe('native DAG reducer', () => {
       bindingGeneration: retryCommand.bindingGeneration,
       operationId: retryCommand.operationId,
       evidence: {
-        branch: 'branch-a', worktree: '/tmp/a', frozenWaveBase: '1'.repeat(40), preparedHead: '1'.repeat(40),
+        branch: 'branch-a', worktree: '/tmp/a', frozenWaveBase: '1'.repeat(40), preparedFrom: '1'.repeat(40), preparedHead: '1'.repeat(40),
         dependencyCommits: [], conflictedFiles: [], childSessionId: SessionId('child-a'),
       },
     })

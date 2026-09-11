@@ -844,9 +844,15 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'write(agent: Agent, request: DagWriteRequest): DagWriteResult',
-        description: 'Replace the declaration after canonical validation.',
+        description: 'Replace the declaration after canonical validation.\n\nExisting nodes may correct their declared fields in place, which keeps their identity, execution facts, descendants, and completed status. Omitting a node that the durable graph declared removes it from every surviving dependent\'s dependency list instead of forcing those dependents to be dropped too.',
         parameters: [{ name: 'agent', description: 'Live dispatcher agent.' }, { name: 'request', description: 'Full node declaration and optional revision guard.' }],
-        returns: 'Accepted write receipt, preserved artifacts, and advisory conflicts.',
+        returns: 'Accepted write receipt, preserved artifacts, corrections, and advisory conflicts.',
+      },
+      {
+        signature: 'amend(agent: Agent, nodeId: DagNodeId, patch: DagNodeAmendRequest): DagCommandAccepted',
+        description: 'Correct the declared fields of one existing node without re-emitting the graph.\n\nOmitted fields keep their current value. The corrected node keeps its id, status, generation, child binding, recorded Git facts, mailbox, descendants, and completed commit, so a wrong declaration never costs dependent work.',
+        parameters: [{ name: 'agent', description: 'Live dispatcher agent.' }, { name: 'nodeId', description: 'Existing node to correct.' }, { name: 'patch', description: 'Declaration fields to replace.' }],
+        returns: 'Accepted command receipt.',
       },
       {
         signature: 'dispatch(agent: Agent, nodeIds: readonly DagNodeId[], guard: DagRevisionGuard = {}): DagCommandAccepted',
@@ -4233,12 +4239,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type DagIntegrationPolicy = \'delegate\' | \'ours\' | \'theirs\';',
   },
   {
+    name: 'DagNodeAmendRequest',
+    declaration: 'export interface DagNodeAmendRequest extends DagRevisionGuard {\n    readonly content?: string;\n    readonly brief?: string;\n    readonly deps?: readonly string[];\n    readonly kind?: DagNodeKind;\n    readonly policy?: DagIntegrationPolicy;\n    readonly files?: readonly string[];\n}',
+  },
+  {
     name: 'DagNodeCommand',
     declaration: 'export interface DagNodeCommand {\n    readonly id: DagCommandId;\n    readonly operationId: DagOperationId;\n    readonly kind: \'dispatch\' | \'resume\' | \'steer\' | \'stop\' | \'reset\' | \'complete\';\n    readonly state: \'accepted\' | \'running\' | \'settled\';\n    readonly generation: number;\n    readonly bindingGeneration: number;\n    readonly message?: string;\n    readonly target?: string;\n    readonly acceptedRevision: number;\n    readonly outcome?: \'succeeded\' | \'failed\' | \'cancelled\';\n    readonly detail?: string;\n    readonly error?: string;\n}',
   },
   {
     name: 'DagNodeDefinition',
     declaration: 'export interface DagNodeDefinition {\n    readonly id: DagNodeId;\n    readonly content: string;\n    readonly brief: string;\n    readonly deps: readonly DagNodeId[];\n    readonly kind: DagNodeKind;\n    readonly policy: DagIntegrationPolicy;\n    readonly files: readonly string[];\n}',
+  },
+  {
+    name: 'DagNodeDefinitionField',
+    declaration: 'export type DagNodeDefinitionField = \'content\' | \'brief\' | \'deps\' | \'kind\' | \'policy\' | \'files\';',
   },
   {
     name: 'DagNodeId',
@@ -4258,7 +4272,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'DagNodeSnapshot',
-    declaration: 'export interface DagNodeSnapshot extends DagNodeDefinition {\n    readonly status: DagNodeStatus;\n    readonly generation: number;\n    readonly bindingGeneration: number;\n    readonly childSessionId?: SessionId;\n    readonly branch?: string;\n    readonly worktree?: string;\n    readonly waveId?: DagWaveId;\n    readonly frozenWaveBase?: string;\n    readonly preparedHead?: string;\n    readonly dependencyCommits: readonly string[];\n    readonly conflictedFiles: readonly string[];\n    readonly currentOperationId?: DagOperationId;\n    readonly settlement?: DagNodeSettlement;\n    readonly completedCommit?: string;\n    readonly commands: readonly DagNodeCommand[];\n}',
+    declaration: 'export interface DagNodeSnapshot extends DagNodeDefinition {\n    readonly status: DagNodeStatus;\n    readonly generation: number;\n    readonly bindingGeneration: number;\n    readonly childSessionId?: SessionId;\n    readonly branch?: string;\n    readonly worktree?: string;\n    readonly waveId?: DagWaveId;\n    readonly frozenWaveBase?: string;\n    readonly preparedFrom?: string;\n    readonly preparedHead?: string;\n    readonly dependencyCommits: readonly string[];\n    readonly conflictedFiles: readonly string[];\n    readonly currentOperationId?: DagOperationId;\n    readonly settlement?: DagNodeSettlement;\n    readonly completedCommit?: string;\n    readonly commands: readonly DagNodeCommand[];\n}',
   },
   {
     name: 'DagNodeStatus',
@@ -4318,7 +4332,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'DagWriteResult',
-    declaration: 'export interface DagWriteResult extends DagCommandAccepted {\n    readonly dropped: readonly {\n        readonly id: DagNodeId;\n        readonly childSessionId?: SessionId;\n        readonly branch?: string;\n        readonly worktree?: string;\n    }[];\n    readonly conflicts: readonly {\n        readonly ids: readonly [\n            DagNodeId,\n            DagNodeId\n        ];\n        readonly files: readonly string[];\n        readonly reason: \'declared-files-overlap\' | \'contract-pin-overlap\';\n    }[];\n}',
+    declaration: 'export interface DagWriteResult extends DagCommandAccepted {\n    readonly dropped: readonly {\n        readonly id: DagNodeId;\n        readonly childSessionId?: SessionId;\n        readonly branch?: string;\n        readonly worktree?: string;\n    }[];\n    readonly amended: readonly {\n        readonly id: DagNodeId;\n        readonly fields: readonly DagNodeDefinitionField[];\n    }[];\n    readonly rewired: readonly {\n        readonly id: DagNodeId;\n        readonly removedDeps: readonly DagNodeId[];\n    }[];\n    readonly conflicts: readonly {\n        readonly ids: readonly [\n            DagNodeId,\n            DagNodeId\n        ];\n        readonly files: readonly string[];\n        readonly reason: \'declared-files-overlap\' | \'contract-pin-overlap\';\n    }[];\n}',
   },
   {
     name: 'DeepSeekLlmApiExtensionMap',

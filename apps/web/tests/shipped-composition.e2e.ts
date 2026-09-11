@@ -38,6 +38,7 @@ const EXPECTED_TOOLS = [
   'bash',
   'create_goal',
   'dag_dispatch',
+  'dag_node_amend',
   'dag_node_inspect',
   'dag_node_redispatch',
   'dag_node_reset',

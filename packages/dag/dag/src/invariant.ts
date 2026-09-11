@@ -6,7 +6,7 @@ import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { projectDag } from './reducer.ts'
 import type { DagNodeSnapshot, DagState } from './types.ts'
 import { DAG_STATE_VERSION } from './types.ts'
-import { sameDefinition } from './validation.ts'
+import { changedDefinitionFields } from './validation.ts'
 
 const PACKAGE_NAME = '@deepseek-ai/dsh-dag'
 
@@ -22,12 +22,13 @@ const LEGAL_EDGES: Readonly<Record<DagNodeSnapshot['status'], readonly DagNodeSn
   in_progress: ['in_progress', 'completed', 'blocked', 'failed', 'interrupted'],
   completed: ['completed'],
   blocked: ['blocked', 'starting', 'interrupted'],
-  failed: ['failed', 'pending'],
+  failed: ['failed', 'pending', 'starting'],
   interrupted: ['interrupted', 'starting'],
 }
 
 const OPERATION_CAUSES = [
   'write',
+  'amend',
   'dispatch',
   'redispatch',
   'resume',
@@ -55,11 +56,13 @@ function matchesAcceptedEdge(
   /* v8 ignore next -- the caller rejects a new node before checking a non-write accepted edge. */
   if (prior === undefined) return false
   const existing = prior
+  if (cause === 'amend') return next.status === existing.status
   if (cause === 'dispatch') return existing.status === 'pending' && next.status === 'starting'
   if (cause === 'redispatch') return existing.status === 'failed' && next.status === 'pending'
-  if (cause === 'resume') return (existing.status === 'blocked' || existing.status === 'interrupted') && next.status === 'starting'
+  if (cause === 'resume') return (existing.status === 'blocked' || existing.status === 'interrupted' || existing.status === 'failed')
+    && next.status === 'starting'
   if (cause === 'steer') return (existing.status === 'in_progress' && next.status === 'in_progress')
-    || ((existing.status === 'blocked' || existing.status === 'interrupted') && next.status === 'starting')
+    || ((existing.status === 'blocked' || existing.status === 'interrupted' || existing.status === 'failed') && next.status === 'starting')
   if (cause === 'stop') return (existing.status === 'starting' || existing.status === 'in_progress' || existing.status === 'blocked')
     && next.status === 'interrupted'
   if (cause === 'reset') return (existing.status === 'pending' || existing.status === 'failed') && next.status === existing.status
@@ -123,7 +126,17 @@ export function validateDagState(previous: DagState | null, state: DagState): vo
     if (accepted !== undefined && !matchesAcceptedEdge(accepted.cause as OperationCause, prior, node)) {
       throw new Error(`node ${JSON.stringify(node.id)} does not match accepted ${accepted.cause} operation`)
     }
-    if (prior !== undefined && !sameDefinition(prior, node)) throw new Error(`node ${JSON.stringify(node.id)} changed its definition`)
+    if (prior !== undefined) {
+      const changed = changedDefinitionFields(prior, node)
+      const declared = accepted?.cause === 'write' || accepted?.cause === 'amend'
+      if (changed.length > 0 && !declared) {
+        throw new Error(`node ${JSON.stringify(node.id)} changed its definition without a declaration operation`)
+      }
+      if (changed.includes('deps') && (prior.frozenWaveBase !== undefined
+        || prior.dependencyCommits.length > 0 || prior.preparedHead !== undefined || prior.completedCommit !== undefined)) {
+        throw new Error(`node ${JSON.stringify(node.id)} changed dependencies after recording local Git preparation`)
+      }
+    }
     if (prior !== undefined && !LEGAL_EDGES[prior.status].includes(node.status)) {
       throw new Error(`node ${JSON.stringify(node.id)} has illegal edge ${prior.status} -> ${node.status}`)
     }
@@ -159,7 +172,7 @@ export function validateDagState(previous: DagState | null, state: DagState): vo
         }
       }
       const requiresAcceptedOperation = (prior.status === 'pending' && node.status === 'starting')
-        || (prior.status === 'failed' && node.status === 'pending')
+        || (prior.status === 'failed' && (node.status === 'pending' || node.status === 'starting'))
         || ((prior.status === 'blocked' || prior.status === 'interrupted') && node.status === 'starting')
         || (node.status === 'interrupted' && prior.status !== 'interrupted')
         || (prior.status === 'in_progress' && node.status === 'blocked')
@@ -189,6 +202,9 @@ export function validateDagState(previous: DagState | null, state: DagState): vo
     }
     if (node.preparedHead !== undefined && (node.frozenWaveBase === undefined || !/^[0-9a-f]{40,64}$/iu.test(node.preparedHead))) {
       throw new Error(`node ${JSON.stringify(node.id)} has invalid prepared Git evidence`)
+    }
+    if (node.preparedFrom !== undefined && (node.frozenWaveBase === undefined || !/^[0-9a-f]{40,64}$/iu.test(node.preparedFrom))) {
+      throw new Error(`node ${JSON.stringify(node.id)} has invalid pre-preparation Git evidence`)
     }
     const activeCommands: DagNodeSnapshot['commands'][number][] = []
     for (const command of node.commands) {
@@ -244,7 +260,7 @@ export function validateDagState(previous: DagState | null, state: DagState): vo
   ) {
     throw new Error('topologicalOrder does not name every node once')
   }
-  if (previous !== null && acceptedOperation?.cause !== 'write'
+  if (previous !== null && acceptedOperation?.cause !== 'write' && acceptedOperation?.cause !== 'amend'
     && JSON.stringify(state.topologicalOrder) !== JSON.stringify(previous.topologicalOrder)) {
     throw new Error('topologicalOrder changed without a write operation')
   }

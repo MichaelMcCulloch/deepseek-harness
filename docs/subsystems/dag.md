@@ -12,11 +12,13 @@ Each snapshot contains a monotonic revision, graph generation, operation counter
 
 The production reducer is pure. An independent reference reducer supports bounded model tests. A service call reads the current revision, reduces the command, and appends one snapshot without an asynchronous wait. An optional `if_revision` value gives compare-and-set behavior. A stale value, a nested append, or a reentrant append fails with `dag-revision-conflict`.
 
+A wrong declaration is corrected in place rather than by dropping the node and its dependents. `dag_write` re-sends the complete graph: an existing node repeats its live status and may change its declared fields, and a node the write omits is also removed from every surviving dependent's dependency list and reported as a rewired row. `dag_node_amend` changes the declared fields of one node without re-sending the graph. Both keep the node's identity, status, generation, child binding, recorded Git facts, mailbox, completion, and dependents. Neither changes the declaration of an active node, and neither changes dependencies after the node recorded local Git preparation, because that record fixes the commit list the dependency merge used. Declared file ownership is exclusive along every dependency edge: a task node that claims a file a transitive dependency declares is rejected at declaration time, because preparing its worktree would merge that dependency's version of the file into the work it owns.
+
 ## Node lifecycle
 
-New nodes start as `pending`. The main path is `pending` to `starting`, then `in_progress`, then `completed`, `blocked`, `failed`, or `interrupted`. A blocked or interrupted node resumes through `starting`. A failed node returns to `pending` only through redispatch. Completion is terminal.
+New nodes start as `pending`. The main path is `pending` to `starting`, then `in_progress`, then `completed`, `blocked`, `failed`, or `interrupted`. A blocked, interrupted, or failed node resumes or is steered through `starting`; a failed node also returns to `pending` through redispatch. Completion is terminal.
 
-Stop first commits `interrupted`, then cancels the active effect or child turn. Steering keeps an active node `in_progress`; steering a blocked or interrupted node moves it through `starting`. A child turn that ends without `dag_node_complete` or `dag_node_block` fails unless a recorded stop or steering replacement caused the end.
+Stop first commits `interrupted`, then cancels the active effect or child turn. Steering keeps an active node `in_progress`; steering a blocked, interrupted, or failed node moves it through `starting`. A child turn that ends without `dag_node_complete` or `dag_node_block` fails unless a recorded stop or steering replacement caused the end.
 
 Dispatch, redispatch, resume, steer, stop, and reset increment the node generation when they make old work invalid. An effect result must match the durable binding generation, node generation, command id, and operation id. A stale result does not change state.
 
@@ -46,7 +48,7 @@ The service runs Git only through `ctx.subprocess`, with an exact argument array
 
 Before a dispatch wave opens, one porcelain-v2 probe requires a clean root worktree, a symbolic local branch, and a valid local HEAD. The wave freezes that branch and commit. Each node worktree starts at the frozen commit. Dependency merges use exact recorded completion commits in declared order, never branch tips.
 
-Task completion requires the expected branch, no active merge, a clean worktree, a new HEAD, and every recorded dependency commit as an ancestor. The service records that exact HEAD. Task nodes must keep changes inside their declared files. Integration nodes use the declared `ours`, `theirs`, or `delegate` policy. Delegate mode records the exact commits and conflicts, aborts the automatic conflicted merge, and assigns manual integration to the child.
+Task completion requires the expected branch, no active merge, a clean worktree, every recorded dependency commit as an ancestor, and a new HEAD. A task whose worktree already carried commits when preparation started completes without a new one: preparation records the pre-merge HEAD, and a worktree created at the frozen wave base still requires a commit. The service records that exact HEAD. Task nodes must keep changes inside their declared files. Integration nodes use the declared `ours`, `theirs`, or `delegate` policy. Delegate mode records the exact commits and conflicts, aborts the automatic conflicted merge, and assigns manual integration to the child.
 
 Reset is available only for pending or failed nodes. It accepts the frozen wave base, an exact commit id, or an explicit local `refs/heads/*` ref. It rejects remote refs and ambiguous names. It aborts an active merge, hard-resets tracked state, keeps untracked files, and reports remaining dirt. The service does not delete old branches, worktrees, or child sessions.
 
@@ -96,11 +98,29 @@ statusFrom(child: Agent): { readonly revision: number readonly topology: readonl
 
 /**
  * Replace the declaration after canonical validation.
+ *
+ * Existing nodes may correct their declared fields in place, which keeps their
+ * identity, execution facts, descendants, and completed status. Omitting a node
+ * that the durable graph declared removes it from every surviving dependent's
+ * dependency list instead of forcing those dependents to be dropped too.
  * @param agent - Live dispatcher agent.
  * @param request - Full node declaration and optional revision guard.
- * @returns Accepted write receipt, preserved artifacts, and advisory conflicts.
+ * @returns Accepted write receipt, preserved artifacts, corrections, and advisory conflicts.
  */
 write(agent: Agent, request: DagWriteRequest): DagWriteResult
+
+/**
+ * Correct the declared fields of one existing node without re-emitting the graph.
+ *
+ * Omitted fields keep their current value. The corrected node keeps its id,
+ * status, generation, child binding, recorded Git facts, mailbox, descendants,
+ * and completed commit, so a wrong declaration never costs dependent work.
+ * @param agent - Live dispatcher agent.
+ * @param nodeId - Existing node to correct.
+ * @param patch - Declaration fields to replace.
+ * @returns Accepted command receipt.
+ */
+amend(agent: Agent, nodeId: DagNodeId, patch: DagNodeAmendRequest): DagCommandAccepted
 
 /**
  * Start dependency-ready pending nodes without waiting for effects.

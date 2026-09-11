@@ -18,7 +18,9 @@
 
 生产 reducer 与独立 reference reducer 都是纯函数。服务命令读取当前 revision、同步 reduce，并在没有 `await` 的情况下追加一份完整快照。可选 `if_revision` 执行比较并设置。陈旧 revision、嵌套 append 或竞争的重入 commit 返回 `dag-revision-conflict`；它不等待状态锁。类型化 `dag/state` 事件加入已知 session-event vocabulary，但不改变结构化会话格式，因此不认识该事件的构建会拒绝它，而不是误读快照。
 
-节点生命周期是 `pending → starting → in_progress → completed | blocked | failed | interrupted`。blocked 与 interrupted 节点通过 starting resume，failed 节点只能通过 redispatch 回到 pending，completed 是终态。stop 在取消 effect 或子级前提交 interrupted。每个使早期工作失效的操作都会推进节点 generation。每个 effect 结果必须匹配 binding generation、节点 generation 与 operation id，因此陈旧回调对状态没有影响。
+节点生命周期是 `pending → starting → in_progress → completed | blocked | failed | interrupted`。blocked、interrupted 与 failed 节点通过 starting resume 或被 steer，failed 节点也可通过 redispatch 回到 pending，completed 是终态。stop 在取消 effect 或子级前提交 interrupted。每个使早期工作失效的操作都会推进节点 generation。每个 effect 结果必须匹配 binding generation、节点 generation 与 operation id，因此陈旧回调对状态没有影响。
+
+既有节点的声明会被就地修正，而不是丢弃该节点及其依赖节点。`dag_write` 修正确切已声明字段发生变化的每个既有行，并在写入省略某个被存活依赖节点引用的节点时重写该依赖节点；`dag_node_amend` 无需重新发送图即可修正单个节点。两者都保留节点 identity、status、generation、child binding、已记录 Git 事实、mailbox、completion 与 dependents，并都拒绝活动节点的声明，或在节点记录了本地 Git 准备后更改依赖。任务节点如果声明的文件也被某个传递依赖声明，会在声明时被拒绝，因为准备其 worktree 会把该依赖版本的文件合并进该节点拥有的工作。
 
 ### 持久 mailbox 拥有异步工作
 
@@ -32,7 +34,7 @@ session-start reconciliation 检查 accepted 和 running 命令，并在重试�
 
 所有 Git 操作都通过 subprocess capability 使用精确参数数组，不使用 shell。dispatch wave 先提交 starting 意图，再执行一次 porcelain-v2 probe，要求根目录 tracked 与 untracked 状态干净、位于符号本地分支并具有有效本地 HEAD。只有 probe 成功后服务才创建 wave，并只冻结一次根分支与 HEAD。
 
-节点分支与 worktree 位于 `<DSH_HOME>/dag/worktrees/v1/` 下，从冻结 wave HEAD 开始。依赖按声明顺序用已记录的精确完成 commit merge，绝不使用分支 tip。任务完成要求符合预期的符号分支、没有活跃 merge、worktree 干净、HEAD 已变化、每个已记录依赖 commit 都是 ancestor，并满足声明文件归属。integration 节点应用 `ours`、`theirs` 或 delegated conflict resolution。reset 只接受冻结 base、精确 commit id 或显式本地 `refs/heads/*` ref，并保留 untracked 文件。运行时代码不检查 remote、不 fetch、不 push，也不创建远程工作项。
+节点分支与 worktree 位于 `<DSH_HOME>/dag/worktrees/v1/` 下，从冻结 wave HEAD 开始。依赖按声明顺序用已记录的精确完成 commit merge，绝不使用分支 tip。任务完成要求符合预期的符号分支、没有活跃 merge、worktree 干净、每个已记录依赖 commit 都是 ancestor，并满足声明文件归属，另外还要求 HEAD 超出冻结 wave 基准，或 worktree 在依赖准备前已带有 commit；准备会记录 merge 前的 HEAD，因此把节点重新投入其自身已交付的提交时可以无需新提交而完成。integration 节点应用 `ours`、`theirs` 或 delegated conflict resolution。reset 只接受冻结 base、精确 commit id 或显式本地 `refs/heads/*` ref，并保留 untracked 文件。运行时代码不检查 remote、不 fetch、不 push，也不创建远程工作项。
 
 ### Subagent 服务保留授权
 
@@ -40,13 +42,13 @@ session-start reconciliation 检查 accepted 和 running 命令，并在重试�
 
 effect-scoped owner-controller registry 保留在 subagent 服务中。服务应用[通用控制授权](../feature/2026-08-06-continuable-subagent-interrupt.zh.md)后，DAG-owned 子级的 stop、redirect 与子级轮次 settlement 委派给 `DagService`。`Agent.redirect` 取消活跃轮次并保留 inbox 状态，把一个替换普通轮次放在已排队普通轮次之前，然后唤醒 agent。`Agent.steer` 仍是非中断式 next-step 操作。Web Stop、`interrupt_agent` 与 `dag_node_stop` 到达同一个 DAG stop transition；Web steering、`steer_agent` 与 `dag_node_steer` 到达同一个 DAG steer transition。
 
-调度器接收完整安全面板与十个命令工具。受 owner 约束的子级只接收其拓扑、依赖状态、执行事实，以及 complete 或 block 工具。变更工具返回 command acceptance、revision 与 operation id，不等待 effect。调度器提示词要求使用 `dag_wait`，而不是轮询状态。只读 Web dock 在第一次声明后显示计数与拓扑行，不暴露绝对 worktree 路径。
+调度器接收完整安全面板与十一个命令工具。受 owner 约束的子级只接收其拓扑、依赖状态、执行事实，以及 complete 或 block 工具。变更工具返回 command acceptance、revision 与 operation id，不等待 effect。调度器提示词要求使用 `dag_wait`，而不是轮询状态。只读 Web dock 在第一次声明后显示计数与拓扑行，不暴露绝对 worktree 路径。
 
 ## 测试
 
-Reducer 模型在含并行 root、fan-out、fan-in、integration 与 tail 节点的有界图上枚举命令、effect 结果、陈旧回调、重启点、redispatch、resume、steer 与 stop。它比较生产和 reference replay，并检查依赖准入、合法 transition、单个活跃 operation、陈旧结果 fencing、单次通知与 wave settlement、stop 的 interrupted 结果、Git-gated 完成、DAG settlement 隔离，以及 notice-before-wait 顺序。
+Reducer 模型在含并行 root、fan-out、fan-in、integration 与 tail 节点的有界图上枚举命令、effect 结果、陈旧回调、重启点、redispatch、resume、steer、stop、声明修正与依赖重连。它比较生产和 reference replay，并检查依赖准入、合法 transition、单个活跃 operation、陈旧结果 fencing、单次通知与 wave settlement、stop 的 interrupted 结果、Git-gated 完成、DAG settlement 隔离，以及 notice-before-wait 顺序。
 
-Barrier 测试覆盖竞争命令对与重启历史。没有 remote 的真实本地仓库覆盖 dirty 和 detached root、并发 worktree 创建、精确依赖 fan-in、文件归属、所有 integration policy、conflict、reset、cancellation、陈旧 effect，以及新 HEAD 上的干净完成。Subagent、projection、tool、composition、locale、Web、generated-catalog 与 recorded-session 测试覆盖其他集成路径。
+Barrier 测试覆盖竞争命令对与重启历史。没有 remote 的真实本地仓库覆盖 dirty 和 detached root、并发 worktree 创建、精确依赖 fan-in、文件归属、所有 integration policy、conflict、reset、cancellation、陈旧 effect、新 HEAD 上的干净完成，以及 worktree 已携带已交付工作时的无操作完成。Subagent、projection、tool、composition、locale、Web、generated-catalog 与 recorded-session 测试覆盖其他集成路径。
 
 ## 考虑过的替代方案
 

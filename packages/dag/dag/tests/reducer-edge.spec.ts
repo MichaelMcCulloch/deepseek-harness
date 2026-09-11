@@ -183,6 +183,7 @@ function evidence(overrides: Partial<DagStartEvidence> = {}): DagStartEvidence {
     branch: 'branch-a',
     worktree: '/tmp/a',
     frozenWaveBase: baseCommit,
+    preparedFrom: baseCommit,
     preparedHead: preparedCommit,
     dependencyCommits: [],
     conflictedFiles: [],
@@ -238,7 +239,7 @@ describe('DAG declaration and public command rejections', () => {
     ])
   })
 
-  it('requires new status and existing immutable and live fields to match', () => {
+  it('requires new status, corrects inactive declarations, and locks active ones', () => {
     const definition = validateDagDeclaration([input('a')]).definitions[0]!
     expect(() => step(null, {
       type: 'write', noticeNamespace: 'test-dispatcher', nodes: [{ definition, status: 'completed' }],
@@ -246,8 +247,100 @@ describe('DAG declaration and public command rejections', () => {
     })).toThrow(/must be pending/)
 
     const current = step(null, writeCommand([input('a')]))
-    expect(() => step(current, writeCommand([input('a', { content: 'Changed' })]))).toThrow(/immutable definition/)
     expect(() => step(current, writeCommand([input('a')], { a: 'failed' }))).toThrow(/repeat live status/)
+
+    const corrected = reduceDagState(current, writeCommand([input('a', { content: 'Changed', files: ['src/other.ts'] })]))
+    expect(corrected.amended).toEqual([{ id: 'a', fields: ['content', 'files'] }])
+    expect(corrected.state.nodes[0]).toMatchObject({ content: 'Changed', files: ['src/other.ts'], generation: 0, status: 'pending' })
+
+    const active = state([node({ status: 'in_progress' })])
+    expect(() => step(active, writeCommand([input('a', { content: 'Changed' })], { a: 'in_progress' })))
+      .toThrow(/stop it first/)
+
+    const prepared = state([
+      node({ id: DagNodeId('a') }),
+      node({
+        id: DagNodeId('b'), status: 'failed', frozenWaveBase: baseCommit,
+        dependencyCommits: [completedCommit], deps: [DagNodeId('a')],
+      }),
+    ], { topologicalOrder: [DagNodeId('a'), DagNodeId('b')] })
+    expect(() => step(prepared, writeCommand([input('a'), input('b')], { a: 'pending', b: 'failed' })))
+      .toThrow(/recorded local Git preparation/)
+  })
+
+  it('corrects one node declaration without disturbing its execution facts or siblings', () => {
+    const declared = step(null, writeCommand([input('a'), input('b', { deps: ['a'] })]))
+    const prepared = state([
+      declared.nodes[0]!,
+      {
+        ...declared.nodes[1]!,
+        status: 'failed' as const,
+        generation: 3,
+        bindingGeneration: 3,
+        childSessionId: SessionId('child-b'),
+        branch: 'branch-b',
+        worktree: '/tmp/b',
+        frozenWaveBase: baseCommit,
+        dependencyCommits: [completedCommit],
+        conflictedFiles: [],
+        settlement: { kind: 'failed' as const, reason: 'bounded failure' },
+        commands: [],
+      },
+    ])
+    const corrected = reduceDagState(prepared, {
+      type: 'amend',
+      nodeId: DagNodeId('b'),
+      definition: {
+        ...declared.nodes[1]!,
+        content: 'Corrected b',
+        files: ['src/b-fixed.ts'],
+      },
+      topologicalOrder: [DagNodeId('a'), DagNodeId('b')],
+    })
+    expect(corrected.amended).toEqual([{ id: 'b', fields: ['content', 'files'] }])
+    expect(corrected.state.nodes[1]).toMatchObject({
+      id: 'b',
+      content: 'Corrected b',
+      files: ['src/b-fixed.ts'],
+      status: 'failed',
+      generation: 3,
+      childSessionId: 'child-b',
+      frozenWaveBase: baseCommit,
+      settlement: { kind: 'failed' },
+    })
+    expect(corrected.state.nodes[0]).toBe(prepared.nodes[0])
+
+    expect(() => step(prepared, {
+      type: 'amend',
+      nodeId: DagNodeId('missing'),
+      definition: declared.nodes[0]!,
+      topologicalOrder: [DagNodeId('a'), DagNodeId('b')],
+    })).toThrow(/unknown DAG node/)
+    expect(() => step(prepared, {
+      type: 'amend',
+      nodeId: DagNodeId('b'),
+      definition: declared.nodes[1]!,
+      topologicalOrder: [DagNodeId('a'), DagNodeId('b')],
+    })).toThrow(/already matches/)
+    expect(() => step(prepared, {
+      type: 'amend',
+      nodeId: DagNodeId('b'),
+      definition: { ...declared.nodes[1]!, deps: [] },
+      topologicalOrder: [DagNodeId('a'), DagNodeId('b')],
+    })).toThrow(/recorded local Git preparation/)
+  })
+
+  it('rejects an amendment of a node holding active child work', () => {
+    const current = state([node({ status: 'blocked', commands: [mailbox('dispatch')] })])
+    expect(() => step(current, {
+      type: 'amend',
+      nodeId: DagNodeId('a'),
+      definition: {
+        ...validateDagDeclaration([input('a')]).definitions[0]!,
+        brief: `${brief}\nMore detail.`,
+      },
+      topologicalOrder: [DagNodeId('a')],
+    })).toThrow(/stop it first/)
   })
 
   it('reports file and contract-pin conflicts and retains only declared waves', () => {
@@ -484,7 +577,7 @@ describe('public node lifecycle commands', () => {
   })
 
   it('accepts resume and steer from every resumable state', () => {
-    for (const status of ['blocked', 'interrupted'] as const) {
+    for (const status of ['blocked', 'interrupted', 'failed'] as const) {
       const resumed = step(state([node({ status, settlement: { kind: status, reason: 'old' } })]), {
         type: 'resume', nodeId: DagNodeId('a'), message: '  continue  ',
       })

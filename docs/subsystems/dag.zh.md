@@ -12,11 +12,13 @@
 
 生产 reducer 是纯函数。独立参考 reducer 支持有界模型测试。服务调用读取当前修订号、归约命令，并在没有异步等待的情况下追加一个快照。可选的 `if_revision` 值提供比较并设置行为。陈旧值、嵌套追加或重入追加会以 `dag-revision-conflict` 失败。
 
+错误的声明会被就地更正，而不是把节点及其依赖节点一并丢弃。`dag_write` 重新发送完整图：既有节点重复其实时状态，并可更改其已声明字段；写入省略的节点也会从每个存活依赖节点的依赖列表中移除，并报告为 rewired 行。`dag_node_amend` 在不重新发送图的情况下更改单个节点的已声明字段。两者都保留节点的标识、状态、代数、子级绑定、已记录 Git 事实、邮箱、完成与依赖节点。两者都不会更改活动节点的声明，也不会在节点记录了本地 Git 准备之后更改依赖，因为该记录固定了依赖合并所使用的提交列表。已声明的文件所有权沿每条依赖边互斥：任务节点若声明了某个传递依赖也声明的文件，会在声明时被拒绝，因为准备其 worktree 会把该依赖版本的文件合并进该节点拥有的工作。
+
 ## 节点生命周期
 
-新节点从 `pending` 开始。主路径是从 `pending` 到 `starting`，然后到 `in_progress`，最后到 `completed`、`blocked`、`failed` 或 `interrupted`。阻塞或中断节点通过 `starting` 恢复。失败节点只能通过重新调度返回 `pending`。完成状态是终止状态。
+新节点从 `pending` 开始。主路径是从 `pending` 到 `starting`，然后到 `in_progress`，最后到 `completed`、`blocked`、`failed` 或 `interrupted`。阻塞、中断或失败节点通过 `starting` 恢复或被定向；失败节点也可通过重新调度返回 `pending`。完成状态是终止状态。
 
-停止操作先提交 `interrupted`，然后取消活动效果或子节点轮次。定向活动节点时，其状态保持为 `in_progress`；定向阻塞或中断节点时，其状态通过 `starting`。如果子节点轮次结束时没有调用 `dag_node_complete` 或 `dag_node_block`，则节点失败；已记录的停止或定向替换不会造成此失败。
+停止操作先提交 `interrupted`，然后取消活动效果或子节点轮次。定向活动节点时，其状态保持为 `in_progress`；定向阻塞、中断或失败节点时，其状态通过 `starting`。如果子节点轮次结束时没有调用 `dag_node_complete` 或 `dag_node_block`，则节点失败；已记录的停止或定向替换不会造成此失败。
 
 当旧工作失效时，调度、重新调度、恢复、定向、停止和重置会递增节点代数。效果结果必须匹配持久绑定代数、节点代数、命令 id 和操作 id。陈旧结果不改变状态。
 
@@ -46,7 +48,7 @@ DAG 子节点是可续跑子智能体，具有绝对 worktree `cwd`、持久 JSO
 
 调度 wave 打开前，一个 porcelain-v2 探针要求根 worktree 干净、位于符号本地分支，并具有有效本地 HEAD。Wave 冻结该分支和提交。每个节点 worktree 从冻结提交开始。依赖合并按照声明顺序使用确切的已记录完成提交，而不使用分支 tip。
 
-任务完成要求预期分支、无活动合并、worktree 干净、HEAD 已改变，并且每个已记录依赖提交都是祖先。服务记录该确切 HEAD。任务节点必须将变更限制在其已声明文件内。集成节点使用已声明的 `ours`、`theirs` 或 `delegate` 策略。Delegate 模式记录确切提交和冲突，取消自动冲突合并，并将手动集成任务交给子节点。
+任务完成要求预期分支、无活动合并、worktree 干净、每个已记录依赖提交都是祖先，并且 HEAD 是新的。准备工作开始时其 worktree 已带有提交的任务无需新 HEAD 即可完成：准备工作记录合并前的 HEAD，而从冻结 wave 基准创建的 worktree 仍要求一次提交。服务记录该确切 HEAD。任务节点必须将变更限制在其已声明文件内。集成节点使用已声明的 `ours`、`theirs` 或 `delegate` 策略。Delegate 模式记录确切提交和冲突，取消自动冲突合并，并将手动集成任务交给子节点。
 
 重置仅适用于待处理或失败节点。它接受冻结的 wave 基准、确切提交 id 或显式本地 `refs/heads/*` ref。它拒绝远程 ref 和歧义名称。它中止活动合并、硬重置已跟踪状态、保留未跟踪文件，并报告剩余脏状态。服务不会删除旧分支、worktree 或子会话。
 
@@ -96,11 +98,29 @@ statusFrom(child: Agent): { readonly revision: number readonly topology: readonl
 
 /**
  * Replace the declaration after canonical validation.
+ *
+ * Existing nodes may correct their declared fields in place, which keeps their
+ * identity, execution facts, descendants, and completed status. Omitting a node
+ * that the durable graph declared removes it from every surviving dependent's
+ * dependency list instead of forcing those dependents to be dropped too.
  * @param agent - Live dispatcher agent.
  * @param request - Full node declaration and optional revision guard.
- * @returns Accepted write receipt, preserved artifacts, and advisory conflicts.
+ * @returns Accepted write receipt, preserved artifacts, corrections, and advisory conflicts.
  */
 write(agent: Agent, request: DagWriteRequest): DagWriteResult
+
+/**
+ * Correct the declared fields of one existing node without re-emitting the graph.
+ *
+ * Omitted fields keep their current value. The corrected node keeps its id,
+ * status, generation, child binding, recorded Git facts, mailbox, descendants,
+ * and completed commit, so a wrong declaration never costs dependent work.
+ * @param agent - Live dispatcher agent.
+ * @param nodeId - Existing node to correct.
+ * @param patch - Declaration fields to replace.
+ * @returns Accepted command receipt.
+ */
+amend(agent: Agent, nodeId: DagNodeId, patch: DagNodeAmendRequest): DagCommandAccepted
 
 /**
  * Start dependency-ready pending nodes without waiting for effects.

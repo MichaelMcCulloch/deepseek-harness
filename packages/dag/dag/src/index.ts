@@ -45,11 +45,13 @@ import {
 import type { DagOwnerMetadata, DagRuntimeConfig } from './runtime.ts'
 import { projectDag, reduceDagState, DagStateError } from './reducer.ts'
 import type { DagDeclaredNode, DagEffectFence, DagReduceResult, DagReducerCommand } from './reducer.ts'
-import { validateDagDeclaration } from './validation.ts'
+import { validateDagDeclaration, rewireOmittedDependencies } from './validation.ts'
 import type {
   DagCommandAccepted,
   DagCommitted,
+  DagNodeAmendRequest,
   DagNodeId,
+  DagNodeInput,
   DagNodeSnapshot,
   DagNotice,
   DagNoticeId,
@@ -315,14 +317,21 @@ export class DagService extends Service implements SubagentOwnerController {
 
   /**
    * Replace the declaration after canonical validation.
+   *
+   * Existing nodes may correct their declared fields in place, which keeps their
+   * identity, execution facts, descendants, and completed status. Omitting a node
+   * that the durable graph declared removes it from every surviving dependent's
+   * dependency list instead of forcing those dependents to be dropped too.
    * @param agent - Live dispatcher agent.
    * @param request - Full node declaration and optional revision guard.
-   * @returns Accepted write receipt, preserved artifacts, and advisory conflicts.
+   * @returns Accepted write receipt, preserved artifacts, corrections, and advisory conflicts.
    */
   write(agent: Agent, request: DagWriteRequest): DagWriteResult {
     this.assertRevision(agent, request.if_revision)
-    const validated = validateDagDeclaration(request.nodes)
-    const byId = new Map(request.nodes.map(node => [node.id.trim(), node]))
+    const known = new Set(this.state(agent)?.nodes.map(node => node.id) ?? [])
+    const prepared = rewireOmittedDependencies(request.nodes, known)
+    const validated = validateDagDeclaration(prepared.inputs)
+    const byId = new Map(prepared.inputs.map(node => [node.id.trim(), node]))
     const rows: DagDeclaredNode[] = validated.definitions.map(definition => ({
       definition,
       status: requiredValue(
@@ -344,8 +353,65 @@ export class DagService extends Service implements SubagentOwnerController {
       revision: result.state.revision,
       operationId: requiredOperation(result),
       dropped: requiredValue(result.dropped, new DagStateError('accepted DAG write lacks dropped artifacts', 'dag-invalid-state')),
+      amended: requiredValue(result.amended, new DagStateError('accepted DAG write lacks amended rows', 'dag-invalid-state')),
+      rewired: prepared.rewired,
       conflicts: requiredValue(result.conflicts, new DagStateError('accepted DAG write lacks conflict rows', 'dag-invalid-state')),
     }
+  }
+
+  /**
+   * Correct the declared fields of one existing node without re-emitting the graph.
+   *
+   * Omitted fields keep their current value. The corrected node keeps its id,
+   * status, generation, child binding, recorded Git facts, mailbox, descendants,
+   * and completed commit, so a wrong declaration never costs dependent work.
+   * @param agent - Live dispatcher agent.
+   * @param nodeId - Existing node to correct.
+   * @param patch - Declaration fields to replace.
+   * @returns Accepted command receipt.
+   */
+  amend(agent: Agent, nodeId: DagNodeId, patch: DagNodeAmendRequest): DagCommandAccepted {
+    this.assertRevision(agent, patch.if_revision)
+    const state = this.requireState(agent)
+    const node = requiredValue(
+      state.nodes.find(row => row.id === nodeId),
+      new DagStateError(`unknown DAG node ${JSON.stringify(nodeId)}`, 'dag-node-not-found'),
+    )
+    const corrected = this.amendedInput(state.nodes, patch, node)
+    const validated = validateDagDeclaration(corrected)
+    const definition = requiredValue(
+      validated.definitions.find(row => row.id === node.id),
+      new DagStateError('validated DAG amendment lost its node', 'dag-invalid-state'),
+    )
+    return this.accept(agent, patch, 'amend', {
+      type: 'amend',
+      nodeId: node.id,
+      definition,
+      topologicalOrder: validated.topologicalOrder,
+    })
+  }
+
+  /** Build the complete declaration this amendment validates, with the patch applied to one row. */
+  private amendedInput(
+    nodes: readonly DagNodeSnapshot[],
+    patch: DagNodeAmendRequest,
+    target: DagNodeSnapshot,
+  ): readonly DagNodeInput[] {
+    const kind = patch.kind ?? target.kind
+    return nodes.map((node) => {
+      const current = node.id === target.id
+      const rowKind = current ? kind : node.kind
+      return {
+        id: node.id,
+        content: current ? patch.content ?? target.content : node.content,
+        brief: current ? patch.brief ?? target.brief : node.brief,
+        deps: current && patch.deps !== undefined ? [...patch.deps] : [...node.deps],
+        status: node.status,
+        kind: rowKind,
+        ...rowKind === 'task' ? {} : { policy: current ? patch.policy ?? target.policy : node.policy },
+        files: current && patch.files !== undefined ? [...patch.files] : [...node.files],
+      }
+    })
   }
 
   /**
@@ -864,11 +930,15 @@ export class DagService extends Service implements SubagentOwnerController {
     if (node.preparedHead === undefined) {
       prepared = await this.git.prepare(root, node, node.branch, node.worktree, base, node.dependencyCommits, signal)
     } else {
+      // A snapshot recorded before pre-preparation evidence existed reports no
+      // value, which is the same as a worktree created at the frozen base.
+      const preparedFrom = node.preparedFrom ?? base
       await this.git.verifyPrepared(root, node, signal)
       prepared = {
         branch: node.branch,
         worktree: node.worktree,
         head: node.preparedHead,
+        preparedFrom,
         dependencyCommits: node.dependencyCommits,
         conflictedFiles: node.conflictedFiles,
       }
@@ -886,6 +956,7 @@ export class DagService extends Service implements SubagentOwnerController {
           branch: prepared.branch,
           worktree: prepared.worktree,
           frozenWaveBase: base,
+          preparedFrom: prepared.preparedFrom,
           preparedHead: prepared.head,
           dependencyCommits: prepared.dependencyCommits,
           conflictedFiles: prepared.conflictedFiles,
@@ -905,6 +976,7 @@ export class DagService extends Service implements SubagentOwnerController {
       prepared.branch,
       prepared.worktree,
       base,
+      prepared.preparedFrom,
       prepared.head,
       prepared.dependencyCommits,
       prepared.conflictedFiles,
@@ -974,6 +1046,7 @@ export class DagService extends Service implements SubagentOwnerController {
     branch: string,
     worktree: string,
     base: string,
+    preparedFrom: string,
     preparedHead: string,
     dependencyCommits: readonly string[],
     conflicts: readonly string[],
@@ -1022,7 +1095,16 @@ export class DagService extends Service implements SubagentOwnerController {
     this.requireCurrentCommand(dispatcher, node.id, command)
     this.mutate(dispatcher, undefined, 'start-succeeded', {
       type: 'start-succeeded', nodeId: node.id, commandId: command.id, generation: command.generation, bindingGeneration: command.bindingGeneration, operationId: command.operationId,
-      evidence: { branch, worktree, frozenWaveBase: base, preparedHead, dependencyCommits, conflictedFiles: conflicts, childSessionId },
+      evidence: {
+        branch,
+        worktree,
+        frozenWaveBase: base,
+        preparedFrom,
+        preparedHead,
+        dependencyCommits,
+        conflictedFiles: conflicts,
+        childSessionId,
+      },
     })
   }
 
@@ -1191,6 +1273,7 @@ export class DagService extends Service implements SubagentOwnerController {
         branch: node.branch,
         worktree: node.worktree,
         frozenWaveBase: node.frozenWaveBase,
+        preparedFrom: node.preparedFrom ?? node.frozenWaveBase,
         preparedHead: node.preparedHead,
         dependencyCommits: node.dependencyCommits,
         conflictedFiles: node.conflictedFiles,

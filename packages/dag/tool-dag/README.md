@@ -32,17 +32,18 @@ Mount the main export in dispatcher compositions and mount the `/child` export i
 | Tool | Purpose |
 |---|---|
 | `dag_write` | Declare or amend the complete graph |
+| `dag_node_amend` | Correct one node's declared fields in place |
 | `dag_dispatch` | Start dependency-ready pending nodes |
 | `dag_wait` | Wait for an injected actionable notice after a revision |
 | `dag_status` | Read the complete safe board once |
 | `dag_node_inspect` | Read one node and its execution facts |
 | `dag_node_redispatch` | Return a failed node to pending |
-| `dag_node_resume` | Resume a blocked or interrupted node |
-| `dag_node_steer` | Cancel and replace node work |
+| `dag_node_resume` | Resume a blocked, interrupted, or failed node |
+| `dag_node_steer` | Cancel and replace node work, or restart a suspended node |
 | `dag_node_stop` | Record interrupted, then cancel node work |
 | `dag_node_reset` | Reset tracked work to an allowed local target |
 
-`dag_write` sends the complete node list. New nodes can declare only `pending`. Existing rows repeat their immutable definition and exact live status. Each brief must contain `VALIDATION:` and `ACCEPTANCE:` sections. Validation rejects duplicate ids, cycles, missing or self dependencies, unsafe paths, invalid integration policies, and removal of active nodes. File and contract-pin overlap rows are advisory.
+`dag_write` sends the complete node list. New nodes can declare only `pending`; an existing row repeats its live status and may correct its declared fields in place, and omitting a declared node also removes it from every surviving dependent's dependency list. `dag_node_amend` corrects one node without re-sending the graph. Each brief must contain `VALIDATION:` and `ACCEPTANCE:` sections. Validation rejects duplicate ids, cycles, missing or self dependencies, unsafe paths, invalid integration policies, removal of active nodes, a declaration change on an active node, a dependency change after recorded Git preparation, and a task node that claims a file a transitive dependency declares. Other file and contract-pin overlap rows are advisory.
 
 ### Child tools
 
@@ -84,7 +85,7 @@ The dispatcher plugin registers the public tools and one model prompt section. T
 
 #### What the model sees
 
-A dispatcher sees the ten public tools and a short rule to use `dag_wait` after dispatch. A DAG child sees only its scoped status, complete, and block tools plus the rule that stop cancels work and steer cancels and replaces work.
+A dispatcher sees the eleven public tools and a short rule to use `dag_wait` after dispatch. A DAG child sees only its scoped status, complete, and block tools plus the rule that stop cancels work and steer cancels and replaces work.
 
 #### Token effect
 

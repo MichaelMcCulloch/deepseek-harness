@@ -86,12 +86,17 @@ export function referenceReduceDagState(current: DagReferenceState | null, comma
       revision: (current?.revision ?? 0) + 1,
       graphGeneration: (current?.graphGeneration ?? 0) + 1,
       operationCounter: counter,
-      nodes: command.nodes.map(({ definition, status }) => old.get(definition.id) ?? {
-        id: definition.id,
-        deps: definition.deps,
-        status,
-        generation: 0,
-        bindingGeneration: 0,
+      nodes: command.nodes.map(({ definition, status }) => {
+        const prior = old.get(definition.id)
+        return prior === undefined
+          ? {
+            id: definition.id,
+            deps: definition.deps,
+            status,
+            generation: 0,
+            bindingGeneration: 0,
+          }
+          : { ...prior, deps: definition.deps }
       }),
     }
   }
@@ -151,6 +156,14 @@ export function referenceReduceDagState(current: DagReferenceState | null, comma
   }
   if (command.type === 'notice-delivered') return { ...current, revision: current.revision + 1 }
   const node = nodeOf(current, command.nodeId)
+  if (command.type === 'amend') {
+    return {
+      ...current,
+      revision: current.revision + 1,
+      operationCounter: current.operationCounter + 1,
+      nodes: current.nodes.map(row => row.id === node.id ? { ...row, deps: command.definition.deps } : row),
+    }
+  }
   if (command.type === 'redispatch') {
     return {
       ...current,

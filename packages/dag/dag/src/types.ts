@@ -33,7 +33,7 @@ export type DagNodeKind = 'task' | 'integration'
 /** Conflict policy for an integration node. */
 export type DagIntegrationPolicy = 'delegate' | 'ours' | 'theirs'
 
-/** Immutable model declaration of one node. */
+/** Model declaration of one node. */
 export interface DagNodeDefinition {
   readonly id: DagNodeId
   readonly content: string
@@ -43,6 +43,9 @@ export interface DagNodeDefinition {
   readonly policy: DagIntegrationPolicy
   readonly files: readonly string[]
 }
+
+/** One declaration field that `amend` and `write` can correct on an existing node. */
+export type DagNodeDefinitionField = 'content' | 'brief' | 'deps' | 'kind' | 'policy' | 'files'
 
 /** Completion or suspension data written by a child. */
 export type DagNodeSettlement =
@@ -77,6 +80,13 @@ export interface DagNodeSnapshot extends DagNodeDefinition {
   readonly worktree?: string
   readonly waveId?: DagWaveId
   readonly frozenWaveBase?: string
+  /**
+   * Worktree HEAD observed immediately before dependency preparation. It differs
+   * from `frozenWaveBase` exactly when the worktree already carried commits, which
+   * is what makes a task's no-op completion valid. A node without recorded
+   * preparation has no value here.
+   */
+  readonly preparedFrom?: string
   /** Exact worktree HEAD after deterministic dependency preparation. */
   readonly preparedHead?: string
   readonly dependencyCommits: readonly string[]
@@ -192,6 +202,19 @@ export interface DagWriteRequest extends DagRevisionGuard {
   readonly nodes: readonly DagNodeInput[]
 }
 
+/**
+ * Targeted correction of one existing node. An omitted field keeps its current
+ * value, so a caller can change one declaration field without re-emitting the graph.
+ */
+export interface DagNodeAmendRequest extends DagRevisionGuard {
+  readonly content?: string
+  readonly brief?: string
+  readonly deps?: readonly string[]
+  readonly kind?: DagNodeKind
+  readonly policy?: DagIntegrationPolicy
+  readonly files?: readonly string[]
+}
+
 /** Accepted asynchronous command acknowledgement. */
 export interface DagCommandAccepted {
   readonly accepted: true
@@ -206,6 +229,16 @@ export interface DagWriteResult extends DagCommandAccepted {
     readonly childSessionId?: SessionId
     readonly branch?: string
     readonly worktree?: string
+  }[]
+  /** Existing nodes whose declaration this write corrected, with the fields it changed. */
+  readonly amended: readonly {
+    readonly id: DagNodeId
+    readonly fields: readonly DagNodeDefinitionField[]
+  }[]
+  /** Existing nodes that lost a dependency because this write omitted it. */
+  readonly rewired: readonly {
+    readonly id: DagNodeId
+    readonly removedDeps: readonly DagNodeId[]
   }[]
   readonly conflicts: readonly {
     readonly ids: readonly [DagNodeId, DagNodeId]

@@ -52,7 +52,9 @@ kind: "package-reference"
 
 ### 节点生命周期
 
-新节点从 `pending` 开始。dispatch 让就绪节点经过 `starting` 进入 `in_progress`。子级报告 `completed` 或 `blocked`；effect 或子级失败记录 `failed`；stop 在取消前记录 `interrupted`。blocked 与 interrupted 节点通过 `starting` resume。failed 节点只能通过 redispatch 回到 `pending`。completed 节点是终态。
+新节点从 `pending` 开始。dispatch 让就绪节点经过 `starting` 进入 `in_progress`。子级报告 `completed` 或 `blocked`；effect 或子级失败记录 `failed`；stop 在取消前记录 `interrupted`。blocked、interrupted 与 failed 节点通过 `starting` resume 或被 steer；failed 节点也可通过 redispatch 回到 `pending`。completed 节点是终态。
+
+错误的声明会被就地修正，因此修正一行绝不会让依赖它的行付出代价。`dag_write` 重新发送完整图，并修正每个已声明字段发生变化的既有行；它还会把被省略的节点从每个存活依赖节点的依赖列表中移除，而不再要求丢弃该依赖节点，并把两者分别报告为 amended 行与 rewired 行。`dag_node_amend` 在不重新发送图的情况下更改单个节点的已声明字段。两条路径都不会更改活动节点的声明，也不会更改已记录本地 Git 准备的节点的依赖。
 
 dispatch、redispatch、resume、steer、stop 或 reset 操作在使早期工作失效时递增节点 generation。effect 回调必须匹配节点 binding generation、节点 generation 与 operation id。陈旧回调不能修改状态。
 
@@ -60,7 +62,7 @@ dispatch、redispatch、resume、steer、stop 或 reset 操作在使早期工作
 
 dispatch wave 先记录意图，再检查一次 porcelain-v2 根状态。根 worktree 必须干净、位于符号本地分支并具有有效本地 HEAD。wave 只冻结一次该分支与 commit。节点分支与 worktree 从冻结 commit 开始，位于 `<DSH_HOME>/dag/worktrees/v1/` 下；依赖 commit 按声明顺序用已记录的精确 commit id merge。
 
-任务节点完成要求 worktree 干净、分支符合预期、没有活跃 merge、HEAD 不同于冻结 base，且每个依赖 commit 都是 ancestor。服务在接受完成前执行声明文件归属检查。integration 节点使用 `ours`、`theirs` 或 `delegate`；delegate 模式记录精确 commit 与 conflict，交由子级手动解决。reset 接受冻结 base、精确 commit 或显式本地 `refs/heads/*` ref，并保留 untracked 文件。
+任务节点完成要求 worktree 干净、分支符合预期、没有活跃 merge，且每个依赖 commit 都是 ancestor，另外还要求 HEAD 不同于冻结 base，或 worktree 在准备开始时已带有 commit。准备会记录 merge 前的 HEAD，因此把节点重新投入其自身已交付的工作时可以无需新 commit 而完成。服务在接受完成前执行声明文件归属检查，并会在声明时拒绝某个传递依赖也声明了其已声明文件的任务节点。integration 节点使用 `ours`、`theirs` 或 `delegate`；delegate 模式记录精确 commit 与 conflict，交由子级手动解决。reset 接受冻结 base、精确 commit 或显式本地 `refs/heads/*` ref，并保留 untracked 文件。
 
 ### 立即命令与等待
 

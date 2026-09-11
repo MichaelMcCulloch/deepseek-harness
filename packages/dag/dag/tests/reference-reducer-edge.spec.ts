@@ -125,6 +125,21 @@ describe('DAG reference reducer edges', () => {
     ])
   })
 
+  it('rewrites one declaration through an amendment without touching scheduler facts', () => {
+    const existing = referenceNode({ status: 'failed', generation: 2, bindingGeneration: 2 })
+    const other = referenceNode({ id: DagNodeId('b'), deps: [DagNodeId('a')] })
+    const next = referenceReduceDagState(referenceState([existing, other]), {
+      type: 'amend',
+      nodeId: DagNodeId('a'),
+      definition: { ...definition('a'), deps: [DagNodeId('b')] },
+      topologicalOrder: [DagNodeId('b'), DagNodeId('a')],
+    })
+
+    expect(next).toMatchObject({ revision: 2, operationCounter: 2 })
+    expect(next.nodes[0]).toMatchObject({ id: 'a', deps: ['b'], status: 'failed', generation: 2 })
+    expect(next.nodes[1]).toBe(other)
+  })
+
   it('dispatches selected nodes and preserves other rows', () => {
     const other = referenceNode({ id: DagNodeId('b') })
     const next = referenceReduceDagState(referenceState([referenceNode(), other]), {
@@ -231,7 +246,7 @@ describe('DAG reference reducer edges', () => {
       type: 'git-prepared', ...fence(active),
       evidence: {
         branch: 'branch', worktree: '/tmp/a', frozenWaveBase: '1'.repeat(40),
-        preparedHead: '2'.repeat(40), dependencyCommits: [], conflictedFiles: [],
+        preparedFrom: '1'.repeat(40), preparedHead: '2'.repeat(40), dependencyCommits: [], conflictedFiles: [],
         childSessionId: 'child-a' as never,
       },
     }).revision).toBe(2)
@@ -239,7 +254,7 @@ describe('DAG reference reducer edges', () => {
       type: 'start-succeeded', ...fence(active),
       evidence: {
         branch: 'branch', worktree: '/tmp/a', frozenWaveBase: '1'.repeat(40),
-        preparedHead: '2'.repeat(40), dependencyCommits: [], conflictedFiles: [],
+        preparedFrom: '1'.repeat(40), preparedHead: '2'.repeat(40), dependencyCommits: [], conflictedFiles: [],
         childSessionId: 'child-a' as never,
       },
     }).nodes[0]).toMatchObject({ status: 'in_progress', commandState: 'settled' })

@@ -36,6 +36,8 @@ export interface DagPreparedWorktree {
   readonly worktree: string
   readonly dependencyCommits: readonly string[]
   readonly conflictedFiles: readonly string[]
+  /** Worktree HEAD observed before the dependency merges. */
+  readonly preparedFrom: string
   readonly head: string
 }
 
@@ -143,7 +145,10 @@ export class DagGit {
         const changed = records((await this.run(worktree, ['diff', '--name-only', '-z', `${base}...${commit}`], signal)).stdout)
         const overlap = changed.filter(path => node.files.includes(path))
         if (overlap.length > 0) {
-          throw new DagGitError(`node ${JSON.stringify(node.id)} owns files changed by dependency ${commit}: ${overlap.join(', ')}`, ['diff'])
+          throw new DagGitError(
+            `node ${JSON.stringify(node.id)} owns files changed by dependency ${commit}: ${overlap.join(', ')}; amend the node's declared files or dependencies before dispatching it again`,
+            ['diff'],
+          )
         }
       }
     }
@@ -165,7 +170,14 @@ export class DagGit {
       }
     }
     const head = (await this.run(worktree, ['rev-parse', 'HEAD'], signal)).stdout.trim()
-    return { branch, worktree, dependencyCommits: [...dependencyCommits], conflictedFiles: [...new Set(conflictedFiles)], head }
+    return {
+      branch,
+      worktree,
+      dependencyCommits: [...dependencyCommits],
+      conflictedFiles: [...new Set(conflictedFiles)],
+      preparedFrom: currentHead,
+      head,
+    }
   }
 
   /**
@@ -213,6 +225,11 @@ export class DagGit {
 
   /**
    * Require all local evidence for one completed node.
+   *
+   * A task node whose worktree already carried commits before dependency
+   * preparation may complete without a new commit: preparation is then a no-op
+   * over work that already exists, and requiring another commit would make
+   * re-arming a node onto its own delivered commit impossible.
    * @param node - Node with frozen Git facts.
    * @param signal - Cancellation for all Git processes.
    * @returns Exact validated completion HEAD.
@@ -234,7 +251,9 @@ export class DagGit {
       if (ancestor === undefined) throw new DagGitError(`dependency commit ${commit} is not an ancestor of completion ${head}`, ['merge-base'])
     }
     if (node.kind === 'task') {
-      if (head === node.preparedHead) throw new DagGitError('task completion requires a commit after dependency preparation', ['rev-parse'])
+      if (head === node.preparedHead && (node.preparedFrom ?? node.frozenWaveBase) === node.frozenWaveBase) {
+        throw new DagGitError('task completion requires a commit after dependency preparation', ['rev-parse'])
+      }
       if (node.files.length > 0) {
         const changed = records((await this.run(node.worktree, ['diff', '--name-only', '-z', `${node.preparedHead}...${head}`], signal)).stdout)
         const outside = changed.filter(path => !node.files.includes(path))

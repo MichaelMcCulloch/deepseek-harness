@@ -13,6 +13,7 @@ export const inject = ['tools', 'dag', 'systemPrompt']
 /** Full tool set exposed only to a DAG dispatcher. */
 export const DISPATCHER_TOOLS = [
   'dag_write',
+  'dag_node_amend',
   'dag_dispatch',
   'dag_wait',
   'dag_status',
@@ -54,7 +55,7 @@ export function apply(ctx: Context): void {
 function registerDispatcherTools(ctx: Context): void {
   ctx.tools.register(defineTool({
     name: 'dag_write',
-    description: 'Declare or amend the complete dependency graph. Send every node on each call. Existing nodes must repeat their immutable fields and exact live status.',
+    description: 'Declare or amend the complete dependency graph. Send every node on each call. An existing node repeats its live status and may correct its declared fields; omitting a node drops it and removes it from every surviving dependent. Use dag_node_amend to correct one node without re-sending the graph.',
     parameters: {
       nodes: {
         type: 'array',
@@ -92,6 +93,22 @@ function registerDispatcherTools(ctx: Context): void {
               },
             },
           },
+          amended: {
+            type: 'array', required: true, items: {
+              type: 'object', additionalProperties: false, properties: {
+                id: { type: 'string', required: true },
+                fields: { type: 'array', required: true, items: { type: 'string' } },
+              },
+            },
+          },
+          rewired: {
+            type: 'array', required: true, items: {
+              type: 'object', additionalProperties: false, properties: {
+                id: { type: 'string', required: true },
+                removedDeps: { type: 'array', required: true, items: { type: 'string' } },
+              },
+            },
+          },
           conflicts: {
             type: 'array', required: true, items: {
               type: 'object', additionalProperties: false, properties: {
@@ -106,7 +123,10 @@ function registerDispatcherTools(ctx: Context): void {
           },
         },
       },
-      render: (_args, value) => [{ type: 'text', text: `DAG declaration accepted at revision ${value.revision}; ${value.conflicts.length} advisory conflict row(s).` }],
+      render: (_args, value) => [{
+        type: 'text',
+        text: `DAG declaration accepted at revision ${value.revision}; ${value.amended.length} amended node(s), ${value.rewired.length} rewired node(s), ${value.conflicts.length} advisory conflict row(s).`,
+      }],
     },
     execute(args, exec) {
       const agent = requireAgent(exec.agent, 'dag_write')
@@ -124,8 +144,38 @@ function registerDispatcherTools(ctx: Context): void {
           ...row.branch === undefined ? {} : { branch: row.branch },
           ...row.worktree === undefined ? {} : { worktree: row.worktree },
         })),
+        amended: result.amended.map(row => ({ id: row.id, fields: [...row.fields] })),
+        rewired: result.rewired.map(row => ({ id: row.id, removedDeps: [...row.removedDeps] })),
         conflicts: result.conflicts.map(row => ({ ids: [...row.ids], files: [...row.files], reason: row.reason })),
       })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'dag_node_amend',
+    description: 'Correct the declared fields of one node without re-sending the graph. Omitted fields keep their value; the node keeps its id, status, recorded Git facts, completed work, and dependents.',
+    parameters: {
+      node_id: { type: 'string', required: true },
+      content: { type: 'string' },
+      brief: { type: 'string', description: 'Must contain VALIDATION: and ACCEPTANCE: sections.' },
+      deps: { type: 'array', items: { type: 'string' } },
+      kind: { type: 'string', enum: ['task', 'integration'] },
+      policy: { type: 'string', enum: ['delegate', 'ours', 'theirs'] },
+      files: { type: 'array', items: { type: 'string' } },
+      if_revision: { type: 'integer' },
+    },
+    output: acceptedOutput('DAG amendment accepted'),
+    execute(args, exec) {
+      const agent = requireAgent(exec.agent, 'dag_node_amend')
+      return Promise.resolve(acceptance(ctx.dag.amend(agent, DagNodeId(args.node_id), {
+        ...args.content === undefined ? {} : { content: args.content },
+        ...args.brief === undefined ? {} : { brief: args.brief },
+        ...args.deps === undefined ? {} : { deps: args.deps },
+        ...args.kind === undefined ? {} : { kind: args.kind },
+        ...args.policy === undefined ? {} : { policy: args.policy },
+        ...args.files === undefined ? {} : { files: args.files },
+        ...guard(args),
+      })))
     },
   }))
 
@@ -187,6 +237,7 @@ function registerDispatcherTools(ctx: Context): void {
         ...node.settlement === undefined ? {} : { settlement: node.settlement },
         ...node.completedCommit === undefined ? {} : { completedCommit: node.completedCommit },
         ...node.preparedHead === undefined ? {} : { preparedHead: node.preparedHead },
+        ...node.preparedFrom === undefined ? {} : { preparedFrom: node.preparedFrom },
         ...node.currentOperationId === undefined ? {} : { currentOperationId: node.currentOperationId },
         commands: node.commands,
       }
@@ -195,10 +246,10 @@ function registerDispatcherTools(ctx: Context): void {
   }))
 
   registerNodeCommand(ctx, 'dag_node_redispatch', 'Re-arm one failed node as pending for a later dag_dispatch call.', {}, (agent, nodeId, _args) => ctx.dag.redispatch(agent, nodeId, guard(_args)))
-  registerNodeCommand(ctx, 'dag_node_resume', 'Resume one blocked or interrupted node with new instructions.', {
+  registerNodeCommand(ctx, 'dag_node_resume', 'Resume one blocked, interrupted, or failed node with new instructions.', {
     message: { type: 'string', required: true },
   }, (agent, nodeId, args) => ctx.dag.resume(agent, nodeId, String(args['message']), guard(args)))
-  registerNodeCommand(ctx, 'dag_node_steer', 'Interrupt and replace active node work. A suspended node returns through starting.', {
+  registerNodeCommand(ctx, 'dag_node_steer', 'Interrupt and replace active node work. A suspended or failed node returns through starting.', {
     message: { type: 'string', required: true },
   }, (agent, nodeId, args) => ctx.dag.steer(agent, nodeId, String(args['message']), guard(args)))
   registerNodeCommand(ctx, 'dag_node_stop', 'Commit interrupted state, then cancel the node child.', {

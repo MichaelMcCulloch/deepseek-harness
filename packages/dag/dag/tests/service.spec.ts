@@ -311,6 +311,7 @@ function appendOwnerPrepared(harness: TestHarness, owner: ReturnType<typeof appe
     branch: owner.node.branch!,
     worktree: owner.node.worktree!,
     frozenWaveBase: '1'.repeat(40),
+    preparedFrom: '1'.repeat(40),
     preparedHead: '1'.repeat(40),
     dependencyCommits: [],
     conflictedFiles: [],
@@ -335,6 +336,7 @@ function appendOwnerInProgress(harness: TestHarness, owner: ReturnType<typeof ap
     branch: owner.node.branch!,
     worktree: owner.node.worktree!,
     frozenWaveBase: '1'.repeat(40),
+    preparedFrom: '1'.repeat(40),
     preparedHead: '1'.repeat(40),
     dependencyCommits: [],
     conflictedFiles: [],
@@ -440,6 +442,57 @@ describe('native DAG service', { timeout: 60_000 }, () => {
 
     expect(written.revision).toBe(inherited.revision + 1)
     expect(ctx.dag.state(dispatcher)?.noticeNamespace).toBe('origin-dispatcher')
+  })
+
+  it('corrects every declared field of one node and rewires a dependent that loses an omitted dependency', async () => {
+    const { ctx, dispatcher } = await setup(new GatedAdapter([]))
+    const correctedBrief = 'Corrected b.\nVALIDATION: rerun the focused test.\nACCEPTANCE: commit clean work.'
+    const leaf = (overrides: Partial<DagNodeInput> = {}): DagNodeInput => ({
+      ...node('b'), deps: ['a'], files: ['leaf.txt'], ...overrides,
+    })
+    const declared = ctx.dag.write(dispatcher, { nodes: [node('a'), leaf()] })
+    expect(declared.amended).toEqual([])
+    expect(declared.rewired).toEqual([])
+
+    ctx.dag.amend(dispatcher, DagNodeId('b'), {
+      content: 'Corrected b',
+      brief: correctedBrief,
+      deps: [],
+      kind: 'integration',
+      policy: 'ours',
+      files: ['src/b.ts'],
+      if_revision: declared.revision,
+    })
+    expect(ctx.dag.inspect(dispatcher, DagNodeId('b'))).toMatchObject({
+      content: 'Corrected b',
+      brief: correctedBrief,
+      deps: [],
+      kind: 'integration',
+      policy: 'ours',
+      files: ['src/b.ts'],
+      status: 'pending',
+      generation: 0,
+    })
+
+    ctx.dag.amend(dispatcher, DagNodeId('b'), { content: 'Corrected again' })
+    ctx.dag.amend(dispatcher, DagNodeId('a'), { content: 'Corrected a' })
+    expect(ctx.dag.inspect(dispatcher, DagNodeId('b'))).toMatchObject({
+      content: 'Corrected again',
+      kind: 'integration',
+      policy: 'ours',
+    })
+
+    const restored = ctx.dag.amend(dispatcher, DagNodeId('b'), { deps: ['a'], kind: 'task' })
+    expect(restored.accepted).toBe(true)
+    expect(ctx.dag.inspect(dispatcher, DagNodeId('b'))).toMatchObject({ deps: ['a'], kind: 'task', policy: 'delegate' })
+
+    const rewritten = ctx.dag.write(dispatcher, {
+      nodes: [leaf({ content: 'Corrected again', brief: correctedBrief, files: ['src/b.ts'] })],
+    })
+    expect(rewritten.dropped).toEqual([{ id: 'a' }])
+    expect(rewritten.rewired).toEqual([{ id: 'b', removedDeps: ['a'] }])
+    expect(rewritten.amended).toEqual([{ id: 'b', fields: ['deps'] }])
+    expect(ctx.dag.inspect(dispatcher, DagNodeId('b'))).toMatchObject({ deps: [], status: 'pending' })
   })
 
   it('contains commit listener failures and still reaches later listeners', async () => {
@@ -794,7 +847,10 @@ describe('native DAG service', { timeout: 60_000 }, () => {
     const directSteered = reduceDagState(directStarted, {
       type: 'steer', nodeId: DagNodeId('a'), message: 'Direct replacement.',
     }).state
-    directHarness.dispatcher.session.append('dag/state', { state: directSteered })
+    // A snapshot recorded before pre-preparation evidence existed carries no
+    // preparedFrom, so the direct steer must fall back to the frozen wave base.
+    const { preparedFrom: _legacyPreparedFrom, ...legacyNode } = directSteered.nodes[0]!
+    directHarness.dispatcher.session.append('dag/state', { state: { ...directSteered, nodes: [legacyNode] } })
     const directNode = directSteered.nodes[0]!
     const directCommand = directNode.commands.at(-1)!
     serviceField<WeakMap<typeof directHarness.dispatcher.session, Set<ReturnType<typeof DagNodeId>>>>(
@@ -916,6 +972,13 @@ describe('native DAG service', { timeout: 60_000 }, () => {
           session: { header: {}, snapshotEvents: () => harness.dispatcher.session.snapshotEvents() },
         } as unknown as Agent,
       )
+      const { preparedFrom: _preparedFrom, ...withoutPreparedFrom } = started.nodes[0]!
+      for (const preparedNode of [
+        { ...withoutPreparedFrom, preparedHead: '1'.repeat(40) },
+        { ...started.nodes[0]!, preparedHead: '1'.repeat(40), preparedFrom: '2'.repeat(40) },
+      ]) {
+        await expectStateFailure({ ...started, nodes: [preparedNode] }, 'prepared worktree is missing')
+      }
     } finally {
       Reflect.set(service, 'requireState', originalRequireState)
     }
@@ -1068,6 +1131,7 @@ describe('native DAG service', { timeout: 60_000 }, () => {
         string,
         string,
         string,
+        string,
         readonly string[],
         readonly string[],
         AbortSignal,
@@ -1090,6 +1154,7 @@ describe('native DAG service', { timeout: 60_000 }, () => {
             node.branch!,
             node.worktree!,
             node.frozenWaveBase!,
+            node.preparedFrom ?? node.frozenWaveBase!,
             node.preparedHead!,
             node.dependencyCommits,
             node.conflictedFiles,
