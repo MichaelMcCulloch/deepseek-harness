@@ -4,7 +4,7 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { defineTool } from './schema.ts'
 import type { DefineToolOptions, ParameterSchemaSpec } from './schema.ts'
-import type { ToolDefinition, ToolRunContext } from './index.ts'
+import type { ToolDefinition, ToolRunContext } from './pipeline-types.ts'
 
 const CONTENT_VALUE_SCHEMA = { type: 'array', items: { type: 'json' } } as const
 

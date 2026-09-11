@@ -32,7 +32,9 @@ Barrels are aggregation points again: `index.ts` imports names from leaves and r
 
 Declarations gained new homes, including types-only leaves in several packages and one coalesced kernel in each vendored framework package. `vendor/cordis/src/context.ts` is necessarily the file the checker cannot parse, because `Service<out T = never>` and the `ReflectService.accessor(...)` class method cannot be respelled without a type change — but its only remaining imports are npm packages, so that blind spot hides no relative edge.
 
-A deep path into a coalesced kernel now exports that cluster's names as well as its own; no name was lost or retyped anywhere, and each package barrel is unchanged. The two cycles that only became visible after the `export type *` rewrite were real and are fixed; they were confirmed by reading the import graph, because the checker cannot see edges through an unparsed barrel.
+A deep path into a coalesced kernel now exports that cluster's names as well as its own; no name was lost or retyped anywhere, and each package barrel is unchanged.
+
+Cycles found by reading the import graph rather than by the checker are fixed the same way. Two surfaced when `export type *` was temporarily rewritten to `export *` (`client/file-upload`, `subagent/subagent`), and three more when the checker gained edge recovery from files it cannot parse (`client/ui-slots`, `core/tools`, `typert/protocol`). Both sets were real; each new release of the checker has so far found more, so "zero cycles" is a statement about a given checker version, not a property that can be assumed stable.
 
 ## Testing
 

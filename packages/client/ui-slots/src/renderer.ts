@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type {
   SessionAreaProps, SlotEntryDef, SlotScope, SlotSpec, StoredEntry, Translate,
-} from './index.ts'
+} from './types.ts'
 
 /**
  * The locale face the render machinery consumes: namespace binding plus an

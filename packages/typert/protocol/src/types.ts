@@ -5,6 +5,7 @@
  */
 
 import type { Context, Events } from '@deepseek-ai/cordis'
+import type { RemoteFailure } from './remote-error.ts'
 
 declare const LOOKUP_HOST: unique symbol
 declare const LOOKUP_WIRE: unique symbol
@@ -39,30 +40,10 @@ export interface TypertContextMap {}
 /** Merge-extensible direct Remote method signatures generated for consumers. */
 export interface TypertRemoteMap {}
 
-/**
- * Merge-extensible Remote failure vocabulary: this package declares the
- * universal carrier codes once; the Gateway merges its infrastructure codes
- * and every owner merges its domain codes next to the throwing code.
- */
-export interface RemoteErrorDetailsMap {
-  /** Owner-side business validation refused the request; `issues` carries codec output when one produced it. */
-  'gateway/bad-request': { readonly issues?: readonly object[] }
-  /** The call was cancelled by the carrier signal or the backend. */
-  'gateway/cancelled': {}
-  /** Carrier, dispatch, or unclassified Host failure. */
-  'gateway/internal': {}
-}
-
-/** Every declared Remote failure code. */
-export type RemoteErrorCode = keyof RemoteErrorDetailsMap
-
-/**
- * One Remote call's failure: the code-discriminated union of RemoteError
- * instances, so a `code` branch narrows `details` with no cast.
- */
-export type RemoteFailure = {
-  [Code in RemoteErrorCode]: import('./remote-error.ts').RemoteError<Code>
-}[RemoteErrorCode]
+// The failure vocabulary and its discriminated union are declared with the
+// RemoteError class that types them, and re-exported here so this module stays
+// the protocol's type surface.
+export type { RemoteErrorCode, RemoteErrorDetailsMap, RemoteFailure } from './remote-error.ts'
 
 /**
  * What every generated Remote method resolves to. The Remote face itself folds
