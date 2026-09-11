@@ -12,7 +12,7 @@
 
 生产 reducer 是纯函数。独立参考 reducer 支持有界模型测试。服务调用读取当前修订号、归约命令，并在没有异步等待的情况下追加一个快照。可选的 `if_revision` 值提供比较并设置行为。陈旧值、嵌套追加或重入追加会以 `dag-revision-conflict` 失败。
 
-错误的声明会被就地更正，而不是把节点及其依赖节点一并丢弃。`dag_write` 重新发送完整图：既有节点重复其实时状态，并可更改其已声明字段；写入省略的节点也会从每个存活依赖节点的依赖列表中移除，并报告为 rewired 行。`dag_node_amend` 在不重新发送图的情况下更改单个节点的已声明字段。两者都保留节点的标识、状态、代数、子级绑定、已记录 Git 事实、邮箱、完成与依赖节点。两者都不会更改活动节点的声明，也不会在节点记录了本地 Git 准备之后更改依赖，因为该记录固定了依赖合并所使用的提交列表。已声明的文件所有权沿每条依赖边互斥：任务节点若声明了某个传递依赖也声明的文件，会在声明时被拒绝，因为准备其 worktree 会把该依赖版本的文件合并进该节点拥有的工作。
+错误的声明会被就地更正，而不是把节点及其依赖节点一并丢弃。`dag_write` 重新发送完整图：既有节点重复其实时状态，并可更改其已声明字段；写入省略的节点也会从每个存活依赖节点的依赖列表中移除，并报告为 rewired 行。`dag_node_amend` 在不重新发送图的情况下更改单个节点的已声明字段。两者都保留节点的标识、状态、代数、子级绑定、已记录 Git 事实、邮箱、完成与依赖节点。两者都不会更改活动节点的声明，也不会在节点记录了本地 Git 准备之后更改依赖，因为该记录固定了依赖合并所使用的提交列表。已声明的文件所有权沿每条依赖边互斥：任务节点若声明了某个传递依赖也声明的文件，会被拒绝，因为准备其 worktree 会把该依赖版本的文件合并进该节点拥有的工作。该规则针对请求将要存储的图进行检查，因此已经带有违规的图仍可修复：修正可以保留或收窄已知违规边，但绝不可扩大其文件集或新增一条边。写入与修正结果会把每个仍存在的违规报告为 `dependency-file-overlap` 冲突行，而每个被拒绝的违规都会在同一条诊断中点名。
 
 ## 节点生命周期
 
@@ -114,13 +114,15 @@ write(agent: Agent, request: DagWriteRequest): DagWriteResult
  *
  * Omitted fields keep their current value. The corrected node keeps its id,
  * status, generation, child binding, recorded Git facts, mailbox, descendants,
- * and completed commit, so a wrong declaration never costs dependent work.
+ * and completed commit, so a wrong declaration never costs dependent work. A
+ * declared-file ownership violation the amendment does not touch is retained
+ * and reported, because the rule is multi-node and this operation is not.
  * @param agent - Live dispatcher agent.
  * @param nodeId - Existing node to correct.
  * @param patch - Declaration fields to replace.
- * @returns Accepted command receipt.
+ * @returns Accepted receipt with the corrected fields and remaining conflicts.
  */
-amend(agent: Agent, nodeId: DagNodeId, patch: DagNodeAmendRequest): DagCommandAccepted
+amend(agent: Agent, nodeId: DagNodeId, patch: DagNodeAmendRequest): DagAmendResult
 
 /**
  * Start dependency-ready pending nodes without waiting for effects.

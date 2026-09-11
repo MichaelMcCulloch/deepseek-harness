@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-29-event-sourced-native-dag-orchestrator.md
-2026-08-29-event-sourced-native-dag-orchestrator.md: 682045bf1024149a60d40b3c577a0dc042a6af7d
-2026-08-29-event-sourced-native-dag-orchestrator.zh.md: a2cd53906f4d22639028cab868cdd30fa7e73ad6
+2026-08-29-event-sourced-native-dag-orchestrator.md: 20a42a842785de8e6d46bda1bdbaee146bbeb60a
+2026-08-29-event-sourced-native-dag-orchestrator.zh.md: be06d472eee10b70b5ab62401c08e888499bf928

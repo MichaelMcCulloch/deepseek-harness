@@ -12,7 +12,7 @@ Each snapshot contains a monotonic revision, graph generation, operation counter
 
 The production reducer is pure. An independent reference reducer supports bounded model tests. A service call reads the current revision, reduces the command, and appends one snapshot without an asynchronous wait. An optional `if_revision` value gives compare-and-set behavior. A stale value, a nested append, or a reentrant append fails with `dag-revision-conflict`.
 
-A wrong declaration is corrected in place rather than by dropping the node and its dependents. `dag_write` re-sends the complete graph: an existing node repeats its live status and may change its declared fields, and a node the write omits is also removed from every surviving dependent's dependency list and reported as a rewired row. `dag_node_amend` changes the declared fields of one node without re-sending the graph. Both keep the node's identity, status, generation, child binding, recorded Git facts, mailbox, completion, and dependents. Neither changes the declaration of an active node, and neither changes dependencies after the node recorded local Git preparation, because that record fixes the commit list the dependency merge used. Declared file ownership is exclusive along every dependency edge: a task node that claims a file a transitive dependency declares is rejected at declaration time, because preparing its worktree would merge that dependency's version of the file into the work it owns.
+A wrong declaration is corrected in place rather than by dropping the node and its dependents. `dag_write` re-sends the complete graph: an existing node repeats its live status and may change its declared fields, and a node the write omits is also removed from every surviving dependent's dependency list and reported as a rewired row. `dag_node_amend` changes the declared fields of one node without re-sending the graph. Both keep the node's identity, status, generation, child binding, recorded Git facts, mailbox, completion, and dependents. Neither changes the declaration of an active node, and neither changes dependencies after the node recorded local Git preparation, because that record fixes the commit list the dependency merge used. Declared file ownership is exclusive along every dependency edge: a task node that claims a file a transitive dependency declares is refused, because preparing its worktree would merge that dependency's version of the file into the work it owns. The rule is checked against the graph the request would store, so a graph that already carries a violation stays repairable: an amendment may keep or narrow a known violating edge, but never widen its file set or add an edge. The write and amendment results report every remaining violation as a `dependency-file-overlap` conflict row, and every refused one is named in a single diagnostic.
 
 ## Node lifecycle
 
@@ -114,13 +114,15 @@ write(agent: Agent, request: DagWriteRequest): DagWriteResult
  *
  * Omitted fields keep their current value. The corrected node keeps its id,
  * status, generation, child binding, recorded Git facts, mailbox, descendants,
- * and completed commit, so a wrong declaration never costs dependent work.
+ * and completed commit, so a wrong declaration never costs dependent work. A
+ * declared-file ownership violation the amendment does not touch is retained
+ * and reported, because the rule is multi-node and this operation is not.
  * @param agent - Live dispatcher agent.
  * @param nodeId - Existing node to correct.
  * @param patch - Declaration fields to replace.
- * @returns Accepted command receipt.
+ * @returns Accepted receipt with the corrected fields and remaining conflicts.
  */
-amend(agent: Agent, nodeId: DagNodeId, patch: DagNodeAmendRequest): DagCommandAccepted
+amend(agent: Agent, nodeId: DagNodeId, patch: DagNodeAmendRequest): DagAmendResult
 
 /**
  * Start dependency-ready pending nodes without waiting for effects.

@@ -54,7 +54,7 @@ kind: "package-reference"
 
 新节点从 `pending` 开始。dispatch 让就绪节点经过 `starting` 进入 `in_progress`。子级报告 `completed` 或 `blocked`；effect 或子级失败记录 `failed`；stop 在取消前记录 `interrupted`。blocked、interrupted 与 failed 节点通过 `starting` resume 或被 steer；failed 节点也可通过 redispatch 回到 `pending`。completed 节点是终态。
 
-错误的声明会被就地修正，因此修正一行绝不会让依赖它的行付出代价。`dag_write` 重新发送完整图，并修正每个已声明字段发生变化的既有行；它还会把被省略的节点从每个存活依赖节点的依赖列表中移除，而不再要求丢弃该依赖节点，并把两者分别报告为 amended 行与 rewired 行。`dag_node_amend` 在不重新发送图的情况下更改单个节点的已声明字段。两条路径都不会更改活动节点的声明，也不会更改已记录本地 Git 准备的节点的依赖。
+错误的声明会被就地修正，因此修正一行绝不会让依赖它的行付出代价。`dag_write` 重新发送完整图，并修正每个已声明字段发生变化的既有行；它还会把被省略的节点从每个存活依赖节点的依赖列表中移除，而不再要求丢弃该依赖节点，并把两者分别报告为 amended 行与 rewired 行。`dag_node_amend` 在不重新发送图的情况下更改单个节点的已声明字段。两条路径都不会更改活动节点的声明，也不会更改已记录本地 Git 准备的节点的依赖。已声明的文件归属沿每条依赖边互斥，且该规则针对请求将要存储的图进行检查：修正可以保留或收窄图已携带的违规边，但绝不可扩大它或新增一条，因此早于该规则的图仍可逐个节点修复。两者都会把仍存在的违规报告为 `dependency-file-overlap` 冲突行。
 
 dispatch、redispatch、resume、steer、stop 或 reset 操作在使早期工作失效时递增节点 generation。effect 回调必须匹配节点 binding generation、节点 generation 与 operation id。陈旧回调不能修改状态。
 

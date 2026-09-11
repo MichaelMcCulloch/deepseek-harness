@@ -149,10 +149,21 @@ class DagNodeAmendArgs(TypedDict):
     if_revision: NotRequired[int]
     # Additional keys beyond those declared are allowed.
 
+class DagNodeAmendOutputAmended(TypedDict):
+    id: str
+    fields: list[str]
+
+class DagNodeAmendOutputConflicts(TypedDict):
+    ids: list[str]
+    files: list[str]
+    reason: Literal["declared-files-overlap", "contract-pin-overlap", "dependency-file-overlap"]
+
 class DagNodeAmendOutput(TypedDict):
     accepted: bool
     revision: int
     operationId: str
+    amended: list[DagNodeAmendOutputAmended]
+    conflicts: list[DagNodeAmendOutputConflicts]
 
 class DagNodeInspectArgs(TypedDict):
     node_id: str
@@ -258,7 +269,7 @@ class DagWriteOutputRewired(TypedDict):
 class DagWriteOutputConflicts(TypedDict):
     ids: list[str]
     files: list[str]
-    reason: Literal["declared-files-overlap", "contract-pin-overlap"]
+    reason: Literal["declared-files-overlap", "contract-pin-overlap", "dependency-file-overlap"]
 
 class DagWriteOutput(TypedDict):
     accepted: bool

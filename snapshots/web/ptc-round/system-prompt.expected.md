@@ -411,6 +411,15 @@ interface ToolOutputMap {
     accepted: boolean;
     revision: number;
     operationId: string;
+    amended: {
+      id: string;
+      fields: string[];
+    }[];
+    conflicts: ({
+      ids: string[];
+      files: string[];
+      reason: "declared-files-overlap" | "contract-pin-overlap" | "dependency-file-overlap";
+    })[];
   };
   dag_node_inspect: {
     text: string;
@@ -467,7 +476,7 @@ interface ToolOutputMap {
     conflicts: ({
       ids: string[];
       files: string[];
-      reason: "declared-files-overlap" | "contract-pin-overlap";
+      reason: "declared-files-overlap" | "contract-pin-overlap" | "dependency-file-overlap";
     })[];
   };
   edit: {

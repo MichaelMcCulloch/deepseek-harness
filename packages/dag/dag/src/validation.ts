@@ -20,6 +20,28 @@ export class DagDeclarationError extends Error {
   }
 }
 
+/** One declared-file ownership violation along a dependency edge. */
+export interface DagOwnershipViolation {
+  readonly claimant: NodeId
+  readonly dependency: NodeId
+  readonly files: readonly string[]
+}
+
+/**
+ * Existing durable nodes a declaration replaces.
+ *
+ * A resulting declared-file ownership violation is accepted when it repeats an
+ * edge the durable graph already violated with at least those files; a new edge,
+ * or a widened file set on a known edge, is refused. The declared rule is
+ * multi-node while every repair the service exposes changes one node, so
+ * refusing an untouched violation outright would leave an existing violating
+ * graph unrepairable, and refusing a narrowed one would fix a repair order.
+ * Omit the scope to refuse every violation.
+ */
+export interface DagDeclarationScope {
+  readonly priorNodes?: readonly DagNodeSnapshot[]
+}
+
 /** Canonical declaration plus its stable topological order. */
 export interface ValidatedDagDeclaration {
   readonly definitions: readonly DagNodeDefinition[]
@@ -45,9 +67,13 @@ function filePath(value: string, nodeId: string): string {
 /**
  * Validate and detach a whole graph declaration.
  * @param inputs - Complete declaration rows from a trusted parser.
+ * @param scope - Durable nodes this declaration replaces; omitted for a complete declaration.
  * @returns Immutable definitions and topological order.
  */
-export function validateDagDeclaration(inputs: readonly DagNodeInput[]): ValidatedDagDeclaration {
+export function validateDagDeclaration(
+  inputs: readonly DagNodeInput[],
+  scope: DagDeclarationScope = {},
+): ValidatedDagDeclaration {
   const definitions: DagNodeDefinition[] = []
   const seen = new Set<string>()
   for (const input of inputs) {
@@ -109,21 +135,49 @@ export function validateDagDeclaration(inputs: readonly DagNodeInput[]): Validat
     }
   }
   if (order.length !== definitions.length) throw new DagDeclarationError('dependency graph must be acyclic')
-  requireDependencyFileOwnership(definitions)
+  const retained = scope.priorNodes === undefined ? [] : dependencyOwnershipViolations(scope.priorNodes)
+  const rejected = dependencyOwnershipViolations(definitions).filter(row => !retainedViolation(retained, row))
+  if (rejected.length > 0) throw new DagDeclarationError(ownershipViolationText(rejected))
   return { definitions, topologicalOrder: order }
 }
 
 /**
- * Reject a task node whose declared files also belong to a transitive dependency.
+ * Return whether a resulting violation only repeats one the durable graph already had.
+ * @param retained - Ownership violations the durable graph already carries.
+ * @param row - Violation the candidate declaration would store.
+ * @returns Whether the same edge already violated with at least these files.
+ */
+function retainedViolation(retained: readonly DagOwnershipViolation[], row: DagOwnershipViolation): boolean {
+  return retained.some(prior => prior.claimant === row.claimant
+    && prior.dependency === row.dependency
+    && row.files.every(file => prior.files.includes(file)))
+}
+
+/** Render every rejected ownership violation in one diagnostic. */
+function ownershipViolationText(violations: readonly DagOwnershipViolation[]): string {
+  const rows = violations.map(row =>
+    `node ${JSON.stringify(row.claimant)} claims files already owned by dependency ${JSON.stringify(row.dependency)}: ${row.files.join(', ')}`)
+  const [first] = rows
+  /* v8 ignore next -- the caller only renders a non-empty violation list. */
+  if (first === undefined) throw new DagDeclarationError('declared-file ownership violations: none')
+  return rows.length === 1 ? first : `declared-file ownership violations: ${rows.join('; ')}`
+}
+
+/**
+ * Return every declared-file ownership violation along a dependency edge.
  *
  * A task worktree is prepared by merging every recorded dependency commit, so a
  * file claimed on both sides is contested ownership that the runtime refuses at
- * preparation. Rejecting the declaration turns that mid-wave Git failure into an
- * immediate declaration error.
+ * preparation. Reporting all of them together lets a caller plan the complete
+ * repair instead of discovering it one node per attempt.
  * @param definitions - Canonical definitions with every dependency present.
+ * @returns One row per violating claimant and dependency pair.
  */
-function requireDependencyFileOwnership(definitions: readonly DagNodeDefinition[]): void {
+export function dependencyOwnershipViolations(
+  definitions: readonly DagNodeDefinition[],
+): readonly DagOwnershipViolation[] {
   const byId = new Map(definitions.map(node => [node.id, node]))
+  const violations: DagOwnershipViolation[] = []
   for (const node of definitions) {
     if (node.kind !== 'task' || node.files.length === 0) continue
     const visited = new Set<NodeId>()
@@ -137,14 +191,11 @@ function requireDependencyFileOwnership(definitions: readonly DagNodeDefinition[
       /* v8 ignore next -- every dependency is present before this check runs. */
       if (dep === undefined) continue
       const shared = dep.files.filter(file => node.files.includes(file))
-      if (shared.length > 0) {
-        throw new DagDeclarationError(
-          `node ${JSON.stringify(node.id)} claims files already owned by dependency ${JSON.stringify(depId)}: ${shared.join(', ')}`,
-        )
-      }
+      if (shared.length > 0) violations.push({ claimant: node.id, dependency: depId, files: shared })
       pending.push(...dep.deps)
     }
   }
+  return violations
 }
 
 /**

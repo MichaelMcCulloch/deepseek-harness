@@ -19,8 +19,8 @@ import { TestSessionQuery } from '../../../subagent/subagent/tests/test-session-
 import DagService from '../src/index.ts'
 import { DagCommandId, DagNodeId, DagOperationId } from '../src/ids.ts'
 import { DagStateError, reduceDagState } from '../src/reducer.ts'
-import { validateDagDeclaration } from '../src/validation.ts'
-import type { DagNodeInput, DagNodeSnapshot, DagNotice, DagState } from '../src/types.ts'
+import { validateDagDeclaration, dependencyOwnershipViolations } from '../src/validation.ts'
+import type { DagNodeDefinition, DagNodeInput, DagNodeSnapshot, DagNotice, DagState } from '../src/types.ts'
 
 interface GatedEntry {
   readonly chunks: StreamChunk[]
@@ -130,6 +130,13 @@ function node(id = 'a'): DagNodeInput {
     status: 'pending',
     files: ['owned.txt'],
   }
+}
+
+/** Require the durable declaration of one test dispatcher. */
+function requiredState(harness: TestHarness): DagState {
+  const state = harness.ctx.dag.state(harness.dispatcher)
+  if (state === null) throw new Error('test DAG declaration is missing')
+  return state
 }
 
 function userMessageForTest(id: string) {
@@ -442,6 +449,82 @@ describe('native DAG service', { timeout: 60_000 }, () => {
 
     expect(written.revision).toBe(inherited.revision + 1)
     expect(ctx.dag.state(dispatcher)?.noticeNamespace).toBe('origin-dispatcher')
+  })
+
+  it('repairs a durable graph whose nodes each claim a dependency file, in any order', async () => {
+    const brief = 'Implement the layer.\nVALIDATION: run the layer test.\nACCEPTANCE: commit clean work.'
+    const layer = (id: string, deps: readonly string[], files: readonly string[]): DagNodeDefinition => ({
+      id: DagNodeId(id), content: `Implement ${id}`, brief, deps: deps.map(DagNodeId), kind: 'task', policy: 'delegate', files,
+    })
+    // A graph declared before the ownership rule existed: each layer also claims its
+    // dependency's file, which no single amendment could clear under a global rule.
+    const legacy = [
+      layer('L1-impl-cpu', [], ['sbb-sys/src/cpu_kernel_ops.rs']),
+      layer('L1-amd64', ['L1-impl-cpu'], ['sbb-sys/src/amd64_kernel_ops.rs', 'sbb-sys/src/cpu_kernel_ops.rs']),
+      layer('L1-reference', ['L1-amd64'], ['sbb-sys/src/reference_kernel_ops.rs', 'sbb-sys/src/amd64_kernel_ops.rs']),
+    ]
+    const corrected = (definition: DagNodeDefinition): readonly string[] => definition.id === DagNodeId('L1-amd64')
+      ? ['sbb-sys/src/amd64_kernel_ops.rs']
+      : definition.id === DagNodeId('L1-reference')
+        ? ['sbb-sys/src/reference_kernel_ops.rs']
+        : [...definition.files]
+    const declared = (): DagState => reduceDagState(null, {
+      type: 'write',
+      noticeNamespace: 'legacy-dispatcher',
+      nodes: legacy.map(definition => ({ definition, status: 'pending' as const })),
+      topologicalOrder: legacy.map(definition => definition.id),
+    }).state
+    const append = (harness: TestHarness): DagState => {
+      const state = declared()
+      harness.dispatcher.session.append('dag/state', { state })
+      return state
+    }
+
+    // Repairing from the dependent end first.
+    const dependentFirst = await setup(new GatedAdapter([]))
+    const started = append(dependentFirst)
+    expect(dependencyOwnershipViolations(started.nodes)).toHaveLength(2)
+    const first = dependentFirst.ctx.dag.amend(dependentFirst.dispatcher, DagNodeId('L1-reference'), {
+      files: ['sbb-sys/src/reference_kernel_ops.rs'],
+    })
+    expect(first.revision).toBe(started.revision + 1)
+    expect(first.amended).toEqual([{ id: 'L1-reference', fields: ['files'] }])
+    expect(first.conflicts).toEqual([{
+      ids: [DagNodeId('L1-amd64'), DagNodeId('L1-impl-cpu')],
+      files: ['sbb-sys/src/cpu_kernel_ops.rs'],
+      reason: 'dependency-file-overlap',
+    }])
+    const second = dependentFirst.ctx.dag.amend(dependentFirst.dispatcher, DagNodeId('L1-amd64'), {
+      files: ['sbb-sys/src/amd64_kernel_ops.rs'],
+    })
+    expect(second.conflicts).toEqual([])
+    expect(dependencyOwnershipViolations(requiredState(dependentFirst).nodes)).toEqual([])
+
+    // The dependency end first reaches the same repaired graph.
+    const dependencyFirst = await setup(new GatedAdapter([]))
+    append(dependencyFirst)
+    dependencyFirst.ctx.dag.amend(dependencyFirst.dispatcher, DagNodeId('L1-amd64'), { files: ['sbb-sys/src/amd64_kernel_ops.rs'] })
+    dependencyFirst.ctx.dag.amend(dependencyFirst.dispatcher, DagNodeId('L1-reference'), { files: ['sbb-sys/src/reference_kernel_ops.rs'] })
+    expect(dependencyOwnershipViolations(requiredState(dependencyFirst).nodes)).toEqual([])
+    expect(dependencyFirst.ctx.dag.inspect(dependencyFirst.dispatcher, DagNodeId('L1-amd64')).files)
+      .toEqual(['sbb-sys/src/amd64_kernel_ops.rs'])
+
+    // The complete corrected graph clears every violation in one write.
+    const rewritten = await setup(new GatedAdapter([]))
+    append(rewritten)
+    const written = rewritten.ctx.dag.write(rewritten.dispatcher, {
+      nodes: legacy.map(definition => ({
+        id: definition.id,
+        content: definition.content,
+        brief: definition.brief,
+        deps: [...definition.deps],
+        status: 'pending' as const,
+        files: [...corrected(definition)],
+      })),
+    })
+    expect(written.conflicts).toEqual([])
+    expect(written.amended.map(row => row.id).sort()).toEqual(['L1-amd64', 'L1-reference'])
+    expect(dependencyOwnershipViolations(requiredState(rewritten).nodes)).toEqual([])
   })
 
   it('corrects every declared field of one node and rewires a dependent that loses an omitted dependency', async () => {

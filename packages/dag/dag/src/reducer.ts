@@ -2,7 +2,7 @@
 
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { DagCommandId, DagNoticeId, DagOperationId, DagWaveId } from './ids.ts'
-import { changedDefinitionFields } from './validation.ts'
+import { changedDefinitionFields, dependencyOwnershipViolations } from './validation.ts'
 import type {
   DagCommandId as CommandId,
   DagIntegrationPolicy,
@@ -327,20 +327,39 @@ function requireAmendable(node: DagNodeSnapshot, fields: readonly DagNodeDefinit
   }
 }
 
-/** Return declared-file and contract-pin advisory rows. */
+/**
+ * Return declared-file ownership, overlap, and contract-pin rows.
+ *
+ * A declared-file ownership violation along a dependency edge is reported under
+ * its own reason and once: the caller repairing a graph needs to see exactly
+ * which edges are still outstanding, not the same pair under two reasons.
+ */
 function advisoryConflicts(nodes: readonly DagNodeDefinition[]): DagWriteResult['conflicts'] {
   const rows: DagWriteResult['conflicts'][number][] = []
+  const ownership = dependencyOwnershipViolations(nodes)
+  const violated = new Set(ownership.map(row => conflictKey(row.claimant, row.dependency)))
   const contractPins = (brief: string): readonly string[] => [...brief.matchAll(/^\s*CONTRACT:\s*(.+)$/gim)]
     .map(match => match[0].replace(/^\s*CONTRACT:\s*/iu, '').trim()).filter(value => value.length > 0)
   for (const [left, a] of nodes.entries()) {
     for (const b of nodes.slice(left + 1)) {
-      const files = a.files.filter(value => b.files.includes(value))
-      if (files.length > 0) rows.push({ ids: [a.id, b.id], files, reason: 'declared-files-overlap' })
+      const shared = violated.has(conflictKey(a.id, b.id))
+      if (!shared) {
+        const files = a.files.filter(value => b.files.includes(value))
+        if (files.length > 0) rows.push({ ids: [a.id, b.id], files, reason: 'declared-files-overlap' })
+      }
       const pins = contractPins(a.brief).filter(value => contractPins(b.brief).includes(value))
       if (pins.length > 0) rows.push({ ids: [a.id, b.id], files: pins, reason: 'contract-pin-overlap' })
     }
   }
+  for (const row of ownership) {
+    rows.push({ ids: [row.claimant, row.dependency], files: row.files, reason: 'dependency-file-overlap' })
+  }
   return rows
+}
+
+/** Return one order-independent identity for a pair of node ids. */
+function conflictKey(left: DagNodeId, right: DagNodeId): string {
+  return [left, right].sort().join('\u0000')
 }
 
 /** Rebuild wave settlement after one node settles. */
@@ -480,6 +499,7 @@ export function reduceDagState(current: DagState | null, command: DagReducerComm
     return {
       operationId: op.id,
       amended: [{ id: node.id, fields }],
+      conflicts: advisoryConflicts(current.nodes.map(row => row.id === node.id ? command.definition : row)),
       state: completeState({
         ...current,
         revision: current.revision + 1,

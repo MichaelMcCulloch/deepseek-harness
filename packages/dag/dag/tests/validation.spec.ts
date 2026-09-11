@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { DagNodeId } from '../src/ids.ts'
-import { changedDefinitionFields, rewireOmittedDependencies, validateDagDeclaration } from '../src/validation.ts'
+import {
+  changedDefinitionFields,
+  dependencyOwnershipViolations,
+  rewireOmittedDependencies,
+  validateDagDeclaration,
+} from '../src/validation.ts'
 import type { DagNodeDefinition, DagNodeDefinitionField, DagNodeInput, DagNodeSnapshot } from '../src/types.ts'
 
 const valid = (overrides: Partial<DagNodeInput> = {}): DagNodeInput => ({
@@ -10,6 +15,23 @@ const valid = (overrides: Partial<DagNodeInput> = {}): DagNodeInput => ({
   deps: [],
   status: 'pending',
   ...overrides,
+})
+
+/** Project one declaration row into the durable node an amendment would replace. */
+const snapshotOf = (input: DagNodeInput): DagNodeSnapshot => ({
+  id: DagNodeId(input.id),
+  content: input.content,
+  brief: input.brief,
+  deps: input.deps.map(DagNodeId),
+  kind: input.kind ?? 'task',
+  policy: input.policy ?? 'delegate',
+  files: input.files ?? [],
+  status: input.status,
+  generation: 0,
+  bindingGeneration: 0,
+  dependencyCommits: [],
+  conflictedFiles: [],
+  commands: [],
 })
 
 describe('DAG declaration validation', () => {
@@ -119,5 +141,62 @@ describe('DAG declaration validation', () => {
     const untouched = rewireOmittedDependencies([valid({ id: 'a', deps: ['b'] })], new Set())
     expect(untouched.rewired).toEqual([])
     expect(untouched.inputs[0]?.deps).toEqual(['b'])
+  })
+
+  it('reports every ownership violation together instead of the first one', () => {
+    const nodes = [
+      valid({ id: 'one', files: ['src/one.ts'] }),
+      valid({ id: 'two', deps: ['one'], files: ['src/one.ts'] }),
+      valid({ id: 'three', files: ['src/three.ts'] }),
+      valid({ id: 'four', deps: ['three'], files: ['src/three.ts'] }),
+    ]
+    expect(() => validateDagDeclaration(nodes))
+      .toThrow(/declared-file ownership violations: .*"two".*"one".*"four".*"three"/s)
+
+    const clean = validateDagDeclaration([valid({ id: 'one', files: ['src/one.ts'] })]).definitions
+    expect(dependencyOwnershipViolations(clean)).toEqual([])
+  })
+
+  it('retains only the ownership violations the durable graph already carried', () => {
+    const nodes = [
+      valid({ id: 'one', files: ['src/one.ts'] }),
+      valid({ id: 'two', deps: ['one'], files: ['src/one.ts'] }),
+      valid({ id: 'three', files: ['src/three.ts'] }),
+      valid({ id: 'four', deps: ['three'], files: ['src/three.ts'] }),
+    ]
+    const prior = nodes.map(snapshotOf)
+    const changed = (id: string, overrides: Partial<DagNodeInput>): DagNodeInput[] =>
+      nodes.map(node => node.id === id ? { ...node, ...overrides } : node)
+
+    // Clearing one edge leaves the untouched edge exactly as the durable graph had it.
+    const repaired = validateDagDeclaration(changed('two', { files: ['src/two.ts'] }), { priorNodes: prior })
+    expect(dependencyOwnershipViolations(repaired.definitions)).toEqual([
+      { claimant: DagNodeId('four'), dependency: DagNodeId('three'), files: ['src/three.ts'] },
+    ])
+
+    // A repair order is never forced: the dependency side may change first.
+    expect(() => validateDagDeclaration(
+      changed('one', { files: ['src/one.ts', 'src/spare.ts'] }),
+      { priorNodes: prior },
+    )).not.toThrow()
+
+    // Widening a known edge is refused.
+    expect(() => validateDagDeclaration([
+      { ...nodes[0]!, files: ['src/one.ts', 'src/extra.ts'] },
+      { ...nodes[1]!, files: ['src/one.ts', 'src/extra.ts'] },
+      nodes[2]!,
+      nodes[3]!,
+    ], { priorNodes: prior })).toThrow(/node "two" claims files already owned by dependency "one": src\/one.ts, src\/extra.ts/)
+
+    // A new violating edge is refused even though the graph already violated another one.
+    expect(() => validateDagDeclaration([
+      nodes[0]!,
+      nodes[1]!,
+      nodes[2]!,
+      { ...nodes[3]!, deps: ['three', 'one'], files: ['src/three.ts', 'src/one.ts'] },
+    ], { priorNodes: prior })).toThrow(/node "four" claims files already owned by dependency "one"/)
+
+    // A complete declaration keeps refusing every violation.
+    expect(() => validateDagDeclaration(nodes, { priorNodes: [] })).toThrow(/declared-file ownership violations/)
   })
 })

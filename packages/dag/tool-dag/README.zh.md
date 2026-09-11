@@ -43,7 +43,7 @@ kind: "package-reference"
 | `dag_node_stop` | 先记录 interrupted，再取消节点工作 |
 | `dag_node_reset` | 把 tracked 工作 reset 到允许的本地目标 |
 
-`dag_write` 发送完整节点列表。新节点只能声明 `pending`；既有行重复其 live status，并可就地修正其已声明字段，且省略某个已声明节点也会把它从每个存活依赖节点的依赖列表中移除。`dag_node_amend` 无需重新发送图即可修正单个节点。每个 brief 必须包含 `VALIDATION:` 与 `ACCEPTANCE:` 段。验证拒绝重复 id、cycle、缺失依赖、自依赖、不安全路径、无效 integration policy、移除活跃节点、更改活动节点的声明、在已记录 Git 准备后更改依赖，以及声明了某个传递依赖也声明的文件的任务节点。其他文件与 contract-pin 重叠行仅为 advisory。
+`dag_write` 发送完整节点列表。新节点只能声明 `pending`；既有行重复其 live status，并可就地修正其已声明字段，且省略某个已声明节点也会把它从每个存活依赖节点的依赖列表中移除。`dag_node_amend` 无需重新发送图即可修正单个节点。每个 brief 必须包含 `VALIDATION:` 与 `ACCEPTANCE:` 段。验证拒绝重复 id、cycle、缺失依赖、自依赖、不安全路径、无效 integration policy、移除活跃节点、更改活动节点的声明、在已记录 Git 准备后更改依赖，以及声明了某个传递依赖也声明的文件的任务节点。该归属规则针对调用将要存储的图进行检查，因此已经违反它的图仍可修复：修正可以保留或收窄违规边，但绝不可扩大或新增一条，且写入与修正结果会把每个仍存在的违规报告为 `dependency-file-overlap` 冲突行。其他文件与 contract-pin 重叠行仅为 advisory。
 
 ### 子级工具
 

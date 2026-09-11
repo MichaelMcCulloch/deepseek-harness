@@ -20,7 +20,7 @@
 
 节点生命周期是 `pending → starting → in_progress → completed | blocked | failed | interrupted`。blocked、interrupted 与 failed 节点通过 starting resume 或被 steer，failed 节点也可通过 redispatch 回到 pending，completed 是终态。stop 在取消 effect 或子级前提交 interrupted。每个使早期工作失效的操作都会推进节点 generation。每个 effect 结果必须匹配 binding generation、节点 generation 与 operation id，因此陈旧回调对状态没有影响。
 
-既有节点的声明会被就地修正，而不是丢弃该节点及其依赖节点。`dag_write` 修正确切已声明字段发生变化的每个既有行，并在写入省略某个被存活依赖节点引用的节点时重写该依赖节点；`dag_node_amend` 无需重新发送图即可修正单个节点。两者都保留节点 identity、status、generation、child binding、已记录 Git 事实、mailbox、completion 与 dependents，并都拒绝活动节点的声明，或在节点记录了本地 Git 准备后更改依赖。任务节点如果声明的文件也被某个传递依赖声明，会在声明时被拒绝，因为准备其 worktree 会把该依赖版本的文件合并进该节点拥有的工作。
+既有节点的声明会被就地修正，而不是丢弃该节点及其依赖节点。`dag_write` 修正确切已声明字段发生变化的每个既有行，并在写入省略某个被存活依赖节点引用的节点时重写该依赖节点；`dag_node_amend` 无需重新发送图即可修正单个节点。两者都保留节点 identity、status、generation、child binding、已记录 Git 事实、mailbox、completion 与 dependents，并都拒绝活动节点的声明，或在节点记录了本地 Git 准备后更改依赖。任务节点如果声明的文件也被某个传递依赖声明，会被拒绝，因为准备其 worktree 会把该依赖版本的文件合并进该节点拥有的工作。该规则针对调用将要存储的图进行评估，因此已经违反它的图仍可通过其暴露的单节点修正来修复：保留或收窄已知违规边会被接受，扩大其文件集或新增一条边会被拒绝，且两者都会把仍存在的违规报告为 `dependency-file-overlap` 冲突行。
 
 ### 持久 mailbox 拥有异步工作
 

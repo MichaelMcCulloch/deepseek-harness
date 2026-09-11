@@ -79,7 +79,14 @@ function fakeDag(options: FakeDagOptions = {}) {
       rewired: [{ id: DagNodeId('dependent'), removedDeps: [DagNodeId('old')] }],
       conflicts: [{ ids: [DagNodeId('a'), DagNodeId('b')], files: ['src/shared.ts'], reason: 'declared-files-overlap' }],
     }),
-    amend: record('amend', accepted),
+    amend: record('amend', {
+      ...accepted,
+      amended: [{ id: DagNodeId('a'), fields: ['files'] }],
+      conflicts: [
+        { ids: [DagNodeId('a'), DagNodeId('b')], files: ['src/shared.ts'], reason: 'declared-files-overlap' },
+        { ids: [DagNodeId('b'), DagNodeId('a')], files: ['src/owned.ts'], reason: 'dependency-file-overlap' },
+      ],
+    }),
     dispatch: record('dispatch', accepted),
     wait: record('wait', Promise.resolve({ revision: 5, notices: [], state: projection() })),
     status: record('status', options.status === undefined ? projection() : options.status),
@@ -155,6 +162,27 @@ describe('native DAG tools', () => {
       conflicts: [{ ids: ['a', 'b'], files: ['src/shared.ts'], reason: 'declared-files-overlap' }],
     })
     expect(result.content.every(block => block.type === 'text')).toBe(true)
+  })
+
+  it('returns an amendment with its changed fields and the conflicts that remain', async () => {
+    const { ctx } = await dispatcherBench()
+    const result = await execute(ctx, 'dag_node_amend', { node_id: 'a', files: [] })
+    expect(result.isError).toBe(false)
+    if (result.isError) throw new Error('dag_node_amend failed')
+    expect(result.value).toMatchObject({
+      accepted: true,
+      revision: 5,
+      operationId: 'op-5',
+      amended: [{ id: 'a', fields: ['files'] }],
+      conflicts: [
+        { ids: ['a', 'b'], files: ['src/shared.ts'], reason: 'declared-files-overlap' },
+        { ids: ['b', 'a'], files: ['src/owned.ts'], reason: 'dependency-file-overlap' },
+      ],
+    })
+    expect(result.content).toEqual([{
+      type: 'text',
+      text: 'DAG amendment accepted at revision 5; 1 dependency file-ownership violation(s) remain.',
+    }])
   })
 
   it('returns complete dispatcher-only node execution facts', async () => {

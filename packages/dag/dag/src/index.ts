@@ -47,6 +47,7 @@ import { projectDag, reduceDagState, DagStateError } from './reducer.ts'
 import type { DagDeclaredNode, DagEffectFence, DagReduceResult, DagReducerCommand } from './reducer.ts'
 import { validateDagDeclaration, rewireOmittedDependencies } from './validation.ts'
 import type {
+  DagAmendResult,
   DagCommandAccepted,
   DagCommitted,
   DagNodeAmendRequest,
@@ -328,9 +329,10 @@ export class DagService extends Service implements SubagentOwnerController {
    */
   write(agent: Agent, request: DagWriteRequest): DagWriteResult {
     this.assertRevision(agent, request.if_revision)
-    const known = new Set(this.state(agent)?.nodes.map(node => node.id) ?? [])
+    const state = this.state(agent)
+    const known = new Set(state?.nodes.map(node => node.id) ?? [])
     const prepared = rewireOmittedDependencies(request.nodes, known)
-    const validated = validateDagDeclaration(prepared.inputs)
+    const validated = validateDagDeclaration(prepared.inputs, { priorNodes: state?.nodes ?? [] })
     const byId = new Map(prepared.inputs.map(node => [node.id.trim(), node]))
     const rows: DagDeclaredNode[] = validated.definitions.map(definition => ({
       definition,
@@ -364,13 +366,15 @@ export class DagService extends Service implements SubagentOwnerController {
    *
    * Omitted fields keep their current value. The corrected node keeps its id,
    * status, generation, child binding, recorded Git facts, mailbox, descendants,
-   * and completed commit, so a wrong declaration never costs dependent work.
+   * and completed commit, so a wrong declaration never costs dependent work. A
+   * declared-file ownership violation the amendment does not touch is retained
+   * and reported, because the rule is multi-node and this operation is not.
    * @param agent - Live dispatcher agent.
    * @param nodeId - Existing node to correct.
    * @param patch - Declaration fields to replace.
-   * @returns Accepted command receipt.
+   * @returns Accepted receipt with the corrected fields and remaining conflicts.
    */
-  amend(agent: Agent, nodeId: DagNodeId, patch: DagNodeAmendRequest): DagCommandAccepted {
+  amend(agent: Agent, nodeId: DagNodeId, patch: DagNodeAmendRequest): DagAmendResult {
     this.assertRevision(agent, patch.if_revision)
     const state = this.requireState(agent)
     const node = requiredValue(
@@ -378,17 +382,24 @@ export class DagService extends Service implements SubagentOwnerController {
       new DagStateError(`unknown DAG node ${JSON.stringify(nodeId)}`, 'dag-node-not-found'),
     )
     const corrected = this.amendedInput(state.nodes, patch, node)
-    const validated = validateDagDeclaration(corrected)
+    const validated = validateDagDeclaration(corrected, { priorNodes: state.nodes })
     const definition = requiredValue(
       validated.definitions.find(row => row.id === node.id),
       new DagStateError('validated DAG amendment lost its node', 'dag-invalid-state'),
     )
-    return this.accept(agent, patch, 'amend', {
+    const result = this.mutate(agent, patch.if_revision, 'amend', {
       type: 'amend',
       nodeId: node.id,
       definition,
       topologicalOrder: validated.topologicalOrder,
     })
+    return {
+      accepted: true,
+      revision: result.state.revision,
+      operationId: requiredOperation(result),
+      amended: requiredValue(result.amended, new DagStateError('accepted DAG amendment lacks its changed fields', 'dag-invalid-state')),
+      conflicts: requiredValue(result.conflicts, new DagStateError('accepted DAG amendment lacks conflict rows', 'dag-invalid-state')),
+    }
   }
 
   /** Build the complete declaration this amendment validates, with the patch applied to one row. */

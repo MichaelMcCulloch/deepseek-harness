@@ -243,8 +243,23 @@ export interface DagWriteResult extends DagCommandAccepted {
   readonly conflicts: readonly {
     readonly ids: readonly [DagNodeId, DagNodeId]
     readonly files: readonly string[]
-    readonly reason: 'declared-files-overlap' | 'contract-pin-overlap'
+    readonly reason: 'declared-files-overlap' | 'contract-pin-overlap' | 'dependency-file-overlap'
   }[]
+}
+
+/** Result of one accepted targeted declaration correction. */
+export interface DagAmendResult extends DagCommandAccepted {
+  /** The corrected node and the declaration fields this operation replaced. */
+  readonly amended: readonly {
+    readonly id: DagNodeId
+    readonly fields: readonly DagNodeDefinitionField[]
+  }[]
+  /**
+   * Declaration conflicts that remain in the graph after the correction. A
+   * `declared-files-overlap` row that persists across amendments is repair still
+   * outstanding; the corrected node never contributes a new one.
+   */
+  readonly conflicts: DagWriteResult['conflicts']
 }
 
 /** A successful state change published after its append. */

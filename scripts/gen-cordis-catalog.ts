@@ -422,6 +422,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   GoalRef: 'goal.md',
   GoalView: 'goal.md',
   CreateGoalResult: 'goal.md',
+  DagAmendResult: 'dag.md',
   DagCommandAccepted: 'dag.md',
   DagCommitted: 'dag.md',
   DagNodeAmendRequest: 'dag.md',

@@ -41,6 +41,21 @@ const textSchema = {
   properties: { text: { type: 'string' as const, required: true as const } },
 } as const satisfies ValueSchemaSpec
 
+/** One advisory declaration conflict row shared by the write and amend outputs. */
+const conflictRowSchema = {
+  type: 'object' as const,
+  additionalProperties: false,
+  properties: {
+    ids: { type: 'array' as const, required: true as const, items: { type: 'string' as const } },
+    files: { type: 'array' as const, required: true as const, items: { type: 'string' as const } },
+    reason: {
+      type: 'string' as const,
+      required: true as const,
+      enum: ['declared-files-overlap', 'contract-pin-overlap', 'dependency-file-overlap'],
+    },
+  },
+} as const satisfies ValueSchemaSpec
+
 /** Register dispatcher tools and their prompt instructions. */
 export function apply(ctx: Context): void {
   registerDispatcherTools(ctx)
@@ -110,16 +125,7 @@ function registerDispatcherTools(ctx: Context): void {
             },
           },
           conflicts: {
-            type: 'array', required: true, items: {
-              type: 'object', additionalProperties: false, properties: {
-                ids: { type: 'array', required: true, items: { type: 'string' } },
-                files: { type: 'array', required: true, items: { type: 'string' } },
-                reason: {
-                  type: 'string', required: true,
-                  enum: ['declared-files-overlap', 'contract-pin-overlap'],
-                },
-              },
-            },
+            type: 'array', required: true, items: conflictRowSchema,
           },
         },
       },
@@ -164,10 +170,31 @@ function registerDispatcherTools(ctx: Context): void {
       files: { type: 'array', items: { type: 'string' } },
       if_revision: { type: 'integer' },
     },
-    output: acceptedOutput('DAG amendment accepted'),
+    output: {
+      schema: {
+        type: 'object', additionalProperties: false, properties: {
+          accepted: { type: 'boolean', required: true },
+          revision: { type: 'integer', required: true },
+          operationId: { type: 'string', required: true },
+          amended: {
+            type: 'array', required: true, items: {
+              type: 'object', additionalProperties: false, properties: {
+                id: { type: 'string', required: true },
+                fields: { type: 'array', required: true, items: { type: 'string' } },
+              },
+            },
+          },
+          conflicts: { type: 'array', required: true, items: conflictRowSchema },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `DAG amendment accepted at revision ${value.revision}; ${value.conflicts.filter(row => row.reason === 'dependency-file-overlap').length} dependency file-ownership violation(s) remain.`,
+      }],
+    },
     execute(args, exec) {
       const agent = requireAgent(exec.agent, 'dag_node_amend')
-      return Promise.resolve(acceptance(ctx.dag.amend(agent, DagNodeId(args.node_id), {
+      const result = ctx.dag.amend(agent, DagNodeId(args.node_id), {
         ...args.content === undefined ? {} : { content: args.content },
         ...args.brief === undefined ? {} : { brief: args.brief },
         ...args.deps === undefined ? {} : { deps: args.deps },
@@ -175,7 +202,14 @@ function registerDispatcherTools(ctx: Context): void {
         ...args.policy === undefined ? {} : { policy: args.policy },
         ...args.files === undefined ? {} : { files: args.files },
         ...guard(args),
-      })))
+      })
+      return Promise.resolve({
+        accepted: result.accepted,
+        revision: result.revision,
+        operationId: result.operationId,
+        amended: result.amended.map(row => ({ id: row.id, fields: [...row.fields] })),
+        conflicts: result.conflicts.map(row => ({ ids: [...row.ids], files: [...row.files], reason: row.reason })),
+      })
     },
   }))
 

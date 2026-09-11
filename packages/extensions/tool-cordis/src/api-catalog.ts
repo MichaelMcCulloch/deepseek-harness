@@ -849,10 +849,10 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Accepted write receipt, preserved artifacts, corrections, and advisory conflicts.',
       },
       {
-        signature: 'amend(agent: Agent, nodeId: DagNodeId, patch: DagNodeAmendRequest): DagCommandAccepted',
-        description: 'Correct the declared fields of one existing node without re-emitting the graph.\n\nOmitted fields keep their current value. The corrected node keeps its id, status, generation, child binding, recorded Git facts, mailbox, descendants, and completed commit, so a wrong declaration never costs dependent work.',
+        signature: 'amend(agent: Agent, nodeId: DagNodeId, patch: DagNodeAmendRequest): DagAmendResult',
+        description: 'Correct the declared fields of one existing node without re-emitting the graph.\n\nOmitted fields keep their current value. The corrected node keeps its id, status, generation, child binding, recorded Git facts, mailbox, descendants, and completed commit, so a wrong declaration never costs dependent work. A declared-file ownership violation the amendment does not touch is retained and reported, because the rule is multi-node and this operation is not.',
         parameters: [{ name: 'agent', description: 'Live dispatcher agent.' }, { name: 'nodeId', description: 'Existing node to correct.' }, { name: 'patch', description: 'Declaration fields to replace.' }],
-        returns: 'Accepted command receipt.',
+        returns: 'Accepted receipt with the corrected fields and remaining conflicts.',
       },
       {
         signature: 'dispatch(agent: Agent, nodeIds: readonly DagNodeId[], guard: DagRevisionGuard = {}): DagCommandAccepted',
@@ -4223,6 +4223,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type CredentialRef = Branded<\'CredentialRef\'>;',
   },
   {
+    name: 'DagAmendResult',
+    declaration: 'export interface DagAmendResult extends DagCommandAccepted {\n    readonly amended: readonly {\n        readonly id: DagNodeId;\n        readonly fields: readonly DagNodeDefinitionField[];\n    }[];\n    readonly conflicts: DagWriteResult[\'conflicts\'];\n}',
+  },
+  {
     name: 'DagCommandAccepted',
     declaration: 'export interface DagCommandAccepted {\n    readonly accepted: true;\n    readonly revision: number;\n    readonly operationId: DagOperationId;\n}',
   },
@@ -4332,7 +4336,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'DagWriteResult',
-    declaration: 'export interface DagWriteResult extends DagCommandAccepted {\n    readonly dropped: readonly {\n        readonly id: DagNodeId;\n        readonly childSessionId?: SessionId;\n        readonly branch?: string;\n        readonly worktree?: string;\n    }[];\n    readonly amended: readonly {\n        readonly id: DagNodeId;\n        readonly fields: readonly DagNodeDefinitionField[];\n    }[];\n    readonly rewired: readonly {\n        readonly id: DagNodeId;\n        readonly removedDeps: readonly DagNodeId[];\n    }[];\n    readonly conflicts: readonly {\n        readonly ids: readonly [\n            DagNodeId,\n            DagNodeId\n        ];\n        readonly files: readonly string[];\n        readonly reason: \'declared-files-overlap\' | \'contract-pin-overlap\';\n    }[];\n}',
+    declaration: 'export interface DagWriteResult extends DagCommandAccepted {\n    readonly dropped: readonly {\n        readonly id: DagNodeId;\n        readonly childSessionId?: SessionId;\n        readonly branch?: string;\n        readonly worktree?: string;\n    }[];\n    readonly amended: readonly {\n        readonly id: DagNodeId;\n        readonly fields: readonly DagNodeDefinitionField[];\n    }[];\n    readonly rewired: readonly {\n        readonly id: DagNodeId;\n        readonly removedDeps: readonly DagNodeId[];\n    }[];\n    readonly conflicts: readonly {\n        readonly ids: readonly [\n            DagNodeId,\n            DagNodeId\n        ];\n        readonly files: readonly string[];\n        readonly reason: \'declared-files-overlap\' | \'contract-pin-overlap\' | \'dependency-file-overlap\';\n    }[];\n}',
   },
   {
     name: 'DeepSeekLlmApiExtensionMap',
