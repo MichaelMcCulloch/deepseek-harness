@@ -332,7 +332,10 @@ export class DagService extends Service implements SubagentOwnerController {
     }))
     const result = this.mutate(agent, request.if_revision, 'write', {
       type: 'write',
-      noticeNamespace: agent.id,
+      // A session seeded from another session inherits that graph's snapshots, whose notice
+      // namespace is the origin session id. The established namespace stays authoritative so
+      // notice ids remain stable and recovery can match inherited delivery records.
+      noticeNamespace: this.state(agent)?.noticeNamespace ?? agent.id,
       nodes: rows,
       topologicalOrder: validated.topologicalOrder,
     })

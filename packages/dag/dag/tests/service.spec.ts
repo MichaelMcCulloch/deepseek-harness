@@ -19,6 +19,7 @@ import { TestSessionQuery } from '../../../subagent/subagent/tests/test-session-
 import DagService from '../src/index.ts'
 import { DagCommandId, DagNodeId, DagOperationId } from '../src/ids.ts'
 import { DagStateError, reduceDagState } from '../src/reducer.ts'
+import { validateDagDeclaration } from '../src/validation.ts'
 import type { DagNodeInput, DagNodeSnapshot, DagNotice, DagState } from '../src/types.ts'
 
 interface GatedEntry {
@@ -414,6 +415,31 @@ describe('native DAG service', { timeout: 60_000 }, () => {
     })).toThrow(expect.objectContaining({ code: 'dag-revision-conflict' }))
     expect(() => ctx.dag.reset(dispatcher, DagNodeId('a'), '', { if_revision: 0 }))
       .toThrow(expect.objectContaining({ code: 'dag-revision-conflict' }))
+  })
+
+  it('fixes the notice namespace on the first declaration', async () => {
+    const { ctx, dispatcher } = await setup(new GatedAdapter([]))
+
+    ctx.dag.write(dispatcher, { nodes: [node()] })
+
+    expect(ctx.dag.state(dispatcher)?.noticeNamespace).toBe(dispatcher.id)
+  })
+
+  it('keeps the inherited namespace when a seeded session amends the graph', async () => {
+    const { ctx, dispatcher } = await setup(new GatedAdapter([]))
+    const declared = validateDagDeclaration([node()])
+    const inherited = reduceDagState(null, {
+      type: 'write',
+      noticeNamespace: 'origin-dispatcher',
+      nodes: declared.definitions.map(definition => ({ definition, status: 'pending' as const })),
+      topologicalOrder: declared.topologicalOrder,
+    }).state
+    dispatcher.session.append('dag/state', { state: inherited })
+
+    const written = ctx.dag.write(dispatcher, { nodes: [node()] })
+
+    expect(written.revision).toBe(inherited.revision + 1)
+    expect(ctx.dag.state(dispatcher)?.noticeNamespace).toBe('origin-dispatcher')
   })
 
   it('contains commit listener failures and still reaches later listeners', async () => {

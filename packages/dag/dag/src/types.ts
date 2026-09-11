@@ -127,7 +127,7 @@ export type DagStatusCounts = Readonly<Record<DagNodeStatus, number>>
 /** Complete authoritative DAG state written on each accepted change. */
 export interface DagState {
   readonly version: number
-  /** Stable dispatcher namespace used in deterministic notice identities. */
+  /** Notice namespace fixed by the graph's first declaration and kept by every later write. */
   readonly noticeNamespace: string
   readonly revision: number
   readonly graphGeneration: number

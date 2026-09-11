@@ -30,7 +30,7 @@ On session reopen, the service folds the newest snapshot and restarts accepted o
 
 ## Notices and waiting
 
-Node failure, block, interruption, wave settlement, and completion outside an open wave create durable notices. Notice ids include the dispatcher session namespace, graph generation, node generation or wave id, and notice kind. Delivery uses `Agent.inject`; it does not steer or wake the dispatcher.
+Node failure, block, interruption, wave settlement, and completion outside an open wave create durable notices. Notice ids combine the namespace fixed by the graph's first declaration, graph generation, node generation or wave id, and notice kind, so a session seeded from the declaring session still amends the graph under stable ids. Delivery uses `Agent.inject`; it does not steer or wake the dispatcher.
 
 Recovery checks pending inbox messages and claimed inbox session events for each notice id. It injects a notice only when no matching record exists. `dag_wait` returns at once when a later delivered notice exists. Otherwise, it registers one cancellable waiter for the dispatcher session. The service injects and logs the notice before it resolves that waiter.
 
