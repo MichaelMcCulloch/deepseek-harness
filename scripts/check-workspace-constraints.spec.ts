@@ -182,6 +182,19 @@ describe('package payload constraints', () => {
     const manifest = JSON.parse(readFileSync(new URL(`../${dir}/package.json`, import.meta.url), 'utf8')) as WorkspaceManifest['manifest']
     expect(checkWorkspaceManifest({ dir, manifest })).toEqual([])
   })
+
+  it('includes a child Loader plugin that has its own runtime bundle', () => {
+    expect(expectedDshPackageFiles({
+      name: '@deepseek-ai/dsh-tool-example',
+      exports: {
+        './child': { default: './lib/child.js' },
+      },
+    })).toEqual([
+      'lib/index.js',
+      'lib/child.js',
+      'lib/types/**/*.d.ts',
+    ])
+  })
 })
 
 it('publishes CLI runtime declarations and rejects a payload that omits them', () => {

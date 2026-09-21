@@ -20,9 +20,37 @@ import type { LayoutState, PaneId, TabId, TabRecord } from '@deepseek-ai/dsh-cli
 import { findTabPane } from '@deepseek-ai/dsh-client-ui-dockkit'
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { SidebarRightNavigationParams } from './contract/params.ts'
+import type { SidebarRightNavigationParams, SidebarRightResourceParams, SidebarRightTabParamsFor } from './contract/params.ts'
 import type { SidebarRightTabActions, SidebarRightTabNavigation, SidebarRightTabPlacement } from './contract/slots.ts'
-import type { SidebarRightOpenResourceOptions, SidebarRightOpenTabOptions, SidebarRightPlacement } from './service.ts'
+
+/** Where an open lands; every field is optional and the defaults are the common case. */
+export interface SidebarRightPlacement {
+  /** Land a new tab in this pane instead of the active docked one. */
+  readonly paneId?: PaneId
+  /** Prefer a new pane for new content; use the target pane when splitting is unavailable. */
+  readonly preferNewPane?: boolean
+  /** Take this tab's place — its pane and its strip slot — and close it in the same step. */
+  readonly replaceTab?: TabId
+  /**
+   * Resource tabs reveal an existing (kind, contentId) by default; `false`
+   * permits duplicates. Pages always deduplicate within the target pane.
+   */
+  readonly revealIfOpened?: boolean
+}
+
+/** How a caller wants a resource opened. */
+export interface SidebarRightOpenResourceOptions extends SidebarRightPlacement {
+  /** Name the opening type instead of letting the registry rank claims; its `canOpen` still applies. */
+  readonly kind?: string
+  /** The resource's navigation parameters, typed by resource type; delivered as `navigation.params`. */
+  readonly params?: SidebarRightResourceParams
+}
+
+/** How a caller wants a page type opened. */
+export interface SidebarRightOpenTabOptions<K extends string = string> extends SidebarRightPlacement {
+  /** That kind's navigation parameters, typed by kind; delivered as `navigation.params`. */
+  readonly params?: SidebarRightTabParamsFor<K>
+}
 
 /**
  * The navigation face a tab's actions call back into, aimed at the session the

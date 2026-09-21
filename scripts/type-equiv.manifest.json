@@ -14,32 +14,32 @@
     {
       "doc": "docs/subsystems/llm-streaming.md",
       "symbol": "AssistantProviderMetadata",
-      "source": "packages/llm/llm/src/message.ts"
+      "source": "packages/llm/llm/src/types.ts"
     },
     {
       "doc": "docs/subsystems/llm-streaming.md",
       "symbol": "Message",
-      "source": "packages/llm/llm/src/message.ts"
+      "source": "packages/llm/llm/src/types.ts"
     },
     {
       "doc": "docs/subsystems/llm-streaming.md",
       "symbol": "MessageSourceMap",
-      "source": "packages/llm/llm/src/message.ts"
+      "source": "packages/llm/llm/src/types.ts"
     },
     {
       "doc": "docs/subsystems/llm-streaming.md",
       "symbol": "ContextForm",
-      "source": "packages/llm/llm/src/message.ts"
+      "source": "packages/llm/llm/src/types.ts"
     },
     {
       "doc": "docs/subsystems/llm-streaming.md",
       "symbol": "ContextSnapshotSection",
-      "source": "packages/llm/llm/src/message.ts"
+      "source": "packages/llm/llm/src/types.ts"
     },
     {
       "doc": "docs/subsystems/llm-streaming.md",
       "symbol": "ContextFormed",
-      "source": "packages/llm/llm/src/message.ts"
+      "source": "packages/llm/llm/src/types.ts"
     },
     {
       "doc": "docs/subsystems/llm-streaming.md",
@@ -467,7 +467,7 @@
     {
       "doc": "docs/subsystems/session.md",
       "symbol": "UserMessage",
-      "source": "packages/llm/llm/src/message.ts"
+      "source": "packages/llm/llm/src/types.ts"
     },
     {
       "doc": "docs/subsystems/session.md",
@@ -598,12 +598,12 @@
     {
       "doc": "docs/subsystems/persistence.md",
       "symbol": "SessionPreparationOptions",
-      "source": "packages/core/session/src/preparation.ts"
+      "source": "packages/core/session/src/index.ts"
     },
     {
       "doc": "docs/subsystems/persistence.md",
       "symbol": "SessionPreparation",
-      "source": "packages/core/session/src/preparation.ts",
+      "source": "packages/core/session/src/index.ts",
       "projection": "public-api"
     },
     {
@@ -779,12 +779,12 @@
     {
       "doc": "docs/subsystems/tools.md",
       "symbol": "ToolOutputDefinition",
-      "source": "packages/core/tools/src/index.ts"
+      "source": "packages/core/tools/src/pipeline-types.ts"
     },
     {
       "doc": "docs/subsystems/tools.md",
       "symbol": "ToolDefinition",
-      "source": "packages/core/tools/src/index.ts"
+      "source": "packages/core/tools/src/pipeline-types.ts"
     },
     {
       "doc": "docs/subsystems/tools.md",
@@ -814,37 +814,37 @@
     {
       "doc": "docs/subsystems/tools.md",
       "symbol": "ToolExecutionToken",
-      "source": "packages/core/tools/src/index.ts"
+      "source": "packages/core/tools/src/pipeline-types.ts"
     },
     {
       "doc": "docs/subsystems/tools.md",
       "symbol": "ToolExecutionInput",
-      "source": "packages/core/tools/src/index.ts"
+      "source": "packages/core/tools/src/pipeline-types.ts"
     },
     {
       "doc": "docs/subsystems/tools.md",
       "symbol": "ToolExecution",
-      "source": "packages/core/tools/src/index.ts"
+      "source": "packages/core/tools/src/pipeline-types.ts"
     },
     {
       "doc": "docs/subsystems/tools.md",
       "symbol": "ToolDispatchExecution",
-      "source": "packages/core/tools/src/index.ts"
+      "source": "packages/core/tools/src/pipeline-types.ts"
     },
     {
       "doc": "docs/subsystems/tools.md",
       "symbol": "ToolExecutionMode",
-      "source": "packages/core/tools/src/index.ts"
+      "source": "packages/core/tools/src/pipeline-types.ts"
     },
     {
       "doc": "docs/subsystems/tools.md",
       "symbol": "PtcDispatchLog",
-      "source": "packages/core/tools/src/index.ts"
+      "source": "packages/core/tools/src/pipeline-types.ts"
     },
     {
       "doc": "docs/subsystems/tools.md",
       "symbol": "ToolRunContext",
-      "source": "packages/core/tools/src/index.ts"
+      "source": "packages/core/tools/src/pipeline-types.ts"
     },
     {
       "doc": "docs/subsystems/tools.md",
@@ -854,7 +854,7 @@
     {
       "doc": "docs/subsystems/tools.md",
       "symbol": "ToolErrorInfo",
-      "source": "packages/core/tools/src/index.ts"
+      "source": "packages/core/tools/src/pipeline-types.ts"
     },
     {
       "doc": "docs/subsystems/tools.md",
@@ -864,22 +864,22 @@
     {
       "doc": "docs/subsystems/tools.md",
       "symbol": "ToolFailure",
-      "source": "packages/core/tools/src/index.ts"
+      "source": "packages/core/tools/src/pipeline-types.ts"
     },
     {
       "doc": "docs/subsystems/tools.md",
       "symbol": "ToolExecutionSuccess",
-      "source": "packages/core/tools/src/index.ts"
+      "source": "packages/core/tools/src/pipeline-types.ts"
     },
     {
       "doc": "docs/subsystems/tools.md",
       "symbol": "ToolExecutionFailure",
-      "source": "packages/core/tools/src/index.ts"
+      "source": "packages/core/tools/src/pipeline-types.ts"
     },
     {
       "doc": "docs/subsystems/tools.md",
       "symbol": "ToolExecutionResult",
-      "source": "packages/core/tools/src/index.ts"
+      "source": "packages/core/tools/src/pipeline-types.ts"
     },
     {
       "doc": "docs/subsystems/tools.md",
@@ -1119,17 +1119,17 @@
     {
       "doc": "docs/subsystems/sandbox.md",
       "symbol": "SandboxMode",
-      "source": "packages/sandbox/sandbox/src/index.ts"
+      "source": "packages/sandbox/sandbox/src/types.ts"
     },
     {
       "doc": "docs/subsystems/sandbox.md",
       "symbol": "ConfinedSandboxMode",
-      "source": "packages/sandbox/sandbox/src/index.ts"
+      "source": "packages/sandbox/sandbox/src/types.ts"
     },
     {
       "doc": "docs/subsystems/sandbox.md",
       "symbol": "SandboxExecutionPolicy",
-      "source": "packages/sandbox/sandbox/src/index.ts"
+      "source": "packages/sandbox/sandbox/src/types.ts"
     },
     {
       "doc": "docs/subsystems/sandbox.md",
@@ -1139,7 +1139,7 @@
     {
       "doc": "docs/subsystems/sandbox.md",
       "symbol": "SandboxPolicy",
-      "source": "packages/sandbox/sandbox/src/index.ts"
+      "source": "packages/sandbox/sandbox/src/types.ts"
     },
     {
       "doc": "docs/subsystems/sandbox.md",
@@ -1864,17 +1864,17 @@
     {
       "doc": "docs/subsystems/session-telemetry.md",
       "symbol": "SessionTelemetrySeverity",
-      "source": "packages/session/session-telemetry/src/index.ts"
+      "source": "packages/session/session-telemetry/src/types.ts"
     },
     {
       "doc": "docs/subsystems/session-telemetry.md",
       "symbol": "SessionTelemetryRecord",
-      "source": "packages/session/session-telemetry/src/index.ts"
+      "source": "packages/session/session-telemetry/src/types.ts"
     },
     {
       "doc": "docs/subsystems/session-telemetry.md",
       "symbol": "SessionTelemetrySink",
-      "source": "packages/session/session-telemetry/src/index.ts"
+      "source": "packages/session/session-telemetry/src/types.ts"
     },
     {
       "doc": "docs/subsystems/typert.md",

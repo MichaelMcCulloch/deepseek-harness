@@ -29,6 +29,7 @@ function stubAgent(rawId: string, overrides: Partial<Agent> = {}): Agent {
     send: () => {},
     followup: () => {},
     steer: () => ({ outcome: Promise.resolve({ status: 'rejected' as const }) }),
+    redirect: () => {},
     inject: () => {},
     cancel() {},
     runMaintenance: task => task(new AbortController().signal),

@@ -77,6 +77,7 @@ describe('scoped-dispatch invariants', () => {
     const rows: Array<[string, unknown[]]> = [
       ...Object.entries(agentRows),
       ['approval/request', [{ agent, toolName: 'echo' }, () => Promise.resolve('unavailable')]],
+      ['dag/committed', [{ agent, committed: {} }]],
       ['goal/changed', [{ agent, change: { operation: 'create', ref: { id: 'goal-a', revision: 1 } } }]],
       ['system-prompt/assemble', [[], { scope: agent }]],
       ['tools/ptc-dispatch-log', [{ exec: { callId: 'c', name: 't', arguments: {} }, agent, subCallId: 'c:code:1', name: 't', isError: false, content: [] }, () => Promise.resolve([])]],

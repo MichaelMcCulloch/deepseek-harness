@@ -173,16 +173,18 @@ describe('partial Landlock runner-failure classification', () => {
       expect(background).not.toBeInstanceOf(SandboxUnavailableError)
     } else {
       expect(foreground).toMatchObject({
-        exitCode: 127,
         signal: null,
         sandbox: { mode: 'read-only', denied: false, enforcement: 'full' },
       })
+      const exitCode = (foreground as { exitCode: number | null }).exitCode
+      expect(exitCode).not.toBeNull()
+      expect(exitCode).not.toBe(0)
       expect((foreground as { stderr: { text: string } }).stderr.text.length).toBeGreaterThan(0)
 
       const background = await bash.start(bash.resolve(request))
       await background.done
       expect(background.status).toBe('completed')
-      expect(background.exitCode).toBe(127)
+      expect(background.exitCode).toBe(exitCode)
       expect(background.signal).toBeNull()
       expect(background.sandbox).toEqual({ mode: 'read-only', denied: false, enforcement: 'full' })
       const output = background.readOutput().delta

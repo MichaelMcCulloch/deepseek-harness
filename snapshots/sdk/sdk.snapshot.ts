@@ -65,6 +65,9 @@ import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 const corpusRoot = fileURLToPath(new URL('../', import.meta.url))
 
 const MINIMAL_SYSTEM_PROMPT = 'You are the environment-selected minimal software engineer.'
+const MINIMAL_ASSEMBLED_SYSTEM_PROMPT = `${MINIMAL_SYSTEM_PROMPT}
+
+Use the DAG tools for dependency work. After dispatch, call dag_wait with the last revision. Do not poll dag_status. A command response means that the command was accepted; Git and child effects continue in the background.`
 const MINIMAL_BASH_DESCRIPTION = `Run commands in a bash shell
 * When invoking this tool, the contents of the "command" parameter does NOT need to be XML-escaped.
 * You don't have access to the internet via this tool.
@@ -141,8 +144,22 @@ const SDK_ASSERTIONS: Readonly<Record<string, SdkAssertions>> = {
   },
   'persistent-tools': {
     environment: { DSH_SYSTEM_PROMPT: MINIMAL_SYSTEM_PROMPT },
-    expectedTools: { bash: ['command'], str_replace_editor: ['command', 'path'] },
-    expectedSystem: MINIMAL_SYSTEM_PROMPT,
+    expectedTools: {
+      bash: ['command'],
+      dag_dispatch: ['node_ids'],
+      dag_node_amend: ['node_id'],
+      dag_node_inspect: ['node_id'],
+      dag_node_redispatch: ['node_id'],
+      dag_node_reset: ['node_id', 'target'],
+      dag_node_resume: ['node_id', 'message'],
+      dag_node_steer: ['node_id', 'message'],
+      dag_node_stop: ['node_id'],
+      dag_status: [],
+      dag_wait: ['after_revision'],
+      dag_write: ['nodes'],
+      str_replace_editor: ['command', 'path'],
+    },
+    expectedSystem: MINIMAL_ASSEMBLED_SYSTEM_PROMPT,
     expectedToolDescriptions: { bash: MINIMAL_BASH_DESCRIPTION },
     runtimeContext: {
       includes: ['Current DSH file policy: danger-full-access', 'Approval prompts are disabled in this session'],

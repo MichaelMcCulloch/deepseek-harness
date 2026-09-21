@@ -23,19 +23,7 @@ import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { createTransport } from './transport.ts'
 import { syncTools } from './tools.ts'
 import type { ToolBridgeOptions, ToolDisposers } from './tools.ts'
-import type { Config } from './index.ts'
-
-/** Automatic reconnect policy for one MCP server connection. */
-export interface ReconnectConfig {
-  /** Reconnect automatically after a lost connection (default true). */
-  enabled?: boolean
-  /** First reconnect delay in milliseconds; doubles per consecutive failed attempt (default 500). */
-  initialDelayMs?: number
-  /** Backoff ceiling in milliseconds; also the uptime after which the attempt budget resets (default 30000). */
-  maxDelayMs?: number
-  /** Consecutive failed attempts per outage before giving up for good (default 10). */
-  maxAttempts?: number
-}
+import type { Config, ReconnectConfig } from './types.ts'
 
 /** Defaults shared by the Config schema and {@link resolveReconnectPolicy}. */
 export const RECONNECT_DEFAULTS: Required<ReconnectConfig> = Object.freeze({

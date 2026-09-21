@@ -2,15 +2,58 @@
  * ClientModuleSystem — the implementation behind the {@link ClientModuleLoader}
  * contract. The conceptual contract (lazy CJS model, resolution branch order) is
  * documented on the public interfaces in `./manifest.ts`; this file owns the
- * state tables and the load/materialize machinery.
+ * state tables, the load/materialize machinery, and the bootstrap-facade
+ * protocol whose creation result is this class.
  */
 import { stripClientSuffix } from './manifest.ts'
 import { ClientEntries } from './entries.ts'
 import { removeOwnedStyles } from './entry-lifecycle.ts'
 import type {
-  BootManifest, BootModuleRow, ClientBundleRegistration, ClientBundleRequire, ClientModuleLoader, ClientModuleRecord,
-  ClientModuleSystemOptions,
+  BootManifest, BootModuleRow, ClientBootstrapModule, ClientBundleRegistration, ClientBundleRequire,
+  ClientModuleCreateOptions, ClientModuleLoader, ClientModuleRecord,
 } from './manifest.ts'
+
+/**
+ * Stable page-global facade: queues early bundle registrations, then registers them live.
+ * Declared beside the class because {@link create} names its creation result:
+ * this file already imports the contract face, so the facade that returns this
+ * implementation cannot be declared there.
+ */
+export interface ClientModuleLoaderTarget {
+  /** Queue before {@link create}; live registration after it returns. */
+  mode: 'queue' | 'live'
+  /** Registrations submitted by parser-preloaded scripts before the module system exists. */
+  pendingQueue: ClientBundleRegistration[]
+  /** Queue or immediately register one bundle factory according to {@link mode}. */
+  load(registration: ClientBundleRegistration): void
+  /** Create the module system exactly once from the parser-preloaded modules bundle. */
+  create(options: ClientModuleCreateOptions): ClientModuleSystem
+}
+
+/** Window API of the web boot protocol: the host-injected graph and registration facade. */
+export interface DshWindow {
+  /**
+   * Host-composed entry graph, injected before the shell bundle runs; wire-boundary raw
+   * until the boot-manifest parser (`parseBootManifest`) reads it.
+   */
+  __DSH_BOOT__?: unknown
+  /** HTML-installed facade: a pending registration queue, then the live module-system target. */
+  __ModuleLoader__?: ClientModuleLoaderTarget
+}
+
+/** Internal construction inputs assembled by the modules bundle's bootstrap export. */
+export interface ClientModuleSystemOptions {
+  /** Parsed boot graph owned by the resulting module system. */
+  manifest: BootManifest
+  /** Module-table seed: platform-singleton specifier → shell instance. */
+  staticModules: Record<string, unknown>
+  /** Stable HTML-installed registration facade to switch from queue to live mode. */
+  registrationTarget: ClientModuleLoaderTarget
+  /** Already-materialized modules bundle consumed while creating the system. */
+  bootstrapModule: ClientBootstrapModule
+  /** Bundle-load hook. Defaults to a same-origin classic `<script src>` element. */
+  loadBundle?: (url: string) => Promise<void>
+}
 
 /** Default bundle-load hook: same-origin external classic script. */
 const defaultLoadBundle = (url: string): Promise<void> => new Promise((resolve, reject) => {

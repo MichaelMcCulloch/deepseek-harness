@@ -12,11 +12,19 @@ import type { ContentBlock, ToolCallId, ToolSchema } from '@deepseek-ai/dsh-llm'
 import type { PtcBindingFunction, PtcRunResult, PtcRunSandbox, PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
 import { approveEscalation, ESCALATION_TARGETS, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
+import type { ScopeKey } from '@deepseek-ai/dsh-scope'
 import type { ApprovalService } from '@deepseek-ai/dsh-user-approval'
 import { deepFreeze, snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
+import type {
+  PtcDispatchLog,
+  ToolDefinition,
+  ToolExecutionInput,
+  ToolExecutionMode,
+  ToolExecutionResult,
+  ToolRunContext,
+  ToolRuntimeScheduler,
+} from './pipeline-types.ts'
 import { defineTool, parameterSchemaSpecToJsonSchema } from './schema.ts'
-import { TOOL_RUNTIME_SCHEDULER } from './index.ts'
-import type { PtcDispatchLog, ToolDefinition, ToolExecutionResult, ToolRuntime, ToolRunContext } from './index.ts'
 import type {} from './types.ts'
 
 /** The model-facing name of the PTC mode tool. */
@@ -308,8 +316,23 @@ export interface RunCodeBridgeOptions {
   peekRuntime: () => PtcRuntime | undefined
   /** The run's overlap cap for parallel-classified sub-calls (the registry passes its validated `maxParallelSubCalls`). */
   maxParallel: number
+  /** The registry's staged dispatch interface, keyed in the registry by its own symbol. */
+  scheduler: ToolRuntimeScheduler
   /** Runs the contained `tools/ptc-dispatch-log` waterfall over one settled sub-dispatch (the registry's private invoker). */
   shapeDispatchLog: (dispatch: PtcDispatchLog) => Promise<ContentBlock[]>
+}
+
+/**
+ * The registry surface one `run_code` program drives: how a sub-call joins the
+ * native concurrency contract, and the calling scope's visible tool schemas.
+ * The owning registry satisfies this structurally; the bridge names only what
+ * it reads so it needs no import of the registry module.
+ */
+export interface RunCodeDispatchRegistry {
+  /** Classify one pending sub-call exactly as the registry's native scheduler does. */
+  executionMode(exec: ToolExecutionInput): ToolExecutionMode
+  /** The calling scope's visible schemas, the same view the SDK section declared. */
+  schemas(scope?: ScopeKey): ToolSchema[]
 }
 
 /**
@@ -323,8 +346,8 @@ export interface RunCodeBridgeOptions {
  * @param options - the registry-private capabilities described above.
  * @returns the registry-ready definition.
  */
-export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeOptions): ToolDefinition {
-  const { requireRuntime, peekRuntime, maxParallel, shapeDispatchLog } = options
+export function createRunCodeTool(registry: RunCodeDispatchRegistry, options: RunCodeBridgeOptions): ToolDefinition {
+  const { requireRuntime, peekRuntime, maxParallel, scheduler, shapeDispatchLog } = options
   const definition = defineTool({
     name: RUN_CODE_NAME,
     // The description and `code` parameter description are placeholders here:
@@ -547,7 +570,6 @@ export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeO
           signal: runController.signal,
         }
         type DispatchOutcome = { isError: true; message: string } | { isError: false; value: JsonValue }
-        const scheduler = registry[TOOL_RUNTIME_SCHEDULER]
         const outcome = await new Promise<DispatchOutcome>((resolve, reject) => {
           // Set by the dispatch stage (or start() for a pre-settled result): what commit() finalizes in submission order.
           let parked:

@@ -30,7 +30,7 @@ Shorthand for `ctx.plugin({ inject, apply: callback })`: the callback is unloade
 
 **Returns** the fiber; awaiting it settles once loading finished.
 
-[Source](../../vendor/cordis/src/registry.ts#L176)
+[Source](../../vendor/cordis/src/context.ts#L459)
 
 ### ctx.plugin(plugin, ...args)
 
@@ -53,7 +53,7 @@ Load a plugin in the current context.
 
 **Returns** the fiber; awaiting it settles once loading finished (rejecting on config or startup errors).
 
-[Source](../../vendor/cordis/src/registry.ts#L185)
+[Source](../../vendor/cordis/src/context.ts#L468)
 
 ## Plugin
 
@@ -118,7 +118,7 @@ namespace Plugin {
 }
 ```
 
-[Source](../../vendor/cordis/src/registry.ts#L92)
+[Source](../../vendor/cordis/src/context.ts#L2291)
 
 ## Inject
 
@@ -149,4 +149,4 @@ namespace Inject {
 }
 ```
 
-[Source](../../vendor/cordis/src/registry.ts#L19)
+[Source](../../vendor/cordis/src/context.ts#L2218)

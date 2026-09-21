@@ -48,6 +48,8 @@ import CordisHostRunner from '@deepseek-ai/dsh-cordis-host-runner'
 import * as ToolCordis from '@deepseek-ai/dsh-tool-cordis'
 import * as ToolPresent from '@deepseek-ai/dsh-tool-present'
 import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
+import * as ToolDag from '@deepseek-ai/dsh-tool-dag'
+import type DagService from '@deepseek-ai/dsh-dag'
 import * as ToolFsSearch from '@deepseek-ai/dsh-tool-fs-search'
 import * as ToolStrReplaceEditor from '@deepseek-ai/dsh-tool-str-replace-editor'
 import TerminalSessionService from '@deepseek-ai/dsh-terminal'
@@ -379,6 +381,21 @@ const TOOL_PACKAGES: ToolPackage[] = [
       'Standalone view/create/unique literal replace/line insert tool over the filesystem seam; it composes with any shell or terminal API.',
   },
   {
+    pkg: '@deepseek-ai/dsh-tool-dag',
+    dir: 'tool-dag',
+    source: 'packages/dag/tool-dag/src/index.ts',
+    requires: ['ctx.tools', 'ctx.dag', 'ctx.systemPrompt', 'an owning dispatcher or DAG child Agent'],
+    writes: ['tool/call', 'dag/state for mutations', 'tool/result'],
+    async mount(ctx) {
+      ctx.provide('dag', {} as DagService)
+      await ctx.plugin(ToolDag)
+      ctx.tools.register(ToolDag.childCompleteTool(ctx.dag))
+      ctx.tools.register(ToolDag.childBlockTool(ctx.dag))
+    },
+    note:
+      'Dispatchers receive the graph controls. Owner-bound DAG children receive only dag_status, dag_node_complete, and dag_node_block; the catalog combines both scoped schema sets, while actual child composition removes every dispatcher control.',
+  },
+  {
     pkg: '@deepseek-ai/dsh-tool-fs',
     dir: 'tool-fs',
     source: 'packages/fs/tool-fs/src/index.ts',
@@ -547,6 +564,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       interrupt_agent: 'packages/subagent/tool-subagent-control/src/index.ts',
       list_agents: 'packages/subagent/tool-subagent-control/src/list-agents.ts',
       send_message: 'packages/subagent/tool-subagent-control/src/index.ts',
+      steer_agent: 'packages/subagent/tool-subagent-control/src/index.ts',
     },
     requires: ['ctx.tools', 'ctx.subagents', 'ctx.agents and ctx.sessionProjections (list_agents only)'],
     writes: ['tool/call', 'tool/result', 'child session events through ctx.subagents'],

@@ -24,10 +24,11 @@ import { planResourceProvider } from './plan-resource.ts'
 import { planAddress, parsePlanAddress } from './plan.ts'
 import { isReviewPreviewAddress, reviewPreviewAddress } from './review-preview.ts'
 import { createPlanReviewStore } from './review-store.ts'
-import { PlanChip } from './PlanModeControl.tsx'
+import { PlanChip, type PlanChipInjected } from './PlanModeControl.tsx'
 import { en, zh, type PlanKey } from './locales.ts'
 
 export type { PlanKey } from './locales.ts'
+export type { PlanChipInjected } from './PlanModeControl.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -38,15 +39,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** Dictionary namespace owned by this plugin. */
 const NS = 'plan'
-
-/** Injected business face of the composer plan seat. */
-export interface PlanChipInjected {
-  /**
-   * Leave plan mode by executing /plan off.
-   * @returns null on admitted execution; a user-visible failure line otherwise.
-   */
-  exitPlanMode: () => Promise<string | null>
-}
 
 /** Services for plan controls, Conversation projection, and resource navigation. */
 export const inject = ['slots', 'remote', 'remote.commands', 'remote.session', 'sessions', 'locale', 'uiConversation', 'resources', 'sidebarRight', 'sidebarRightTabs']

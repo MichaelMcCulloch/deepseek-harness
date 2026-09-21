@@ -23,7 +23,7 @@ async function fakeAgent(ctx: Context, rawId: string): Promise<Agent> {
     status: 'idle',
     ctx: scope.ctx,
     send: () => {},
-    followup: () => {}, steer: () => {}, inject: () => {}, cancel() {},
+    followup: () => {}, steer: () => {}, redirect: () => {}, inject: () => {}, cancel() {},
     runMaintenance: job => job(new AbortController().signal),
     whenIdle: () => Promise.resolve(),
   }

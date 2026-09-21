@@ -43,7 +43,7 @@ interface ImageAttachmentAccess {
 }
 ```
 
-源码：[`packages/llm/llm/src/message.ts`](../../packages/llm/llm/src/message.ts)
+源码：[`packages/llm/llm/src/types.ts`](../../packages/llm/llm/src/types.ts)
 
 `Message` 是一个带标识且不可变的角色／来源／内容值。模型生成的 assistant 消息会在来源中记录生成它的提供方和模型，以及可选的适配器私有回放数据：
 

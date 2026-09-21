@@ -2,8 +2,7 @@
 import { resolve } from '../../module-system/posix-path.ts'
 import { DSH_TMP } from '../../storage/paths.ts'
 import { filesystemError } from '../fs-access.ts'
-import type { ShellDirent, ShellFileSystem, ShellStats } from '../types.ts'
-import type { VirtualExecutable, VirtualExecutableExit } from './virtual-executables.ts'
+import type { ShellDirent, ShellFileSystem, ShellStats, VirtualExecutable, VirtualExecutableExit } from '../types.ts'
 
 /** Parsed invocation of the native launcher's unchanged argv grammar. */
 export type LandlockInvocation =

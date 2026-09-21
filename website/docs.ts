@@ -331,6 +331,7 @@ const subsystemGroups = [
     ['skills.md', '技能', 'Skills'],
     ['workflow.md', '工作流', 'Workflows'],
     ['subagent.md', '子代理', 'Subagents'],
+    ['dag.md', '原生 DAG 编排', 'Native DAG orchestration'],
   ]],
   ['策略与交互', 'Policy and interaction', [
     ['approval.md', '审批', 'Approvals'],

@@ -26,6 +26,13 @@ export type NodeId = PaneId | SplitId
 /** Identity of one open tab; distinct copies of one content share `contentId`, never `TabId`. */
 export type TabId = Branded<'TabId'>
 
+/** Mints ids for the operations a planner produces: the one place a string becomes an id. */
+export interface Mint {
+  (prefix: 'tab'): TabId
+  (prefix: 'pane' | 'float'): PaneId
+  (prefix: 'split'): SplitId
+}
+
 /** Direction a split lays its children out in. */
 export type SplitAxis = 'row' | 'column'
 

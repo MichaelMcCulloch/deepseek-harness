@@ -594,12 +594,18 @@ describe('dsh-tool-team', () => {
   })
 
   it('reinstalls Team scope before a cold-resumed teammate request', async () => {
-    const { ctx, lead, adapter } = await setup([textResponse('first'), 'hang', 'hang'])
+    const { ctx, lead, adapter } = await setup([
+      textResponse('first'),
+      textResponse('settlement received'),
+      'hang',
+    ])
     const spawned = await execute(ctx, lead, 'spawn_teammate', {
       name: 'cold-worker', description: 'cold worker', prompt: 'finish once',
     })
     const childId = spawnedChildId(spawned)
     await vi.waitFor(() => { expect(ctx.agents.get(childId)).toBeUndefined() }, { timeout: 5_000 })
+    await vi.waitFor(() => { expect(adapter.requests).toHaveLength(2) }, { timeout: 5_000 })
+    await lead.whenIdle()
 
     await ctx.agentTeams.sendMessage(lead, {
       target: 'cold-worker',

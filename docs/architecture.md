@@ -67,6 +67,7 @@ Here are some core packages that contribute to the Cordis tree.
 | [`core/agent-loop`](subsystems/core.md) | The default driver implementing that interface | `ctx.agentLoop` |
 | [`core/scope`](subsystems/scope.md) | The per-agent scoped-registration primitive | library, no key |
 | [`llm/llm`](subsystems/llm-streaming.md) | Message and stream vocabulary plus the adapter seam | `ctx.llm` |
+| [`dag/dag`](subsystems/dag.md) | Durable dependency-graph state, recovery, notices, and local Git execution | `ctx.dag` |
 | [`webhook/webhook`](subsystems/webhook.md) | Authenticated-delivery dispatch and Workspace Session creation | `ctx.webhookRuntime` |
 
 ## Events
@@ -132,6 +133,8 @@ A **seam** is a swappable capability with three roles: a **Service Definition** 
 
 Seams are why one provider swap changes the whole product. Filesystem and subprocess providers share one execution world, so pointing them at a remote sandbox moves Bash, PTY, and LSP with them, with no provider forks. [Subagent providers](subsystems/subagent.md) vary just as widely behind one interface, from a fresh child agent to a delegated turn in another product.
 
+The [native DAG scheduler](subsystems/dag.md) composes the session log, subagent, subprocess, projection, tool, and Web seams. Its dispatcher commits complete state snapshots before asynchronous work, then generation-fenced effects operate continuable children in local Git worktrees. The subagent service keeps authorization; an owner controller gives the DAG one stop, redirect, and settlement path without changing generic continuation behavior.
+
 [Experimental Agent Teams](subsystems/agent-team.md) is a published opt-in coordination seam on `ctx.agentTeams`, with a durable roster, task board, and mailbox layered over continuable subagents.
 
 ## Where new behavior goes
@@ -157,6 +160,7 @@ New behavior attaches to a documented extension point. Changing the loop itself 
 | Add durable session state | extend `SessionEventMap`; render and replay from the log |
 | Generate session titles | register the sole `ctx.sessionTitle` provider |
 | Manage a same-session objective | use `ctx.goals`; continue through `agent/*` |
+| Coordinate dependency-ordered local agent work | use `ctx.dag`; let its durable mailboxes drive continuable children and local Git worktrees |
 | Fork a session at a turn boundary | `ctx.agents.create({ sessionId, seed, meta: { parentSession, seedLength } })` — only agent-loop-published sessions persist |
 | Store sessions in a new backend | implement `SessionPersistence` (`create`/`open`/`stat`/`list`/`export`) over the shared handle scaffolding |
 | Scope a registration to one agent | use that agent's `agent.ctx` |

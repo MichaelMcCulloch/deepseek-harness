@@ -157,7 +157,7 @@ async function bench(script: Script, options: BenchOptions = {}): Promise<{
         agent.inbox.append('next-turn', message)
         idle = Promise.resolve().then(() => script.afterPrompt(session, message, agent))
       },
-      steer: () => {},
+      steer: () => {}, redirect: () => {},
       inject: () => {},
       whenIdle: () => {
         options.onWhenIdle?.(agent)

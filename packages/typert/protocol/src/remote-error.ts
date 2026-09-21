@@ -1,6 +1,21 @@
-/** The one Remote failure class shared by owners, the Gateway, and consumers. */
+/** The Remote failure vocabulary, its class, and the discriminated failure union shared by owners, the Gateway, and consumers. */
 
-import type { RemoteErrorCode, RemoteErrorDetailsMap, RemoteFailure } from './types.ts'
+/**
+ * Merge-extensible Remote failure vocabulary: this package declares the
+ * universal carrier codes once; the Gateway merges its infrastructure codes
+ * and every owner merges its domain codes next to the throwing code.
+ */
+export interface RemoteErrorDetailsMap {
+  /** Owner-side business validation refused the request; `issues` carries codec output when one produced it. */
+  'gateway/bad-request': { readonly issues?: readonly object[] }
+  /** The call was cancelled by the carrier signal or the backend. */
+  'gateway/cancelled': {}
+  /** Carrier, dispatch, or unclassified Host failure. */
+  'gateway/internal': {}
+}
+
+/** Every declared Remote failure code. */
+export type RemoteErrorCode = keyof RemoteErrorDetailsMap
 
 /**
  * One Remote call failure: a real Error carrying its stable code and typed
@@ -29,6 +44,14 @@ export class RemoteError<Code extends RemoteErrorCode = RemoteErrorCode> extends
     this.name = 'RemoteError'
   }
 }
+
+/**
+ * One Remote call's failure: the code-discriminated union of RemoteError
+ * instances, so a `code` branch narrows `details` with no cast.
+ */
+export type RemoteFailure = {
+  [Code in RemoteErrorCode]: RemoteError<Code>
+}[RemoteErrorCode]
 
 /**
  * Structurally identify a RemoteError thrown across module or realm copies of

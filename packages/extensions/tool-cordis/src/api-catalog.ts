@@ -859,6 +859,123 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'dag',
+    summary: 'Native DAG service backed only by complete session-log state values.',
+    description: 'Native DAG service backed only by complete session-log state values.',
+    methods: [
+      {
+        signature: 'state(agent: Agent): DagState | null',
+        description: 'Return the latest durable state for one dispatcher.',
+        parameters: [{ name: 'agent', description: 'Live dispatcher agent.' }],
+        returns: 'Latest state, or null before the first write.',
+      },
+      {
+        signature: 'status(agent: Agent): DagProjection | null',
+        description: 'Return the complete dispatcher board.',
+        parameters: [{ name: 'agent', description: 'Live dispatcher agent.' }],
+        returns: 'Safe board projection, or null before the first write.',
+      },
+      {
+        signature: 'inspect(agent: Agent, nodeId: DagNodeId): DagNodeSnapshot',
+        description: 'Return one node card, including dispatcher-only local execution facts.',
+        parameters: [{ name: 'agent', description: 'Live dispatcher agent.' }, { name: 'nodeId', description: 'Node to inspect.' }],
+        returns: 'Complete durable node card.',
+      },
+      {
+        signature: 'statusFrom(child: Agent): { readonly revision: number readonly topology: readonly { readonly id: DagNodeId; readonly deps: readonly DagNodeId[]; readonly status: DagNodeSnapshot[\'status\'] }[] readonly own: DagProjection[\'nodes\'][number] }',
+        description: 'Return topology and execution facts for the exact owner-bound child.',
+        parameters: [{ name: 'child', description: 'Live DAG child agent.' }],
+        returns: 'Topology and the child\'s safe node facts.',
+      },
+      {
+        signature: 'write(agent: Agent, request: DagWriteRequest): DagWriteResult',
+        description: 'Replace the declaration after canonical validation.\n\nExisting nodes may correct their declared fields in place, which keeps their identity, execution facts, descendants, and completed status. Omitting a node that the durable graph declared removes it from every surviving dependent\'s dependency list instead of forcing those dependents to be dropped too.',
+        parameters: [{ name: 'agent', description: 'Live dispatcher agent.' }, { name: 'request', description: 'Full node declaration and optional revision guard.' }],
+        returns: 'Accepted write receipt, preserved artifacts, corrections, and advisory conflicts.',
+      },
+      {
+        signature: 'amend(agent: Agent, nodeId: DagNodeId, patch: DagNodeAmendRequest): DagAmendResult',
+        description: 'Correct the declared fields of one existing node without re-emitting the graph.\n\nOmitted fields keep their current value. The corrected node keeps its id, status, generation, child binding, recorded Git facts, mailbox, descendants, and completed commit, so a wrong declaration never costs dependent work. A declared-file ownership violation the amendment does not touch is retained and reported, because the rule is multi-node and this operation is not.',
+        parameters: [{ name: 'agent', description: 'Live dispatcher agent.' }, { name: 'nodeId', description: 'Existing node to correct.' }, { name: 'patch', description: 'Declaration fields to replace.' }],
+        returns: 'Accepted receipt with the corrected fields and remaining conflicts.',
+      },
+      {
+        signature: 'dispatch(agent: Agent, nodeIds: readonly DagNodeId[], guard: DagRevisionGuard = {}): DagCommandAccepted',
+        description: 'Start dependency-ready pending nodes without waiting for effects.',
+        parameters: [{ name: 'agent', description: 'Live dispatcher agent.' }, { name: 'nodeIds', description: 'Pending nodes to start.' }, { name: 'guard', description: 'Optional expected revision.' }],
+        returns: 'Accepted command receipt.',
+      },
+      {
+        signature: 'redispatch(agent: Agent, nodeId: DagNodeId, guard: DagRevisionGuard = {}): DagCommandAccepted',
+        description: 'Re-enter a failed node with its durable child identity.',
+        parameters: [{ name: 'agent', description: 'Live dispatcher agent.' }, { name: 'nodeId', description: 'Failed node to dispatch again.' }, { name: 'guard', description: 'Optional expected revision.' }],
+        returns: 'Accepted command receipt.',
+      },
+      {
+        signature: 'resume(agent: Agent, nodeId: DagNodeId, message: string, guard: DagRevisionGuard = {}): DagCommandAccepted',
+        description: 'Resume a blocked or interrupted node.',
+        parameters: [{ name: 'agent', description: 'Live dispatcher agent.' }, { name: 'nodeId', description: 'Suspended node to resume.' }, { name: 'message', description: 'New work message for the child.' }, { name: 'guard', description: 'Optional expected revision.' }],
+        returns: 'Accepted command receipt.',
+      },
+      {
+        signature: 'steer(agent: Agent, nodeId: DagNodeId, message: string, guard: DagRevisionGuard = {}): DagCommandAccepted',
+        description: 'Replace a node\'s active work, or restart a suspended node.',
+        parameters: [{ name: 'agent', description: 'Live dispatcher agent.' }, { name: 'nodeId', description: 'Node to steer.' }, { name: 'message', description: 'Replacement work message.' }, { name: 'guard', description: 'Optional expected revision.' }],
+        returns: 'Accepted command receipt.',
+      },
+      {
+        signature: 'reset(agent: Agent, nodeId: DagNodeId, target: string, guard: DagRevisionGuard = {}): DagCommandAccepted',
+        description: 'Reset tracked worktree state to one allowed local target.',
+        parameters: [{ name: 'agent', description: 'Live dispatcher agent.' }, { name: 'nodeId', description: 'Pending or failed node to reset.' }, { name: 'target', description: 'Frozen base, exact commit, or local branch ref.' }, { name: 'guard', description: 'Optional expected revision.' }],
+        returns: 'Accepted command receipt.',
+      },
+      {
+        signature: 'blockFrom(child: Agent, reason: string): DagCommandAccepted',
+        description: 'Mark the calling DAG child blocked.',
+        parameters: [{ name: 'child', description: 'Live DAG child agent.' }, { name: 'reason', description: 'Reason that work cannot continue.' }],
+        returns: 'Accepted command receipt.',
+      },
+      {
+        signature: 'completeFrom(child: Agent, summary: string, artifacts: readonly JsonValue[] = []): DagCommandAccepted',
+        description: 'Request completion validation for the calling DAG child.',
+        parameters: [{ name: 'child', description: 'Live DAG child agent.' }, { name: 'summary', description: 'Result summary for the dispatcher.' }, { name: 'artifacts', description: 'Optional JSON result records.' }],
+        returns: 'Accepted command receipt.',
+      },
+      {
+        signature: 'wait(agent: Agent, afterRevision: number, signal: AbortSignal): Promise<DagWaitResult>',
+        description: 'Wait for an injected actionable notice after one revision.',
+        parameters: [{ name: 'agent', description: 'Live dispatcher agent.' }, { name: 'afterRevision', description: 'Last revision already handled by the caller.' }, { name: 'signal', description: 'Cancellation signal for this wait.' }],
+        returns: 'First available later notice and current safe board.',
+      },
+      {
+        signature: 'stop(request: SubagentOwnerStopRequest): void',
+        description: 'Commit one authorized owner stop and then cancel the child turn.',
+        parameters: [{ name: 'request', description: 'Authorized owner stop request.' }],
+      },
+      {
+        signature: 'stop(agent: Agent, nodeId: DagNodeId, reason?: string, guard?: DagRevisionGuard): DagCommandAccepted',
+        description: 'Commit a dispatcher stop without waiting for cancellation.',
+        parameters: [{ name: 'agent', description: 'Live dispatcher agent.' }, { name: 'nodeId', description: 'Active or blocked node to stop.' }, { name: 'reason', description: 'Optional interruption reason.' }, { name: 'guard', description: 'Optional expected revision.' }],
+        returns: 'Accepted command receipt.',
+      },
+      {
+        signature: 'redirect(request: SubagentOwnerRedirectRequest): Promise<void>',
+        description: 'Commit one authorized redirect and then replace the child turn.',
+        parameters: [{ name: 'request', description: 'Authorized owner redirect request.' }],
+      },
+      {
+        signature: 'settled(settlement: SubagentOwnerSettlement): void',
+        description: 'Convert an unreported owner-child turn end to failure.',
+        parameters: [{ name: 'settlement', description: 'Authorized child turn settlement.' }],
+      },
+      {
+        signature: 'turnSettled(settlement: SubagentOwnerTurnSettlement): void',
+        description: 'Fail one current child turn that ended without a final DAG report.',
+        parameters: [{ name: 'settlement', description: 'Authorized ordinary-turn settlement facts.' }],
+      },
+    ],
+  },
+  {
     key: 'deepseekLlmApiExtensions',
     summary: 'Registry of independently owned top-level fields for official DeepSeek requests.',
     description: 'Registry of independently owned top-level fields for official DeepSeek requests.',
@@ -2558,6 +2675,34 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         throws: ['when continuation services are unavailable, adjacency is rejected, or the message was not admitted.'],
       },
       {
+        signature: 'async followup( parent: Agent, childId: SessionId, content: ContentBlock[], options: SubagentDeliveryOptions, ): Promise<MessageId>',
+        description: 'Queue one durable parent-to-child follow-up as the child\'s next FIFO turn. A resident child finishes its current turn first; an absent child cold-resumes from persistence, and an unknown one rejects. Supplying `messageId` makes the delivery idempotent: a caller recovering from a restart re-uses the identity it already recorded and the child never runs the same message twice.',
+        parameters: [{ name: 'parent', description: 'exact live direct parent authorizing delivery.' }, { name: 'childId', description: 'durable direct-child session id.' }, { name: 'content', description: 'model-visible prompt blocks.' }, { name: 'options', description: 'durable attribution, optional stable message id, and caller cancellation.' }],
+        returns: 'the accepted durable message id.',
+        throws: ['{SubagentError} `UNAUTHORIZED` when the parent does not own the live child, `NOT_RESUMABLE` when the target has no persisted continuation.'],
+      },
+      {
+        signature: 'async redirect( parent: Agent, childId: SessionId, content: ContentBlock[], options: SubagentRedirectOptions, ): Promise<MessageId>',
+        description: 'Interrupt one continuable child\'s active work and place replacement content before its queued ordinary turns. An absent child cold-resumes and accepts the replacement as its next turn. Authorization and residency routing match follow-up delivery; an owner-bound child delegates the already-authorized state transition to its registered controller before the Agent operation runs.',
+        parameters: [{ name: 'parent', description: 'exact live direct parent authorizing delivery.' }, { name: 'childId', description: 'durable direct-child session id.' }, { name: 'content', description: 'replacement user-role content.' }, { name: 'options', description: 'durable attribution, optional stable message id, cancellation, and cause.' }],
+        returns: 'the accepted replacement\'s inbox id.',
+        throws: ['{SubagentError} `UNAUTHORIZED` when the parent does not own the live child, `NOT_RESUMABLE` when no persisted continuation exists, and `OWNER_CONTROLLER_UNAVAILABLE` when the durable owner is not mounted.'],
+      },
+      {
+        signature: 'registerOwnerController(name: string, controller: SubagentOwnerController): () => void',
+        description: 'Register one durable owner namespace. The returned disposer revokes new owner operations immediately; children already bound to that name keep their binding and fail loud until the same controller name is registered again.',
+        parameters: [{ name: 'name', description: 'non-empty durable controller name.' }, { name: 'controller', description: 'owner hooks; redirect admission can be asynchronous.' }],
+        returns: 'the exact Cordis effect disposer.',
+        throws: ['{SubagentError} `INVALID_OWNER` for an empty name, `DUPLICATE_OWNER` when that name is already registered.'],
+      },
+      {
+        signature: 'registerContinuableSetup(contribution: ContinuableSetupContribution): () => void',
+        description: 'Register one deployment capability composed into every continuable child\'s unpublished creation context. The contribution receives the durable owner binding so an owner namespace can install child-scoped behavior without teaching this service which capabilities exist.',
+        parameters: [{ name: 'contribution', description: 'synchronous child-scope installer.' }],
+        returns: 'an idempotent registration undo.',
+        throws: ['{SubagentError} after attempting every installation when a disposer fails.'],
+      },
+      {
         signature: 'interrupt(targetSessionId: SessionId, authority: SubagentInterruptAuthority): void',
         description: 'Interrupt one live continuable child\'s current turn under a human parent address or an exact live ancestor Agent. Fire-and-return: the cancel signal is issued before this returns, but the target may keep running until it observes the signal. Unclaimed pending inbox work, the Activation, and published descendants are preserved; claimed work is not requeued. Once the interrupted driver is idle, a waking send resumes the parked FIFO queue. An absent target — including a one-shot or unknown id — is an accepted no-op, as is a manager-less composition, which cannot own a live Activation.',
         parameters: [{ name: 'targetSessionId', description: 'the durable child session id to interrupt.' }, { name: 'authority', description: 'the human parent address or exact live ancestor Agent.' }],
@@ -2604,6 +2749,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'request', description: 'durable address, delivery, minted identity, content, and optional browser zone.' }, { name: 'signal', description: 'carrier cancellation, owning the call until inbox acceptance.' }],
         returns: 'the accepted message\'s inbox identity.',
         throws: ['{RemoteError} `gateway/bad-request`, `subagent/attachment-invalid`, `subagent/invalid-time-zone`, `subagent/parent-unavailable`, `subagent/not-resumable`, `subagent/unauthorized`, `subagent/delivery-unavailable`, `gateway/cancelled`, or `gateway/internal`.'],
+      },
+      {
+        signature: '@Remote(\'steer\') async steer(request: SubagentSteerRequest, signal: AbortSignal): Promise<SubagentSteerReceipt>',
+        description: 'Remote face of redirect under one durable parent address: interrupt the child\'s active work and accept one replacement ordinary turn before its queued ordinary turns. The exact live direct parent remains the authority credential, and an owner-bound child\'s controller still commits its own state first.',
+        parameters: [{ name: 'request', description: 'durable address, minted identity, content, and optional browser zone.' }, { name: 'signal', description: 'carrier cancellation through inbox acceptance.' }],
+        returns: 'the accepted replacement\'s inbox identity.',
+        throws: ['{RemoteError} the same failure vocabulary as {@link prompt}.'],
       },
       {
         signature: '@Remote(\'interruptByParent\') interruptByParent( childSessionId: SessionId, parentSessionId: SessionId, mode: \'continuable\', ): SubagentInterruptReceipt',
@@ -3641,6 +3793,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'ref', description: 'the reference whose stored value changed.' }],
   },
   {
+    name: 'dag/committed',
+    mode: 'emit',
+    signature: '\'dag/committed\'(this: import(\'@deepseek-ai/dsh-scope\').Scoped<Agent>, payload: { readonly agent: Agent; readonly committed: DagCommitted }): void',
+    summary: 'A complete DAG state value was appended to the dispatcher session.',
+    description: 'A complete DAG state value was appended to the dispatcher session.',
+    parameters: [{ name: 'payload', description: '.committed - immutable committed state facts. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that dispatcher.' }],
+  },
+  {
     name: 'domain/changed',
     mode: 'emit',
     signature: '\'domain/changed\'(change: DomainChanged): void',
@@ -4401,16 +4561,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ContinuableCreateSpec {\n    readonly seed?: readonly SessionEvent[];\n}',
   },
   {
+    name: 'ContinuableSetupContribution',
+    declaration: 'export type ContinuableSetupContribution = (childCtx: Context, owner: SubagentOwnerBinding | undefined) => () => void;',
+  },
+  {
     name: 'ContinuableStart',
     declaration: 'export interface ContinuableStart {\n    readonly childId: SessionId;\n    readonly messageId: MessageId;\n}',
   },
   {
     name: 'ContinuableStartSpec',
-    declaration: 'export interface ContinuableStartSpec {\n    readonly provider: string;\n    readonly label: string;\n    readonly childId?: SessionId;\n    readonly request: Omit<SubagentStartRequest, \'label\' | \'signal\' | \'outputSchema\'>;\n    readonly signal: AbortSignal;\n}',
+    declaration: 'export interface ContinuableStartSpec {\n    readonly provider: string;\n    readonly label: string;\n    readonly childId?: SessionId;\n    readonly messageId?: MessageId;\n    readonly cwd?: string;\n    readonly owner?: SubagentOwnerBinding;\n    readonly settlementDelivery?: SubagentSettlementDelivery;\n    readonly request: Omit<SubagentStartRequest, \'label\' | \'signal\' | \'outputSchema\'>;\n    readonly signal: AbortSignal;\n}',
   },
   {
     name: 'ContinuableSubagentDescriptorData',
-    declaration: 'export interface ContinuableSubagentDescriptorData extends SubagentDescriptorBase {\n    readonly mode: \'continuable\';\n    readonly label: string;\n    readonly agentProvider?: string;\n    readonly agentModel?: string;\n    readonly agentReasoningEffort?: ReasoningEffortId;\n    readonly persona?: string;\n    readonly toolFilter?: ToolRestriction;\n}',
+    declaration: 'export interface ContinuableSubagentDescriptorData extends SubagentDescriptorBase {\n    readonly mode: \'continuable\';\n    readonly label: string;\n    readonly agentProvider?: string;\n    readonly agentModel?: string;\n    readonly agentReasoningEffort?: ReasoningEffortId;\n    readonly persona?: string;\n    readonly toolFilter?: ToolRestriction;\n    readonly settlementDelivery: SubagentSettlementDelivery;\n    readonly owner?: SubagentOwnerBinding;\n}',
   },
   {
     name: 'CordisDynamicPackageId',
@@ -4523,6 +4687,122 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CredentialRef',
     declaration: 'export type CredentialRef = Branded<\'CredentialRef\'>;',
+  },
+  {
+    name: 'DagAmendResult',
+    declaration: 'export interface DagAmendResult extends DagCommandAccepted {\n    readonly amended: readonly {\n        readonly id: DagNodeId;\n        readonly fields: readonly DagNodeDefinitionField[];\n    }[];\n    readonly conflicts: DagWriteResult[\'conflicts\'];\n}',
+  },
+  {
+    name: 'DagCommandAccepted',
+    declaration: 'export interface DagCommandAccepted {\n    readonly accepted: true;\n    readonly revision: number;\n    readonly operationId: DagOperationId;\n}',
+  },
+  {
+    name: 'DagCommandId',
+    declaration: 'export type DagCommandId = Branded<\'DagCommandId\'>;',
+  },
+  {
+    name: 'DagCommitted',
+    declaration: 'export interface DagCommitted {\n    readonly dispatcherSession: SessionId;\n    readonly revision: number;\n    readonly graphGeneration: number;\n    readonly cause: string;\n    readonly snapshot: DagState;\n}',
+  },
+  {
+    name: 'DagIntegrationPolicy',
+    declaration: 'export type DagIntegrationPolicy = \'delegate\' | \'ours\' | \'theirs\';',
+  },
+  {
+    name: 'DagNodeAmendRequest',
+    declaration: 'export interface DagNodeAmendRequest extends DagRevisionGuard {\n    readonly content?: string;\n    readonly brief?: string;\n    readonly deps?: readonly string[];\n    readonly kind?: DagNodeKind;\n    readonly policy?: DagIntegrationPolicy;\n    readonly files?: readonly string[];\n}',
+  },
+  {
+    name: 'DagNodeCommand',
+    declaration: 'export interface DagNodeCommand {\n    readonly id: DagCommandId;\n    readonly operationId: DagOperationId;\n    readonly kind: \'dispatch\' | \'resume\' | \'steer\' | \'stop\' | \'reset\' | \'complete\';\n    readonly state: \'accepted\' | \'running\' | \'settled\';\n    readonly generation: number;\n    readonly bindingGeneration: number;\n    readonly message?: string;\n    readonly target?: string;\n    readonly acceptedRevision: number;\n    readonly outcome?: \'succeeded\' | \'failed\' | \'cancelled\';\n    readonly detail?: string;\n    readonly error?: string;\n}',
+  },
+  {
+    name: 'DagNodeDefinition',
+    declaration: 'export interface DagNodeDefinition {\n    readonly id: DagNodeId;\n    readonly content: string;\n    readonly brief: string;\n    readonly deps: readonly DagNodeId[];\n    readonly kind: DagNodeKind;\n    readonly policy: DagIntegrationPolicy;\n    readonly files: readonly string[];\n}',
+  },
+  {
+    name: 'DagNodeDefinitionField',
+    declaration: 'export type DagNodeDefinitionField = \'content\' | \'brief\' | \'deps\' | \'kind\' | \'policy\' | \'files\';',
+  },
+  {
+    name: 'DagNodeId',
+    declaration: 'export type DagNodeId = Branded<\'DagNodeId\'>;',
+  },
+  {
+    name: 'DagNodeInput',
+    declaration: 'export interface DagNodeInput {\n    readonly id: string;\n    readonly content: string;\n    readonly brief: string;\n    readonly deps: readonly string[];\n    readonly status: DagNodeStatus;\n    readonly kind?: DagNodeKind;\n    readonly policy?: DagIntegrationPolicy;\n    readonly files?: readonly string[];\n}',
+  },
+  {
+    name: 'DagNodeKind',
+    declaration: 'export type DagNodeKind = \'task\' | \'integration\';',
+  },
+  {
+    name: 'DagNodeSettlement',
+    declaration: 'export type DagNodeSettlement = {\n    readonly kind: \'completed\';\n    readonly summary: string;\n    readonly artifacts: readonly JsonValue[];\n} | {\n    readonly kind: \'blocked\';\n    readonly reason: string;\n} | {\n    readonly kind: \'failed\';\n    readonly reason: string;\n} | {\n    readonly kind: \'interrupted\';\n    readonly reason: string;\n};',
+  },
+  {
+    name: 'DagNodeSnapshot',
+    declaration: 'export interface DagNodeSnapshot extends DagNodeDefinition {\n    readonly status: DagNodeStatus;\n    readonly generation: number;\n    readonly bindingGeneration: number;\n    readonly childSessionId?: SessionId;\n    readonly branch?: string;\n    readonly worktree?: string;\n    readonly waveId?: DagWaveId;\n    readonly frozenWaveBase?: string;\n    readonly preparedFrom?: string;\n    readonly preparedHead?: string;\n    readonly dependencyCommits: readonly string[];\n    readonly conflictedFiles: readonly string[];\n    readonly currentOperationId?: DagOperationId;\n    readonly settlement?: DagNodeSettlement;\n    readonly completedCommit?: string;\n    readonly commands: readonly DagNodeCommand[];\n}',
+  },
+  {
+    name: 'DagNodeStatus',
+    declaration: 'export type DagNodeStatus = \'pending\' | \'starting\' | \'in_progress\' | \'completed\' | \'blocked\' | \'failed\' | \'interrupted\';',
+  },
+  {
+    name: 'DagNotice',
+    declaration: 'export interface DagNotice {\n    readonly id: DagNoticeId;\n    readonly kind: \'node-failed\' | \'node-blocked\' | \'node-interrupted\' | \'node-completed\' | \'wave-settled\';\n    readonly revision: number;\n    readonly graphGeneration: number;\n    readonly nodeId?: DagNodeId;\n    readonly waveId?: DagWaveId;\n    readonly text: string;\n    readonly delivered: boolean;\n    readonly deliveredRevision?: number;\n}',
+  },
+  {
+    name: 'DagNoticeId',
+    declaration: 'export type DagNoticeId = Branded<\'DagNoticeId\'>;',
+  },
+  {
+    name: 'DagOperationId',
+    declaration: 'export type DagOperationId = Branded<\'DagOperationId\'>;',
+  },
+  {
+    name: 'DagOperationReceipt',
+    declaration: 'export interface DagOperationReceipt {\n    readonly id: DagOperationId;\n    readonly cause: string;\n    readonly acceptedRevision: number;\n    readonly nodeIds: readonly DagNodeId[];\n}',
+  },
+  {
+    name: 'DagProjection',
+    declaration: 'export interface DagProjection {\n    readonly revision: number;\n    readonly graphGeneration: number;\n    readonly nodes: readonly DagProjectionNode[];\n    readonly counts: DagStatusCounts;\n    readonly readyNodeIds: readonly DagNodeId[];\n    readonly openWaves: readonly DagWaveSnapshot[];\n}',
+  },
+  {
+    name: 'DagProjectionNode',
+    declaration: 'export interface DagProjectionNode {\n    readonly id: DagNodeId;\n    readonly content: string;\n    readonly deps: readonly DagNodeId[];\n    readonly kind: DagNodeKind;\n    readonly policy: DagIntegrationPolicy;\n    readonly files: readonly string[];\n    readonly status: DagNodeStatus;\n    readonly generation: number;\n    readonly branch?: string;\n    readonly waveId?: DagWaveId;\n    readonly dependencyCommits: readonly string[];\n    readonly conflictedFiles: readonly string[];\n    readonly settlement?: DagNodeSettlement;\n    readonly completedCommit?: string;\n}',
+  },
+  {
+    name: 'DagRevisionGuard',
+    declaration: 'export interface DagRevisionGuard {\n    readonly if_revision?: number;\n}',
+  },
+  {
+    name: 'DagState',
+    declaration: 'export interface DagState {\n    readonly version: number;\n    readonly noticeNamespace: string;\n    readonly revision: number;\n    readonly graphGeneration: number;\n    readonly operationCounter: number;\n    readonly nodes: readonly DagNodeSnapshot[];\n    readonly topologicalOrder: readonly DagNodeId[];\n    readonly readyNodeIds: readonly DagNodeId[];\n    readonly counts: DagStatusCounts;\n    readonly waves: readonly DagWaveSnapshot[];\n    readonly activeCommandIds: readonly DagCommandId[];\n    readonly receipts: readonly DagOperationReceipt[];\n    readonly notices: readonly DagNotice[];\n}',
+  },
+  {
+    name: 'DagStatusCounts',
+    declaration: 'export type DagStatusCounts = Readonly<Record<DagNodeStatus, number>>;',
+  },
+  {
+    name: 'DagWaitResult',
+    declaration: 'export interface DagWaitResult {\n    readonly revision: number;\n    readonly notices: readonly DagNotice[];\n    readonly state: DagProjection;\n}',
+  },
+  {
+    name: 'DagWaveId',
+    declaration: 'export type DagWaveId = Branded<\'DagWaveId\'>;',
+  },
+  {
+    name: 'DagWaveSnapshot',
+    declaration: 'export interface DagWaveSnapshot {\n    readonly id: DagWaveId;\n    readonly nodeIds: readonly DagNodeId[];\n    readonly rootBranch: string;\n    readonly rootHead: string;\n    readonly status: \'open\' | \'settled\';\n    readonly pendingNodeIds: readonly DagNodeId[];\n    readonly completedNodeIds: readonly DagNodeId[];\n    readonly failedNodeIds: readonly DagNodeId[];\n}',
+  },
+  {
+    name: 'DagWriteRequest',
+    declaration: 'export interface DagWriteRequest extends DagRevisionGuard {\n    readonly nodes: readonly DagNodeInput[];\n}',
+  },
+  {
+    name: 'DagWriteResult',
+    declaration: 'export interface DagWriteResult extends DagCommandAccepted {\n    readonly dropped: readonly {\n        readonly id: DagNodeId;\n        readonly childSessionId?: SessionId;\n        readonly branch?: string;\n        readonly worktree?: string;\n    }[];\n    readonly amended: readonly {\n        readonly id: DagNodeId;\n        readonly fields: readonly DagNodeDefinitionField[];\n    }[];\n    readonly rewired: readonly {\n        readonly id: DagNodeId;\n        readonly removedDeps: readonly DagNodeId[];\n    }[];\n    readonly conflicts: readonly {\n        readonly ids: readonly [\n            DagNodeId,\n            DagNodeId\n        ];\n        readonly files: readonly string[];\n        readonly reason: \'declared-files-overlap\' | \'contract-pin-overlap\' | \'dependency-file-overlap\';\n    }[];\n}',
   },
   {
     name: 'DeepSeekLlmApiExtensionMap',
@@ -6357,6 +6637,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SubagentCatalog {\n    readonly entries: readonly SubagentListEntry[];\n    readonly parentAvailable: boolean;\n}',
   },
   {
+    name: 'SubagentDeliveryOptions',
+    declaration: 'export interface SubagentDeliveryOptions {\n    readonly source: MessageSource;\n    readonly messageId?: MessageId;\n    readonly signal: AbortSignal;\n}',
+  },
+  {
     name: 'SubagentDescendantListEntry',
     declaration: 'export type SubagentDescendantListEntry = SubagentListEntry & {\n    readonly parentId: SessionId;\n    readonly depth: number;\n};',
   },
@@ -6377,6 +6661,30 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type SubagentListEntry = {\n    readonly kind: \'child\';\n    readonly id: SessionId;\n    readonly activity: \'running\' | \'inactive\';\n    readonly hasChildren: boolean;\n} & ({\n    readonly mode: \'one-shot\';\n    readonly label?: string;\n} | {\n    readonly mode: \'continuable\';\n    readonly label: string;\n}) | {\n    readonly kind: \'diagnostic\';\n    readonly id: SessionId;\n    readonly reason: \'corrupt\' | \'unsupported\' | \'unavailable\';\n};',
   },
   {
+    name: 'SubagentOwnerBinding',
+    declaration: 'export interface SubagentOwnerBinding {\n    readonly controller: string;\n    readonly metadata: JsonValue;\n}',
+  },
+  {
+    name: 'SubagentOwnerController',
+    declaration: 'export interface SubagentOwnerController {\n    stop(request: SubagentOwnerStopRequest): void;\n    redirect(request: SubagentOwnerRedirectRequest): void | Promise<void>;\n    turnSettled(settlement: SubagentOwnerTurnSettlement): void;\n    settled(settlement: SubagentOwnerSettlement): void;\n}',
+  },
+  {
+    name: 'SubagentOwnerRedirectRequest',
+    declaration: 'export interface SubagentOwnerRedirectRequest {\n    readonly binding: SubagentOwnerBinding;\n    readonly child: Agent;\n    readonly message: UserMessage;\n    readonly redirect: (replacement?: UserMessage) => void;\n}',
+  },
+  {
+    name: 'SubagentOwnerSettlement',
+    declaration: 'export interface SubagentOwnerSettlement {\n    readonly binding: SubagentOwnerBinding;\n    readonly childId: SessionId;\n    readonly parentSessionId: SessionId;\n    readonly stopReason: SubagentResult[\'stopReason\'];\n    readonly messageId?: MessageId;\n    readonly output?: ContentBlock[];\n    readonly error?: string;\n}',
+  },
+  {
+    name: 'SubagentOwnerStopRequest',
+    declaration: 'export interface SubagentOwnerStopRequest {\n    readonly binding: SubagentOwnerBinding;\n    readonly child: Agent;\n    readonly authority: SubagentInterruptAuthority;\n    readonly stop: () => void;\n}',
+  },
+  {
+    name: 'SubagentOwnerTurnSettlement',
+    declaration: 'export interface SubagentOwnerTurnSettlement {\n    readonly binding: SubagentOwnerBinding;\n    readonly child: Agent;\n    readonly parentSessionId: SessionId;\n    readonly turn: number;\n    readonly stopReason: SubagentResult[\'stopReason\'];\n    readonly messageId: MessageId;\n    readonly error?: string;\n    readonly stop: () => void;\n}',
+  },
+  {
     name: 'SubagentPromptReceipt',
     declaration: 'export interface SubagentPromptReceipt {\n    readonly messageId: MessageId;\n}',
   },
@@ -6391,6 +6699,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SubagentProvider',
     declaration: 'export interface SubagentProvider {\n    readonly name: string;\n    readonly capabilities: SubagentCapabilities;\n    readonly inheritsParentContext: boolean;\n    readonly agentRouteDefaults?: Readonly<{\n        provider: string;\n        model: string;\n    }>;\n    start(request: ResolvedSubagentStartRequest): Promise<SubagentRun>;\n    prepareContinuable?(request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>;\n}',
+  },
+  {
+    name: 'SubagentRedirectOptions',
+    declaration: 'export interface SubagentRedirectOptions extends SubagentDeliveryOptions {\n    readonly cause: AgentCancelCause;\n}',
   },
   {
     name: 'SubagentResult',
@@ -6414,15 +6726,27 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SubagentRuntime',
-    declaration: 'export class SubagentRuntime extends TypertRemoteService {\n    static Config: z<Config>;\n    constructor(ctx: Context, config: Config);\n    resolveMaxDepth(configured?: number | \'provider-managed\'): number | undefined;\n    async startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart>;\n    async sendMessage(sender: Agent, targetId: SessionId, content: ContentBlock[], options: SubagentSendMessageOptions): Promise<MessageId>;\n    interrupt(targetSessionId: SessionId, authority: SubagentInterruptAuthority): void;\n    async drainContinuableDescendants(parents: readonly Agent[]): Promise<void>;\n    async drainContinuableChildren(parent: Agent, childIds: readonly SessionId[]): Promise<void>;\n    listChildren(parentSessionId: SessionId, signal?: AbortSignal): Promise<SubagentListEntry[]>;\n    listDescendants(rootSessionId: SessionId, signal?: AbortSignal): Promise<SubagentDescendantListEntry[]>;\n    @Remote(\'list\')\n    async remoteExportList(parentSessionId: SessionId, signal: AbortSignal): Promise<SubagentCatalog>;\n    @Remote(\'prompt\')\n    async prompt(request: SubagentPromptRequest, signal: AbortSignal): Promise<SubagentPromptReceipt>;\n    @Remote(\'interruptByParent\')\n    interruptByParent(childSessionId: SessionId, parentSessionId: SessionId, mode: \'continuable\'): SubagentInterruptReceipt;\n    registerProvider(provider: SubagentProvider): () => void;\n    getProvider(name: string): SubagentProvider | undefined;\n    list(): string[];\n    async start(name: string, re /* …truncated — full shape in source */',
+    declaration: 'export class SubagentRuntime extends TypertRemoteService {\n    static Config: z<Config>;\n    constructor(ctx: Context, config: Config);\n    resolveMaxDepth(configured?: number | \'provider-managed\'): number | undefined;\n    async startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart>;\n    async sendMessage(sender: Agent, targetId: SessionId, content: ContentBlock[], options: SubagentSendMessageOptions): Promise<MessageId>;\n    async followup(parent: Agent, childId: SessionId, content: ContentBlock[], options: SubagentDeliveryOptions): Promise<MessageId>;\n    async redirect(parent: Agent, childId: SessionId, content: ContentBlock[], options: SubagentRedirectOptions): Promise<MessageId>;\n    registerOwnerController(name: string, controller: SubagentOwnerController): () => void;\n    registerContinuableSetup(contribution: ContinuableSetupContribution): () => void;\n    interrupt(targetSessionId: SessionId, authority: SubagentInterruptAuthority): void;\n    async drainContinuableDescendants(parents: readonly Agent[]): Promise<void>;\n    async drainContinuableChildren(parent: Agent, childIds: readonly SessionId[]): Promise<void>;\n    listChildren(parentSessionId: SessionId, signal?: AbortSignal): Promise<SubagentListEntry[]>;\n    listDescendants(rootSessionId: SessionId, signal?: AbortSignal): Promise<SubagentDescendantListEntry[]>;\n    @Remote(\'list\')\n    async remoteExportList(parentSessionId: SessionId, signal: AbortSignal): Promise<SubagentCatalog>;\n    @Remote(\'p /* …truncated — full shape in source */',
   },
   {
     name: 'SubagentSendMessageOptions',
     declaration: 'export interface SubagentSendMessageOptions {\n    readonly signal: AbortSignal;\n}',
   },
   {
+    name: 'SubagentSettlementDelivery',
+    declaration: 'export type SubagentSettlementDelivery = \'adaptive\' | \'quiet\' | \'none\';',
+  },
+  {
     name: 'SubagentStartRequest',
     declaration: 'export interface SubagentStartRequest {\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly agentOptions?: AgentOptions;\n    readonly outputSchema?: ObjectJsonSchema;\n    readonly maxDepth?: number;\n    readonly toolFilter?: ToolRestriction;\n    readonly persona?: string;\n}',
+  },
+  {
+    name: 'SubagentSteerReceipt',
+    declaration: 'export interface SubagentSteerReceipt {\n    readonly messageId: MessageId;\n}',
+  },
+  {
+    name: 'SubagentSteerRequest',
+    declaration: 'export type SubagentSteerRequest = Omit<SubagentPromptRequest, \'delivery\'>;',
   },
   {
     name: 'SubagentStopReason',
@@ -7233,6 +7557,7 @@ export const INHERITED_CTX_API: readonly InheritedApiEntry[] = [
   { name: 'ctx.root / ctx.fiber / ctx.registry / ctx.reflect / ctx.events / ctx.logger', summary: 'Ambient handles onto the running context graph.' },
   { name: 'ctx.timer (+ interval / timeout / throttle / debounce)', summary: 'Disposable timer helpers. The `timer` key is provided at runtime; the four supported helpers are mixed onto ctx directly (declared via Pick).' },
   { name: 'ctx.loader', summary: 'The config Loader that booted the app (present under the loader).' },
+  { name: 'ctx.hmr', summary: 'The hot-module-reload watcher (present under the hmr plugin).' },
 ]
 
 function referencedTypeClosure(seeds: readonly string[]): TypeApiEntry[] {

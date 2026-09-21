@@ -1,4 +1,5 @@
 /** File-extension preview registrations; component dispatch belongs to the keyed document slot. */
+import type {} from '@deepseek-ai/cordis'
 import { notifySubscribers } from '@deepseek-ai/dsh-client-store'
 import { documentFileName, matchedSuffixLength, normalizeSuffix } from './suffix.ts'
 
@@ -124,5 +125,12 @@ export class DocumentPreviewRegistry {
   private publish(): void {
     this.snapshot = [...this.registered.values()]
     notifySubscribers(this.listeners, '[document-previews] registry')
+  }
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** File-extension renderer registrations, independent from their keyed document bodies. */
+    documentPreviews: DocumentPreviewRegistry
   }
 }

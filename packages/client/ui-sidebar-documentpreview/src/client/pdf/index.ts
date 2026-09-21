@@ -1,7 +1,9 @@
 /** Builtin PDF registration through document metadata and the keyed body slot. */
 import type { Context } from '@deepseek-ai/cordis'
+// Type-only: the declaration merges behind ctx.locale, ctx.slots, and ctx.documentPreviews.
+import type {} from '@deepseek-ai/dsh-client-locale/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { retainDocumentTabs } from '../document/tab-lifetime.ts'
-import type {} from '../index.ts'
 import type { DocumentPreviewDefinition } from '../document/registry.ts'
 import type { PdfBodyInjected } from './pdf.tsx'
 import { LazyPdfBody } from './LazyPdfBody.tsx'

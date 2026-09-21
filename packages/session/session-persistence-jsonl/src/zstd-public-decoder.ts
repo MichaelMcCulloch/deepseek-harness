@@ -4,7 +4,7 @@
  */
 
 import { zstdDecompressSync } from 'node:zlib'
-import type { ZstdFrameDecoder, ZstdFrameRange } from './zstd.ts'
+import type { ZstdFrameDecoder, ZstdFrameRange } from './types.ts'
 
 /** Multi-frame adapter built exclusively from Node's supported one-shot API. */
 export class PublicZstdFrameDecoder implements ZstdFrameDecoder {

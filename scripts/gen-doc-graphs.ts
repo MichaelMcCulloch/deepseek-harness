@@ -68,6 +68,7 @@ const GROUP_ORDER = [
   'core',
   'typert',
   'goal',
+  'dag',
   'experimental',
   'process',
   'bash',
@@ -542,6 +543,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Folds revisioned objective state from the session log and keeps live continuation activation process-local.',
   },
   {
+    key: 'dag',
+    pkg: 'dag',
+    title: 'Durable DAG orchestration domain',
+    mode: 'core',
+    consumers: ['tool-dag'],
+    note: 'Commits complete revisioned graph snapshots before it schedules fenced Git, child, notice, and lifecycle effects.',
+  },
+  {
     key: 'ssh',
     pkg: 'ssh',
     title: 'POSIX SSH connection owner',
@@ -977,7 +986,7 @@ export class EventRelationCollector {
   ) {
     this.contextType = this.declaredType('vendor/cordis/src/context.ts', 'Context')
     this.agentDispatchType = this.declaredType('packages/core/agent/src/dispatch.ts', 'AgentEventDispatch')
-    this.eventsServiceType = this.declaredType('vendor/cordis/src/events.ts', 'EventsService')
+    this.eventsServiceType = this.declaredType('vendor/cordis/src/context.ts', 'EventsService')
     this.packageSourceFiles = new Set(sources.map(source => source.sourceFile))
   }
 

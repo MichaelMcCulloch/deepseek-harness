@@ -341,6 +341,11 @@
     - id: ui-goal
       name: '@deepseek-ai/dsh-client-ui-goal'
 
+    # DAG surface: the read-only DAG dock in the input dock over the session's
+    # dag projection.
+    - id: ui-dag
+      name: '@deepseek-ai/dsh-client-ui-dag'
+
     # The feedback surface: Like/Dislike in the assistant-message action
     # strip, the feedback dialog behind Dislike and /feedback with its
     # acknowledgement toast, over the messageFeedback and sessionFeedback Remotes.
@@ -497,6 +502,9 @@
   disabled: true
 
 - id: tool-todo
+  disabled: true
+
+- id: tool-dag
   disabled: true
 
 - id: tool-web

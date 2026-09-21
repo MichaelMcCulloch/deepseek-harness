@@ -92,6 +92,7 @@ export interface Config {
 | [`src/index.ts`](src/index.ts) | 插件入口：pre-step 监听器、`tools/result` touch 跟踪、inbox 组合 |
 | [`src/config.ts`](src/config.ts) | `Config` schema、预算解析、基线标识 |
 | [`src/files.ts`](src/files.ts) | 候选发现、项目根搜索、有界流式读取 |
+| [`src/types.ts`](src/types.ts) | 发现、对账与渲染共用的指令文件记录 |
 | [`src/render.ts`](src/render.ts) | 指令渲染、预算截断、变更记录 |
 | [`src/state.ts`](src/state.ts) | 持久消息来源、版本／digest 缓存、对账 |
 | [`src/digest.ts`](src/digest.ts) | SHA-1 内容标识与每目录重复键 |

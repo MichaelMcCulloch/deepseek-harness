@@ -3,7 +3,7 @@
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
-import type { ToolDefinition, ToolExecution, ToolExecutionResult, ToolRunContext, ToolResult } from './index.ts'
+import type { ToolDefinition, ToolExecution, ToolExecutionResult, ToolRunContext, ToolResult } from './pipeline-types.ts'
 import { assertSupportedJsonSchema, isJsonSchemaRecord, isPlainJsonArray, JsonSchemaError, validateJsonSchemaValue } from './json-schema.ts'
 import type { JsonSchemaNode, JsonSchemaScalar, ObjectJsonSchema } from './json-schema.ts'
 import type { ToolCallView, ToolResultView } from './presentation.ts'

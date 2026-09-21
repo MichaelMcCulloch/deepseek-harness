@@ -1,0 +1,5 @@
+- group:
+  - text: "Task Graph Pending: 2 Ready: 1"
+  - list:
+    - listitem: "prepare: Prepare the implementation Pending"
+    - listitem: "verify: Verify the implementation Pending"

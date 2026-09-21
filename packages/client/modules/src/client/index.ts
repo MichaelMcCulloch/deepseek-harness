@@ -12,20 +12,20 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Loader } from '@deepseek-ai/cordis-plugin-loader'
-import { ClientModuleSystem } from './system.ts'
+import { ClientModuleSystem, type ClientModuleLoaderTarget } from './system.ts'
 import { parseBootManifest } from './manifest.ts'
 import type {
-  ClientBootstrapModule, ClientModuleCreateOptions, ClientModuleLoader, ClientModuleLoaderTarget,
+  ClientBootstrapModule, ClientModuleCreateOptions, ClientModuleLoader,
 } from './manifest.ts'
 
 export { ClientModuleSystem }
 export { tearDownEntryFiber } from './entry-lifecycle.ts'
 export type { ClientEntries, ClientEntryState } from './entries.ts'
+export type { ClientModuleLoaderTarget, ClientModuleSystemOptions, DshWindow } from './system.ts'
 export { exactPackageSpecifier, parseBootManifest, parseDshClient, stripClientSuffix } from './manifest.ts'
 export type {
   BootManifest, BootModuleRow, BootPluginRow, ClientBootstrapModule, ClientBundleRegistration,
-  ClientModuleCreateOptions, ClientModuleLoader, ClientModuleLoaderTarget, ClientModuleRecord,
-  ClientModuleSystemOptions, DshWindow,
+  ClientModuleCreateOptions, ClientModuleLoader, ClientModuleRecord,
   WebBootEntry, WebBootGraph,
 } from './manifest.ts'
 

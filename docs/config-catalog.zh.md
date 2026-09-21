@@ -573,6 +573,35 @@ export interface Config {
 
 来源：[`packages/credentials/credentials-local/src/index.ts:64`](../packages/credentials/credentials-local/src/index.ts)
 
+<a id="deepseek-aidsh-dag"></a>
+
+## `@deepseek-ai/dsh-dag`
+
+需要：`agents` · `subagents` · `subprocess` · `sessions`
+
+```ts config-catalog
+/** Deployment choices for the local DAG runtime. */
+export interface Config extends DagRuntimeConfig {}
+
+/** Deployment choices accepted by the local DAG runtime. */
+export interface DagRuntimeConfig {
+  /** Optional DSH home. A blank value uses normal DSH_HOME resolution. */
+  readonly dshHome?: string
+  /** Git executable name or absolute path. */
+  readonly gitExecutable?: string
+  /** Deadline for each Git process. */
+  readonly commandDeadlineMs?: number
+  /** TERM-to-KILL grace for each Git process. */
+  readonly terminationGraceMs?: number
+  /** Per-stream collected Git output limit. */
+  readonly outputLimitBytes?: number
+  /** Continuable in-process provider used for DAG children. */
+  readonly subagentProvider?: string
+}
+```
+
+来源：[`packages/dag/dag/src/index.ts:107`](../packages/dag/dag/src/index.ts)
+
 <a id="deepseek-aidsh-experimental-agent-team"></a>
 
 ## `@deepseek-ai/dsh-experimental-agent-team`
@@ -1678,7 +1707,7 @@ export interface StdioConfig {
   env: Record<string, string>
   /** Working directory for the child process. */
   cwd: string
-  /** Timeout per tool call or resource request in milliseconds. */
+  /** Per-tool-call timeout in milliseconds. */
   toolCallTimeoutMs: number
   /** Fail plugin activation when the initial connection or tool synchronization fails. */
   failOnStartupError: boolean
@@ -1702,7 +1731,7 @@ export interface StreamableHttpConfig {
   url: string
   /** Additional headers attached to MCP requests. */
   headers: Record<string, string>
-  /** Timeout per tool call or resource request in milliseconds. */
+  /** Per-tool-call timeout in milliseconds. */
   toolCallTimeoutMs: number
   /** Fail plugin activation when the initial connection or tool synchronization fails. */
   failOnStartupError: boolean
@@ -1725,7 +1754,7 @@ export interface ReconnectConfig {
 }
 ```
 
-来源：[`packages/mcp/mcp-client/src/index.ts:104`](../packages/mcp/mcp-client/src/index.ts)
+来源：[`packages/mcp/mcp-client/src/index.ts:53`](../packages/mcp/mcp-client/src/index.ts)
 
 <a id="deepseek-aidsh-message-feedback"></a>
 
@@ -2674,7 +2703,7 @@ export interface Config {
 }
 ```
 
-来源： [`packages/subagent/subagent/src/index.ts:190`](../packages/subagent/subagent/src/index.ts)
+来源： [`packages/subagent/subagent/src/index.ts:207`](../packages/subagent/subagent/src/index.ts)
 
 <a id="deepseek-aidsh-subagent-acp"></a>
 
@@ -3498,7 +3527,7 @@ export interface Config {
 export type ToolPresentationMode = 'native' | 'ptc' | 'both'
 ```
 
-来源：[`packages/core/tools/src/index.ts:656`](../packages/core/tools/src/index.ts)
+来源：[`packages/core/tools/src/index.ts:400`](../packages/core/tools/src/index.ts)
 
 <a id="deepseek-aidsh-typert-loader"></a>
 
@@ -3790,7 +3819,8 @@ export interface Config {
 - `@deepseek-ai/dsh-client-ui-commands`（[`packages/client/ui-commands/src/index.ts`](../packages/client/ui-commands/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-conversation`（[`packages/client/ui-conversation/src/index.ts`](../packages/client/ui-conversation/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-cordis`（[`packages/extensions/ui-cordis/src/index.ts`](../packages/extensions/ui-cordis/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-deliverables` — 需要 `systemPrompt` · `connection` · `sessionQuery` · `sessionController`（[`packages/client/ui-deliverables/src/index.ts`](../packages/client/ui-deliverables/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-dag`（[`packages/client/ui-dag/src/index.ts`](../packages/client/ui-dag/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-deliverables` — 需要 `systemPrompt` · `connection` · `sessionQuery` · `sessionController` · `workspaceFiles` · `fs` · `sandboxPolicy` · `workspaceChanges`（[`packages/client/ui-deliverables/src/index.ts`](../packages/client/ui-deliverables/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-directory-picker-browse`（[`packages/client/ui-directory-picker-browse/src/index.ts`](../packages/client/ui-directory-picker-browse/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-directory-picker-native`（[`packages/client/ui-directory-picker-native/src/index.ts`](../packages/client/ui-directory-picker-native/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-goal`（[`packages/client/ui-goal/src/index.ts`](../packages/client/ui-goal/src/index.ts)）
@@ -3826,7 +3856,7 @@ export interface Config {
 - `@deepseek-ai/dsh-client-ui-user-questions`（[`packages/client/ui-user-questions/src/index.ts`](../packages/client/ui-user-questions/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-workflow-run`（[`packages/client/ui-workflow-run/src/index.ts`](../packages/client/ui-workflow-run/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-workspace`（[`packages/client/ui-workspace/src/index.ts`](../packages/client/ui-workspace/src/index.ts)）
-- `@deepseek-ai/dsh-command-compact` — 需要 `commands` · `compact`（[`packages/compaction/command-compact/src/index.ts`](../packages/compaction/command-compact/src/index.ts)）
+- `@deepseek-ai/dsh-command-compact` — 需要 `commands` · `compaction`（[`packages/compaction/command-compact/src/index.ts`](../packages/compaction/command-compact/src/index.ts)）
 - `@deepseek-ai/dsh-command-feedback` — 需要 `commands`（[`packages/feedback/command-feedback/src/index.ts`](../packages/feedback/command-feedback/src/index.ts)）
 - `@deepseek-ai/dsh-command-goal` — 需要 `commands` · `goals`（[`packages/goal/command-goal/src/index.ts`](../packages/goal/command-goal/src/index.ts)）
 - `@deepseek-ai/dsh-commands`（[`packages/interaction/commands/src/index.ts`](../packages/interaction/commands/src/index.ts)）
@@ -3858,9 +3888,10 @@ export interface Config {
 - `@deepseek-ai/dsh-subprocess-local`（[`packages/subprocess/subprocess-local/src/index.ts`](../packages/subprocess/subprocess-local/src/index.ts)）
 - `@deepseek-ai/dsh-subprocess-ssh` — 需要 `ssh`（[`packages/ssh/subprocess-ssh/src/index.ts`](../packages/ssh/subprocess-ssh/src/index.ts)）
 - `@deepseek-ai/dsh-terminal`（[`packages/terminal/terminal/src/index.ts`](../packages/terminal/terminal/src/index.ts)）
-- `@deepseek-ai/dsh-tool-ask-user` — 需要 `tools` · `userInteraction`（[`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts)）
+- `@deepseek-ai/dsh-tool-ask-user` — 需要 `tools` · `userQuestions`（[`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts)）
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — 需要 `tools`（[`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts)）
 - `@deepseek-ai/dsh-tool-cordis` — 需要 `tools` · `systemPrompt` · `cordisInspect`（[`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts)）
+- `@deepseek-ai/dsh-tool-dag` — 需要 `tools` · `dag` · `systemPrompt`（[`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts)）
 - `@deepseek-ai/dsh-tool-subagent-control` — 需要 `tools` · `subagents`（[`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts)）
 - `@deepseek-ai/dsh-user-questions`（[`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts)）
 - `@deepseek-ai/dsh-webhook` — 需要 `agents` · `agentDefaultModel` · `agentPresets` · `permissionPresets` · `sessionTitle` · `workspaceRegistry`（[`packages/webhook/webhook/src/index.ts`](../packages/webhook/webhook/src/index.ts)）

@@ -52,13 +52,6 @@ function cordisModuleBodies(sf: ts.SourceFile): ts.ModuleBlock[] {
   return bodies
 }
 
-/** The FIRST cordis module-merge body in `sf`, or null without one — for the
- * vendor core-API renderer whose input files carry exactly one merge; the
- * exhaustiveness scan uses {@link cordisModuleBodies} to read them all. */
-export function cordisModuleBody(sf: ts.SourceFile): ts.ModuleBlock | null {
-  return cordisModuleBodies(sf)[0] ?? null
-}
-
 /**
  * Every `key: Type` property a `declare module '@deepseek-ai/cordis'` Context merge
  * declares in one module body.

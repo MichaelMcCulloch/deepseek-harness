@@ -53,7 +53,7 @@ async function harness(withJobs: boolean): Promise<{
     ctx,
     send: () => {},
     followup: () => {},
-    steer: () => {},
+    steer: () => {}, redirect: () => {},
     inject: () => {},
     cancel: () => {},
     runMaintenance: task => task(new AbortController().signal),

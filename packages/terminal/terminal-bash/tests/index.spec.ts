@@ -59,7 +59,7 @@ function agent(ctx: Context, cwd?: string): Agent {
     status: 'idle',
     ctx,
     send: () => {},
-    followup: () => {}, steer: () => {}, inject: () => {}, cancel() {},
+    followup: () => {}, steer: () => {}, redirect: () => {}, inject: () => {}, cancel() {},
     runMaintenance: task => task(new AbortController().signal),
     whenIdle: () => Promise.resolve(),
   }
@@ -661,7 +661,7 @@ describe('terminal-bash plugin shape', () => {
       status: 'idle',
       ctx: ownerFiber.ctx,
       send: () => {},
-      followup: () => {}, steer: () => {}, inject: () => {}, cancel() {},
+      followup: () => {}, steer: () => {}, redirect: () => {}, inject: () => {}, cancel() {},
       runMaintenance: task => task(new AbortController().signal),
       whenIdle: () => Promise.resolve(),
     }
@@ -711,7 +711,7 @@ describe('terminal-bash plugin shape', () => {
       status: 'idle',
       ctx: ownerFiber.ctx,
       send: () => {},
-      followup: () => {}, steer: () => {}, inject: () => {}, cancel() {},
+      followup: () => {}, steer: () => {}, redirect: () => {}, inject: () => {}, cancel() {},
       runMaintenance: task => task(new AbortController().signal),
       whenIdle: () => Promise.resolve(),
     }

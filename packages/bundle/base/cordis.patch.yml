@@ -299,6 +299,17 @@
     - id: goal
       name: '@deepseek-ai/dsh-goal'
 
+    # Durable DAG state, local Git effects, projection, and owner-controlled
+    # continuable children stay on the host plane.
+    - id: dag
+      name: '@deepseek-ai/dsh-dag'
+      config:
+        gitExecutable: git
+        commandDeadlineMs: 120000
+        terminationGraceMs: 5000
+        outputLimitBytes: 8388608
+        subagentProvider: spawn
+
     - id: goal-round-driver
       name: '@deepseek-ai/dsh-goal-round-driver'
 
@@ -376,6 +387,11 @@
     - id: ptc-runtime
       name: '@deepseek-ai/dsh-ptc-runtime-node'
 
+    # One host-plane continuable setup installs child-only DAG tools only for
+    # children whose durable owner is the DAG service.
+    - id: tool-dag-child
+      name: '@deepseek-ai/dsh-tool-dag/child'
+
     - id: workflow-ptc
       name: '@deepseek-ai/dsh-workflow-ptc'
       config:
@@ -417,6 +433,9 @@
       name: '@deepseek-ai/dsh-tool-todo'
       config:
         allowParallelInProgress: true
+
+    - id: tool-dag
+      name: '@deepseek-ai/dsh-tool-dag'
 
     # Persisted same-session goals reach the model and the slash menu here; the
     # domain, driver, and `/goal` command are above.

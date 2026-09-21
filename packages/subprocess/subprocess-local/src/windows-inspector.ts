@@ -12,7 +12,7 @@
 import { spawnSync } from 'node:child_process'
 import type { SubprocessTerminalSignal } from '@deepseek-ai/dsh-subprocess'
 import { createLazyRequire } from '@deepseek-ai/dsh-lazy-require'
-import type { ProcessIdentity, ProcessInspector, ProcessSnapshot } from './process-inspector.ts'
+import type { ProcessIdentity, ProcessInspector, ProcessSnapshot } from './types.ts'
 
 type Koffi = typeof import('koffi')['default']
 type KoffiType = ReturnType<Koffi['pointer']>

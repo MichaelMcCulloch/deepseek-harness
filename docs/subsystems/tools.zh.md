@@ -4,7 +4,7 @@
 
 [dsh-tools](../../packages/core/tools) 的工具流水线。[core.md](core.zh.md) 介绍了核心包共用、用于编写流水线的类型 `ToolDefinition`；面向模型的 [`ToolSchema`](llm-streaming.zh.md#the-model-request-and-result) 协议类型与模型请求一起声明。本页记录 `ToolDefinition` 的每个字段、用于构建它的类型化 schema DSL、带守卫的执行类型和 UI 展示类型。
 
-源码：[`packages/core/tools/src/index.ts`](../../packages/core/tools/src/index.ts) · [`packages/core/tools/src/schema.ts`](../../packages/core/tools/src/schema.ts) · [`packages/core/tools/src/presentation.ts`](../../packages/core/tools/src/presentation.ts)
+源码：[`packages/core/tools/src/index.ts`](../../packages/core/tools/src/index.ts) · [`packages/core/tools/src/pipeline-types.ts`](../../packages/core/tools/src/pipeline-types.ts) · [`packages/core/tools/src/schema.ts`](../../packages/core/tools/src/schema.ts) · [`packages/core/tools/src/presentation.ts`](../../packages/core/tools/src/presentation.ts)
 
 ## `ToolDefinition` — 一个已注册的工具
 
@@ -166,6 +166,10 @@ interface ToolRestriction {
   readonly deny?: readonly string[]
 }
 ```
+
+## 持久命令 acceptance
+
+工具可以把异步工作转移给另一个持久 owner，而不等待该工作。转移点必须明确：工具先把命令提交到持久状态，再返回包含其 revision 与 operation identity 的 acceptance 值。结果文本必须说明命令已接受，不能说明工作已完成。独立 wait 或 observation 工具报告后续 settlement；存在可取消 wait 时，system prompt 必须禁止状态轮询。原生 DAG 工具对 Git 与可续行子级 effect 使用此形式；其通用 presentation 不暴露文件位置，因为已接受意图不是已完成文件操作。
 
 ## 执行：可扩展的 waterfall（瀑布式事件）加单调策略
 

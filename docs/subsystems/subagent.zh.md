@@ -133,7 +133,7 @@ persisted Session
        -> zero or more owned child Activations
 ```
 
-`SubagentRuntime.startContinuable()` 会预留稳定的子 agent id，对版本化的 `subagent/descriptor` payload 建立快照，向指定提供方索取其分离的 `ContinuableCreateSpec`，通过私有的 activation-owner 作用域创建子 Agent，建立任何可继续父级的所有权，并提交初始提示词。当收件箱（inbox）准入产出消息 id 时，它以 `{ childId, messageId }` resolve——无需等待轮次开始，也无需等待消息进入会话日志。在该准入之前的任何失败都会以两个 id 都不返回的方式 reject，并 dispose（资源释放）任何已创建的 handle，回滚 Activation 与父级所有权。
+`SubagentRuntime.startContinuable()` 会预留或接受调用方预留的稳定子 agent id 与初始消息 id，对版本化的 `subagent/descriptor` payload 建立快照，向指定提供方索取其分离的 `ContinuableCreateSpec`，通过私有的 activation-owner 作用域创建子 Agent，建立任何可继续父级的所有权，并提交初始提示词。可选 `cwd` 必须为绝对路径；它保存在子会话 metadata 中，并在冷恢复时复用。可选持久 owner metadata 与通用 settlement notice 策略保存在 descriptor 中。当收件箱（inbox）准入产出消息 id 时，它以 `{ childId, messageId }` resolve——无需等待轮次开始，也无需等待消息进入会话日志。在该准入之前的任何失败都会以两个 id 都不返回的方式 reject，并 dispose（资源释放）任何已创建的 handle，回滚 Activation 与父级所有权。
 
 `SubagentRuntime.sendMessage()` 是唯一由模型编写消息的操作。它接收确切在线 sender 与目标 id，只允许直接 parent 或直接可继续 child，自行推导 sender 来源信息，并根据目标 child 的 Activation 驻留状态路由：
 
@@ -147,13 +147,15 @@ persisted Session
 
 Agent 收件箱是唯一队列。每条 Agent 消息都使用 `Agent.steer()`：空闲目标会启动一个轮次，运行中目标则在最近的 step 边界领取消息。浏览器 `subagent.prompt` Remote 会另行通过同一条内部准入路径携带 `delivery: 'queue' | 'steer'`；Queue 开启后续 FIFO 轮次，Steer 保留 Agent loop 的 best-effort 最近 step 行为以及消息的人类来源。投递成功会返回被接受的 `MessageId`；既有的 `agent/inbox/inserted`、`agent/inbox/claimed` 与 `agent/inbox/discarded` 事件仍是消息生命周期的观测点，继续执行层不定义第二条队列。
 
+两种继续执行操作与上述 Agent 消息路径并存。`SubagentRuntime.followup()` 调用 `Agent.followup()`，因此驻留的子级先完成当前轮次，再把消息作为较后的 FIFO 轮次准入；`SubagentRuntime.redirect()` 调用 `Agent.redirect()`，在保留 inbox 的情况下取消活跃工作，并在已排队普通轮次前插入一个替换普通轮次。两者都以同一个确切在线的直接 parent 授权，都会冷恢复缺席的子级，并返回被接受的 `MessageId`；可选的调用方指定 `messageId` 使重复投递幂等。`steer_agent` 控制工具与 [DAG 调度器](dag.zh.md)使用 redirect，DAG 调度器还使用 follow-up 向自己拥有的子级投递更新的轮次。owner-bound 子级会在 Agent 操作运行前通过其 controller 路由 redirect 准入。
+
 权限来自确切在线 sender。parent 到 child 的投递要求目标的 `SessionHeader.parentSession` 指向 sender；child 到 parent 的投递要求 sender 的驻留 Activation 指向目标。sibling、相隔多于一条边的 ancestor、self-target、陈旧 Agent 对象与一次性 child 都会被拒绝。每条已接受消息都以 `Agent <sender-id> sent a message:` 作为前缀，并记录 `AgentMessageSource`；来源信息记录 sender，但不授予权限。
 
-对于 `startContinuable()`、`sendMessage()` 与浏览器 prompt 投递，调用方 signal 仅在收件箱接受之前掌管查找、物化与准入。此后管理器独立掌管该 Activation：之后的调用方取消既不会取消已接受的轮次，也不会 dispose 子 agent。公开 subagent 服务不暴露由调用方选择的 Agent 消息调度；浏览器人类 Queue 与 Steer 仍是内部适配器选择。
+对于 `startContinuable()`、`sendMessage()`、`followup()`、`redirect()` 与浏览器 prompt 投递，调用方 signal 仅在收件箱接受之前掌管查找、物化与准入。此后管理器独立掌管该 Activation：之后的调用方取消既不会取消已接受的轮次，也不会 dispose 子 agent。委派控制工具使用这些具名操作，而不是由调用方选择的调度模式：`send_message` 通过 `sendMessage()` 准入，`steer_agent` 通过 `redirect()` 替换当前工作。浏览器人类 Queue 与 Steer 仍是内部适配器选择。
 
 在线 queue occurrence 变更属于 Session 域。只有在线 subagent-owned Agent 的当前 projection identity 为 continuable，且其 descriptor 序号位于该 child 自身的非 seed suffix 时，`session.updateQueue` 才会接纳普通 Edit、Remove 与 QueueDock Steer。Identity projection 以 last-wins 方式折叠 descriptor，因此 child descriptor 会覆盖 fork lineage 保留的 descriptor；own-suffix 序号检查会阻止仅来自 seed 的祖先 identity 授权变更。One-shot、缺失、未知、损坏或冷 child 会被拒绝，queue 变更绝不会冷恢复 child。这些变更以目标 Session id 作为人类权限，包括待处理 `nextStep` steering 或注入 context。Steer 要求 queued `MessageId`，且 command 开始时 Agent 必须报告 running；准入后发生取消时，会使用 Agent 已接受的唤醒 `nextTurn` fallback。Edit 会在同一个 `MessageId` 下改写内容，且 Edit 与 Steer 都会同步完成 Inbox 变更，因此 settlement 只会观察最终状态。`agent/inbox/claimed` 与 `agent/inbox/discarded` 都会唤醒 watcher 重新读取是否仍有待处理 occurrence；这样，直接 Agent 投递可以恢复停放工作，而移除最后一个停放 occurrence 可使 idle child 结算。[人类 inbox 控制 Agent Note](../../.agents/notes/implemented/feature/2026-08-27-continuable-subagent-human-inbox-control.zh.md)拥有这些语义。
 
-`SubagentRuntime.interrupt(targetSessionId, authority)` 是唯一的公开停止操作：它同步完成鉴权，对在线目标发出 `Agent.cancel(cause, { keepInbox: true })`，然后不等待完全停稳即返回。Activation、其尚未领取的待处理 inbox 工作与已发布的后代均不受影响；已被领取进入中断轮次的工作不会重新入队。被中断的 driver 进入 idle 后，一次唤醒发送会恢复被暂停的 FIFO 队列。不存在的目标——未知、一次性或已结算——以及未绑定管理器的组合是被接受的 no-op。对在线目标，错误的 parent 地址或不在其在线祖先链中的调用方会以 `UNAUTHORIZED` 拒绝；陈旧的 ancestor 对象和指向自身的 ancestor 请求会在查找目标前拒绝。
+`SubagentRuntime.interrupt(targetSessionId, authority)` 是公开停止操作：它同步完成鉴权，并在不等待完全停稳的情况下返回。普通子级接收 `Agent.cancel(cause, { keepInbox: true })`；owner-bound 子级则把已授权请求委派给其已注册的 owner controller，该 controller 可以先提交 owner 状态，再调用同一个 cancel closure。Activation、其尚未领取的待处理 inbox 工作与已发布的后代均不受影响；已被领取进入中断轮次的工作不会重新入队。被中断的 driver 进入 idle 后，一次唤醒发送会恢复被暂停的 FIFO 队列。不存在的目标——未知、一次性或已结算——以及未绑定管理器的组合是被接受的 no-op。对在线目标，错误的 parent 地址或不在其在线祖先链中的调用方会以 `UNAUTHORIZED` 拒绝；陈旧的 ancestor 对象和指向自身的 ancestor 请求会在查找目标前拒绝。
 
 ```ts type-equiv
 /**
@@ -199,7 +201,7 @@ interface ContinuableStart {
 }
 ```
 
-当驻留 Activation 结算时，管理器会向该 child 持久化的直接 parent 投递一条通知，说明该 epoch 如何结束，并携带其最终 assistant 输出中的非空文本块；若没有剩余的非空文本，则携带 `It left no closing message.`。对每个调用方拿到过 id 的 child，这条投递都是无条件的；它发生在会让 parent 被判定为已结算的所有权释放之前，并通过与 Agent 消息相同的唤醒 Agent 投递到达驻留 parent。若 parent 自身所在的谱系已在拆卸中，这条通知会以不唤醒的方式送达，因为唤醒一个 idle Agent 是开启一个轮次，而不是排队等待工作。其来源信息使用一个独立的 kind，因此 transcript（文本记录）绝不会把运行时的记账呈现为 child 自己写下的内容。
+当驻留 Activation 结算时，通用 settlement notice 策略决定管理器是否向该 child 持久化的直接 parent 投递一条通知，说明该 epoch 如何结束，并携带其最终 assistant 输出中的非空文本块；若没有剩余的非空文本，则携带 `It left no closing message.`。默认值 `adaptive` 根据 parent 状态保留当前 waking 或 quiet 选择；`quiet` 总是注入通知，不唤醒也不 steer parent；`none` 不投递通用通知，由 [DAG 调度器](dag.zh.md)等 owner 改为发布自己的持久通知。在 `adaptive` 或 `quiet` 下，对每个调用方拿到过 id 的 child，这条投递都是无条件的；它发生在会让 parent 被判定为已结算的所有权释放之前，并通过与 Agent 消息相同的唤醒 Agent 投递到达驻留 parent。若 parent 自身所在的谱系已在拆卸中，这条通知会以不唤醒的方式送达，因为唤醒一个 idle Agent 是开启一个轮次，而不是排队等待工作。其来源信息使用一个独立的 kind，因此 transcript（文本记录）绝不会把运行时的记账呈现为 child 自己写下的内容。
 
 ```ts type-equiv
 /**
@@ -260,7 +262,9 @@ interface ContinuableCreateSpec {
 }
 ```
 
-描述符（[descriptor.ts](../../packages/subagent/subagent/src/descriptor.ts) 中的 `SubagentDescriptorData`）是每个由会话支撑的 subagent 所使用、按模式判别的持久化身份。两种模式都携带提供方名称。`one-shot` 描述符可以携带调用方拥有的可选显示 `label`；`continuable` 描述符要求以委派 `description` 作为持久化创建标签，并另外对已解析的子 agent `agentOptions.provider`／`model`／`reasoningEffort` 与可选的 `persona`／`toolFilter` 建立快照，用于冷恢复。它绝不会对可合并扩展的 `AgentOptions` 对象建立快照，因此无关的扩展值不会破坏继续执行，后续新增组合配置输入则是一次有意的版本更改。描述符省略 `subagentDepth`（冷恢复以持久化 header 中的 `delegationDepth` 作为单调下界）和 `outputSchema`（单次运行或 Activation 的结果约定，而非持久化身份）。
+描述符（[descriptor.ts](../../packages/subagent/subagent/src/descriptor.ts) 中的 `SubagentDescriptorData`）是每个由会话支撑的 subagent 所使用、按模式判别的持久化身份。两种模式都携带提供方名称。`one-shot` 描述符可以携带调用方拥有的可选显示 `label`；`continuable` 描述符要求以委派 `description` 作为持久化创建标签，并另外对已解析的子 agent `agentOptions.provider`／`model`／`reasoningEffort`、可选的 `persona`／`toolFilter`、通用 settlement notice 策略与可选 owner binding 建立快照，用于冷恢复。绝对 `cwd` 属于子会话 metadata，而不属于 descriptor。它绝不会对可合并扩展的 `AgentOptions` 对象建立快照，因此无关的扩展值不会破坏继续执行，后续新增组合配置输入则是一次有意的版本更改。描述符省略 `subagentDepth`（冷恢复以持久化 header 中的 `delegationDepth` 作为单调下界）和 `outputSchema`（单次运行或 Activation 的结果约定，而非持久化身份）。
+
+可选 `SubagentOwnerBinding` 指定一个 effect-scoped owner controller，并携带只有该 controller 会解读的不可变 JSON metadata。授权保留在 subagent 服务中：controller 只会收到已授权的在线子级，以及在自身状态提交后才运行的 cancel 或 redirect closure，因此 `redirect` 准入可以等待 owner 的持久化屏障。该 controller 还会在通用 parent notice 投递前观测每个普通轮次与 Activation 的终态事实。移除 controller 会拒绝新的 owner 操作；绑定该名称的子级会保留其持久 binding，并在同一名称重新注册之前以 `OWNER_CONTROLLER_UNAVAILABLE` 明确失败。继续执行 setup registry 会收到相同的 binding，因此 owner 可以在新建与冷恢复的 Activation 上安装 child-scoped 工具与提示词段。
 
 本地一次性提供方会在子 agent 的初始轮次内、首次请求前追加描述符。继续执行管理器会在任何提供方提供的谱系之后、初始提示词获准之前追加描述符；`Session.inheritedEventCount` 仍是 fork 谱系边界：恢复时的描述符权威读取子 agent 自身的后缀，而供列表使用的身份投影以 last-wins 折叠 `subagent/descriptor`，子 agent 自己的描述符会覆盖 fork seed 中祖先的描述符。seeded cold list 会跳过 cache hint，直到权威 observation 提供该精确 cut。该事件只进入日志：不含 `surfaceOp`，绝不进入模型历史，并由仅追加日志跨压缩保留。格式错误的当前版本描述符属于损坏；本运行时无法对不受支持的版本进行分类。
 
@@ -533,6 +537,64 @@ async startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart>
 async sendMessage( sender: Agent, targetId: SessionId, content: ContentBlock[], options: SubagentSendMessageOptions, ): Promise<MessageId>
 
 /**
+ * Queue one durable parent-to-child follow-up as the child's next FIFO turn.
+ * A resident child finishes its current turn first; an absent child
+ * cold-resumes from persistence, and an unknown one rejects. Supplying
+ * `messageId` makes the delivery idempotent: a caller recovering from a
+ * restart re-uses the identity it already recorded and the child never runs
+ * the same message twice.
+ * @param parent - exact live direct parent authorizing delivery.
+ * @param childId - durable direct-child session id.
+ * @param content - model-visible prompt blocks.
+ * @param options - durable attribution, optional stable message id, and caller cancellation.
+ * @returns the accepted durable message id.
+ * @throws {SubagentError} `UNAUTHORIZED` when the parent does not own the live
+ *   child, `NOT_RESUMABLE` when the target has no persisted continuation.
+ */
+async followup( parent: Agent, childId: SessionId, content: ContentBlock[], options: SubagentDeliveryOptions, ): Promise<MessageId>
+
+/**
+ * Interrupt one continuable child's active work and place replacement content
+ * before its queued ordinary turns. An absent child cold-resumes and accepts
+ * the replacement as its next turn. Authorization and residency routing match
+ * follow-up delivery; an owner-bound child delegates the already-authorized
+ * state transition to its registered controller before the Agent operation runs.
+ * @param parent - exact live direct parent authorizing delivery.
+ * @param childId - durable direct-child session id.
+ * @param content - replacement user-role content.
+ * @param options - durable attribution, optional stable message id, cancellation, and cause.
+ * @returns the accepted replacement's inbox id.
+ * @throws {SubagentError} `UNAUTHORIZED` when the parent does not own the live
+ *   child, `NOT_RESUMABLE` when no persisted continuation exists, and
+ *   `OWNER_CONTROLLER_UNAVAILABLE` when the durable owner is not mounted.
+ */
+async redirect( parent: Agent, childId: SessionId, content: ContentBlock[], options: SubagentRedirectOptions, ): Promise<MessageId>
+
+/**
+ * Register one durable owner namespace. The returned disposer revokes new
+ * owner operations immediately; children already bound to that name keep
+ * their binding and fail loud until the same controller name is registered
+ * again.
+ * @param name - non-empty durable controller name.
+ * @param controller - owner hooks; redirect admission can be asynchronous.
+ * @returns the exact Cordis effect disposer.
+ * @throws {SubagentError} `INVALID_OWNER` for an empty name, `DUPLICATE_OWNER`
+ *   when that name is already registered.
+ */
+registerOwnerController(name: string, controller: SubagentOwnerController): () => void
+
+/**
+ * Register one deployment capability composed into every continuable child's
+ * unpublished creation context. The contribution receives the durable owner
+ * binding so an owner namespace can install child-scoped behavior without
+ * teaching this service which capabilities exist.
+ * @param contribution - synchronous child-scope installer.
+ * @returns an idempotent registration undo.
+ * @throws {SubagentError} after attempting every installation when a disposer fails.
+ */
+registerContinuableSetup(contribution: ContinuableSetupContribution): () => void
+
+/**
  * Interrupt one live continuable child's current turn under a human parent
  * address or an exact live ancestor Agent. Fire-and-return: the cancel
  * signal is issued before this returns, but the target may keep running
@@ -643,6 +705,19 @@ listDescendants(rootSessionId: SessionId, signal?: AbortSignal): Promise<Subagen
  *   `subagent/delivery-unavailable`, `gateway/cancelled`, or `gateway/internal`.
  */
 @Remote('prompt') async prompt(request: SubagentPromptRequest, signal: AbortSignal): Promise<SubagentPromptReceipt>
+
+/**
+ * Remote face of {@link redirect} under one durable parent address: interrupt
+ * the child's active work and accept one replacement ordinary turn before its
+ * queued ordinary turns. The exact live direct parent remains the authority
+ * credential, and an owner-bound child's controller still commits its own
+ * state first.
+ * @param request - durable address, minted identity, content, and optional browser zone.
+ * @param signal - carrier cancellation through inbox acceptance.
+ * @returns the accepted replacement's inbox identity.
+ * @throws {RemoteError} the same failure vocabulary as {@link prompt}.
+ */
+@Remote('steer') async steer(request: SubagentSteerRequest, signal: AbortSignal): Promise<SubagentSteerReceipt>
 
 /**
  * Remote face of {@link interrupt} under one durable parent address. No

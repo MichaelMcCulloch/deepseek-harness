@@ -1,8 +1,8 @@
 /**
  * Minimal Codex app-server 0.153.4 protocol adapter. The shared JSON-RPC
  * transport owns framing and request correlation; this module owns only the
- * product methods, current thread/turn association, unattended approval
- * responses, and terminal-answer selection.
+ * product methods, current thread/turn association, permission-mode mapping,
+ * unattended approval responses, and terminal-answer selection.
  *
  * @module @deepseek-ai/dsh-subagent-codex/wire
  */
@@ -11,9 +11,14 @@ import type { Readable, Writable } from 'node:stream'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SubagentResult } from '@deepseek-ai/dsh-subagent'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
-import type { CodexPermissionMode } from './run.ts'
 
 type JsonObject = Record<string, unknown>
+
+/** Profile-selectable non-interactive Codex permission mode. */
+export type CodexPermissionMode =
+  | 'never'
+  | 'approve-for-me'
+  | 'dangerously-bypass-approvals-and-sandbox'
 
 /** Product facts owned by the Codex wire after publication. */
 export interface CodexWireFailureFacts {

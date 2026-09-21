@@ -67,6 +67,7 @@ Electron 使用 Electron Node 模式启动私有 Desktop Host。Host 调用共�
 | [`core/agent-loop`](subsystems/core.zh.md) | 实现该接口的默认驱动器 | `ctx.agentLoop` |
 | [`core/scope`](subsystems/scope.zh.md) | 按 agent 划分作用域的注册原语 | 库，无 ctx 键 |
 | [`llm/llm`](subsystems/llm-streaming.zh.md) | 消息与流式词汇表，以及适配器 seam | `ctx.llm` |
+| [`dag/dag`](subsystems/dag.zh.md) | 持久依赖图状态、恢复、通知与本地 Git 执行 | `ctx.dag` |
 | [`webhook/webhook`](subsystems/webhook.zh.md) | 已认证 delivery 的分派和 Workspace Session 创建 | `ctx.webhookRuntime` |
 
 <a id="events"></a>
@@ -136,6 +137,8 @@ Session 消费方只了解当前逻辑格式。仅 header 的 `stat` 与 `list` 
 
 seam 正是替换一个提供方就能改变整个产品的原因。文件系统与进程提供方共享同一个执行世界，因此把它们指向远程沙箱，也就把 Bash、PTY 和 LSP 一并搬了过去，无需提供方专用 fork。[subagent 提供方](subsystems/subagent.zh.md)在同一个接口之后同样千差万别，从新建一个子 agent，到把一个轮次委派给另一个产品。
 
+[原生 DAG 调度器](subsystems/dag.zh.md)组合 session log、subagent、subprocess、projection、tool 与 Web seam。其调度器在异步工作前提交完整状态快照，然后由 generation-fenced effect 在本地 Git worktree 中操作可续行子级。subagent 服务保留授权；owner controller 向 DAG 提供统一 stop、redirect 与 settlement 路径，而不修改通用 continuation 行为。
+
 [实验性 Agent Teams](subsystems/agent-team.zh.md) 是 `ctx.agentTeams` 上公开发布、显式启用的协作 seam，在可继续 subagent 之上提供持久 roster、任务板和 mailbox。
 
 ## 新行为的归属位置
@@ -161,6 +164,7 @@ seam 正是替换一个提供方就能改变整个产品的原因。文件系统
 | 添加持久会话状态 | 扩展 `SessionEventMap`；从日志渲染和回放 |
 | 生成会话标题 | 注册唯一的 `ctx.sessionTitle` 提供方 |
 | 管理同会话目标 | 使用 `ctx.goals`；通过 `agent/*` 续跑 |
+| 协调按依赖排序的本地 agent 工作 | 使用 `ctx.dag`；让其持久 mailbox 驱动可续行子级与本地 Git worktree |
 | 在轮次边界 fork 会话 | `ctx.agents.create({ sessionId, seed, meta: { parentSession, seedLength } })`——只有经 agent-loop 发布的会话才会持久化 |
 | 在新后端存储会话 | 基于共享的句柄脚手架实现 `SessionPersistence`（`create`/`open`/`stat`/`list`/`export`） |
 | 将注册项限定到单个 agent | 使用该 agent 的 `agent.ctx` |

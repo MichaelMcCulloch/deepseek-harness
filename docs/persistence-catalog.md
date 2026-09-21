@@ -466,6 +466,19 @@ Types: [ContentBlock](subsystems/core.md) · [TokenUsage](subsystems/llm-streami
 
 Source: [`packages/compaction/compaction/src/types.ts:34`](../packages/compaction/compaction/src/types.ts)
 
+### `dag/*`
+
+<a id="dagstate--log-only"></a>
+
+#### `dag/state` — log-only
+
+```ts persistence-catalog
+/** One complete immutable native DAG state value. */
+'dag/state': { readonly state: DagState }
+```
+
+Source: [`packages/dag/dag/src/types.ts:229`](../packages/dag/dag/src/types.ts)
+
 ### `deliverables/*`
 
 <a id="deliverablespresented--log-only"></a>
@@ -894,7 +907,7 @@ Source: [`packages/subagent/subagent/src/catalog.ts:40`](../packages/subagent/su
 'subagent/descriptor': SubagentDescriptorData
 ```
 
-Source: [`packages/subagent/subagent/src/descriptor.ts:38`](../packages/subagent/subagent/src/descriptor.ts)
+Source: [`packages/subagent/subagent/src/descriptor.ts:39`](../packages/subagent/subagent/src/descriptor.ts)
 
 <a id="subagentmodel-selection-policy--log-only"></a>
 

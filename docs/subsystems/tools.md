@@ -4,7 +4,7 @@ English | [中文](tools.zh.md)
 
 The tool pipeline of [dsh-tools](../../packages/core/tools). [core.md](core.md) introduces `ToolDefinition` as the pipeline-authoring type shared by the core packages; the model-facing [`ToolSchema`](llm-streaming.md#the-model-request-and-result) wire type is declared with the model request. This page documents every `ToolDefinition` field, the typed schema DSL that builds it, the guarded execution types, and the UI-presentation types.
 
-Source: [`packages/core/tools/src/index.ts`](../../packages/core/tools/src/index.ts) · [`packages/core/tools/src/schema.ts`](../../packages/core/tools/src/schema.ts) · [`packages/core/tools/src/presentation.ts`](../../packages/core/tools/src/presentation.ts)
+Source: [`packages/core/tools/src/index.ts`](../../packages/core/tools/src/index.ts) · [`packages/core/tools/src/pipeline-types.ts`](../../packages/core/tools/src/pipeline-types.ts) · [`packages/core/tools/src/schema.ts`](../../packages/core/tools/src/schema.ts) · [`packages/core/tools/src/presentation.ts`](../../packages/core/tools/src/presentation.ts)
 
 ## `ToolDefinition` — a registered tool
 
@@ -166,6 +166,10 @@ interface ToolRestriction {
   readonly deny?: readonly string[]
 }
 ```
+
+## Durable command acceptance
+
+A tool can transfer asynchronous work to another durable owner instead of awaiting that work. The transfer point must be explicit: the tool first commits the command to durable state, then returns an acceptance value that names its revision and operation identity. Its result text must say that the command was accepted, not that work completed. A separate wait or observation tool reports later settlement, and the system prompt must forbid status polling when a cancellable wait exists. The native DAG tools use this form for Git and continuable-child effects; their generic presentation exposes no file locations because accepted intent is not a completed file operation.
 
 ## Execution: extensible waterfalls plus monotonic policy
 

@@ -1,6 +1,10 @@
 /** Builtin HTML metadata and keyed body registration; assembly belongs to the package entry. */
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from '../index.ts'
+// Type-only: the declaration merges behind ctx.locale, ctx.slots, ctx.remote, and ctx.documentPreviews.
+import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type {} from '@deepseek-ai/dsh-api-workspace-files/remote'
+import type {} from '@deepseek-ai/dsh-client-locale/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { DocumentPreviewDefinition } from '../document/registry.ts'
 import { hostFileOf } from '../rpc.ts'
 import { HtmlBody } from './HtmlBody.tsx'

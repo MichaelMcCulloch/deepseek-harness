@@ -46,7 +46,7 @@ Cold resume does not dispatch through a subagent provider. The continuation mana
 
 `ctx.subagents.sendMessage(sender, targetId, content, { signal })` is the sole model-authored continuation-message operation. The exact live sender authorizes delivery to its direct parent or direct continuable child; cold resume checks direct-child authority before reconstruction and every path checks again in the final no-await inbox-admission span, so an Agent unregistered or replaced during materialization cannot authorize delivery. The service derives a durable `agent-message` source from that sender. The model-facing `send_message` tool keeps only `agent_id` and `message` and uses fixed Steer scheduling. Both start and send return the accepted `MessageId`, and neither reports how the manager materialized the Activation.
 
-For start and follow-up, the caller signal owns lookup, materialization, and admission only until inbox acceptance. After the operation returns its `MessageId`, the manager owns the Activation independently; later caller cancellation does not cancel the accepted turn or dispose the child.
+For start, follow-up, and redirect, the caller signal owns lookup, materialization, and admission only until inbox acceptance. After the operation returns its `MessageId`, the manager owns the Activation independently; later caller cancellation does not cancel the accepted turn or dispose the child.
 
 ### Durable Session and live Activation
 
@@ -83,11 +83,11 @@ The manager derives these states from Agent quiescence, the Inbox's pending stat
 
 The manager linearizes manager-owned delivery, child release, and disposal for each durable child. A private `SubagentInbox` delegates Queue and Steer to the Agent inbox and owns the Activation's existing close transaction. If manager delivery races with final disposal, exactly one side wins this admission cutoff: delivery either enters the still-live Agent inbox, or observes closing and follows its operation-specific rejection or cold-resume path. Direct Agent work does not use this wrapper, so natural settlement uses short maintenance claims to validate the idle phase before the final flush and final disposal decision, then revalidates the Session sequence, Inbox pending state, wake generation, and owned-child set under the child lock. Accepted work that remains active or changes Session, Inbox, or ownership state invalidates that settlement attempt instead of being cancelled by it; maintenance that starts and finishes entirely during the flush has completed before the cutoff.
 
-### One inbox and follow-up delivery
+### One inbox for follow-up and redirect delivery
 
-The Agent inbox is the only queue. Every continuation message uses `Agent.followup()` and becomes one FIFO turn; neither the continuation manager nor the host maintains another message queue. Every pending Inbox occurrence keeps the current Activation live until it is claimed or discarded. This conservative rule also retains injected context: a quiet injection that remains after quiescence can keep the Activation and its live ancestors resident until a waking delivery claims it, a queue mutation removes it, or manager teardown disposes the tree.
+The Agent inbox is the only queue. `Agent.followup()` adds one later FIFO turn, while `Agent.redirect()` cancels active work with the pending inbox preserved, inserts one replacement ordinary turn before the queued ordinary turns, and wakes the Agent; neither the continuation manager nor the host maintains another message queue. Every pending Inbox occurrence keeps the current Activation live until it is claimed or discarded. This conservative rule also retains injected context: a quiet injection that remains after quiescence can keep the Activation and its live ancestors resident until a waking delivery claims it, a queue mutation removes it, or manager teardown disposes the tree.
 
-Routing depends only on Activation residency:
+Follow-up routing depends only on Activation residency:
 
 | Activation state | `followup` |
 |---|---|
@@ -95,7 +95,7 @@ Routing depends only on Activation residency:
 | `waiting` | wake the same Activation |
 | no Activation | cold-resume a new Activation |
 
-The continuation layer defines no separate delivery-route result. Successful `ctx.subagents.followup()` and `send_message` delivery returns the accepted `MessageId`, while delivery failure throws. Existing `agent/inbox/enqueue`, `agent/inbox/dequeue`, and `agent/inbox/discard` events remain the message-lifecycle observations; adapters may render a generic acceptance but do not expose `started`, `queued`, `resumed`, or another subagent-specific route vocabulary.
+The continuation layer defines no separate delivery-route result. Successful follow-up or redirect delivery returns the accepted `MessageId`, while delivery failure throws. Existing `agent/inbox/inserted`, `agent/inbox/claimed`, and `agent/inbox/discarded` events remain the message-lifecycle observations; adapters may render a generic acceptance but do not expose `started`, `queued`, `resumed`, or another subagent-specific route vocabulary.
 
 ### Child ownership
 
@@ -118,6 +118,12 @@ The shared `sendMessage(sender, targetId, content, options)` service operation a
 ### Agent and human scheduling
 
 Every accepted Agent message uses `Agent.steer()`. A running target claims it at the nearest step boundary; an idle or cold-resumed target starts a turn. Browser-authored human input separately carries `delivery: 'queue' | 'steer'` through `subagent.prompt`: Queue opens a later FIFO turn, while Steer uses the same best-effort nearest-step scheduling without changing the message's human source. The public service exposes no caller-selectable scheduling mode for Agent messages.
+
+### Redirect and owner-controlled continuations
+
+`ctx.subagents.followup()` queues one later FIFO turn, and `ctx.subagents.redirect()` interrupts the child's active work, preserves its unclaimed inbox, and places one replacement ordinary turn ahead of the queued ordinary turns. Redirect uses the same direct-parent authority, cold-resume path, and final admission check as follow-up delivery. `send_message` keeps its non-interrupting nearest-step scheduling; the model-facing `steer_agent` tool and the browser `subagent.steer` operation both use redirect.
+
+A continuable descriptor can carry durable JSON owner metadata and a `settlementDelivery` policy. After this service authorizes a stop or redirect, an effect-scoped owner controller can commit owner state before it invokes the supplied cancellation or redirect closure, and child settlement delegates to that same controller through `turnSettled()` and `settled()`. Ordinary children retain manager-owned behavior. A native DAG child selects `none` for generic settlement delivery and uses the [event-sourced DAG owner](../architecture/2026-08-29-event-sourced-native-dag-orchestrator.md) for stop, redirect, and durable notices.
 
 ### Authority and recorded sender identity
 
@@ -143,7 +149,7 @@ Session and descriptor persistence survive restart. Activation state, Agent inbo
 
 This version covers continuable in-process children and leaves one-shot delegation unchanged. Remote providers require a separate Activation handle with equivalent authenticated control and child-first quiescence contracts before they can support the same behavior.
 
-It adds no host-user continuation, subagent steering operation, durable mailbox, cross-process lease, automatic replay of interrupted inbox work, team authority, workflow authority, public residency query, or runtime cache; the later [current-turn interrupt](2026-08-06-continuable-subagent-interrupt.md) added the one public stop operation on top of this lifecycle. Existing delegation-depth policy remains unchanged. Optional child-to-parent reporting is a later consumer of this lifecycle rather than part of the base continuable capability.
+It adds no host-user continuation, generic durable mailbox, cross-process lease, automatic replay of interrupted inbox work, team authority, workflow authority, public residency query, or runtime cache; the later [current-turn interrupt](2026-08-06-continuable-subagent-interrupt.md) added the one public stop operation on top of this lifecycle. Existing delegation-depth policy remains unchanged. Optional child-to-parent reporting and owner-controlled scheduling are later consumers of this lifecycle rather than part of the base continuable capability.
 
 ## Alternatives considered
 
@@ -163,7 +169,7 @@ It adds no host-user continuation, subagent steering operation, durable mailbox,
 
 **Maintain a separate queue for continuation messages.** A second FIFO creates ambiguous ordering against messages already accepted by the Agent. A single Agent inbox gives every accepted turn one observable order.
 
-**Expose subagent steering now.** Parent steering needs current-turn controller state and a separate admission policy from follow-up delivery. Queueing every first-version continuation avoids that state and its admission race.
+**Treat steering as non-interrupting next-step input.** Rejected. `Agent.steer()` extends current work at a step boundary and cannot replace a wrong turn. `Agent.redirect()` gives replacement work an explicit cancel-and-priority-turn operation while leaving follow-up ordering unchanged.
 
 **Expose host-user follow-up without a host consumer.** A public authority-minting method and user branch would make cold resume possible without the historical parent, but no production host adapter calls that operation. The continuation API accepts only the exact live parent until a concrete authenticated host interaction can receive a private capability.
 
@@ -181,11 +187,12 @@ The implementation pins these behaviors:
 - Every failure before initial-prompt inbox acceptance rejects without ids and rolls back any created handle, Activation, and parent `ownedChildren` membership through a closing transaction visible to concurrent delivery and drain; lifecycle publication failure emits no unmatched terminal edge.
 - Cold resume calls `ctx.agents.resume()` from the continuation manager and never dispatches through or requires the initial subagent provider; the descriptor retains the initial provider name after provider removal, while `SubagentProvider.resume?()` and `SubagentProviderResumeRequest` are absent.
 - A continuable Activation directly owns `AgentHandle` and never creates, wraps, or retains `SubagentRun`; `SubagentProvider.start()` and `SubagentRun` remain one-shot-only, without `SubagentRun.steer?()`.
-- `followup()` accepts only the exact live direct parent and rechecks that identity at the final no-await inbox-admission boundary after any materialization; durable message source fields cannot authorize delivery.
-- Continuation messages always use `Agent.followup()` and share its inbox FIFO, including when the child already has an open turn.
-- `ctx.subagents.followup()` and its `send_message` adapter return only the accepted `MessageId`; the continuation layer accepts no delivery target and defines no subagent-specific route result.
-- Caller signals stop start and follow-up only before inbox acceptance, while host-scoped and manager-global teardown retain child-first cleanup; the [current-turn interrupt](2026-08-06-continuable-subagent-interrupt.md) is the one public stop and does not enter teardown.
-- This version exposes no subagent steering operation or current-turn controller state.
+- `followup()` and `redirect()` accept only the exact live direct parent and recheck that identity at the final no-await inbox-admission boundary after any materialization; durable message source fields cannot authorize delivery.
+- Follow-up delivery uses `Agent.followup()` as a later FIFO turn. Redirect delivery uses `Agent.redirect()` to cancel current work with pending items preserved and insert one priority replacement turn in the same inbox.
+- `ctx.subagents.followup()` and `redirect()`, plus their `steer_agent` and browser-steer adapters, return only the accepted `MessageId`; the continuation layer accepts no delivery target and defines no subagent-specific route result.
+- Caller signals stop start, follow-up, and redirect only before inbox acceptance, while host-scoped and manager-global teardown retain child-first cleanup; the [current-turn interrupt](2026-08-06-continuable-subagent-interrupt.md) is the one public stop and does not enter teardown.
+- Durable owner metadata can delegate already-authorized stop, redirect, and settlement to one effect-scoped controller; ordinary children retain the manager's generic behavior.
+- A descriptor's `settlementDelivery` selects `adaptive`, `quiet`, or `none` generic parent notice delivery; `none` leaves the completion account to the owner.
 - An idle Agent with live owned children yields a `waiting` Activation whose `AgentHandle` remains retained.
 - A `next-turn` delivered to `waiting` wakes the same Activation; delivery after completed disposal cold-resumes a new Activation.
 - Every continuation-managed parent Activation disposes only after all directly owned child Activations complete `AgentHandle` disposal; top-level Agents do not join the waiting graph.
@@ -195,9 +202,9 @@ The implementation pins these behaviors:
 - Session logs reconstruct only messages that were actually written, with the source that supplied each message; inbox-accepted but unlogged messages have no restart guarantee.
 - No continuable-subagent path creates or depends on a Task, `JobId`, Task completion notice, Task cancellation, or intermediate result-bearing execution wrapper.
 - Unit coverage pins the `startContinuable()` inbox-acceptance return boundary, complete rollback for each pre-acceptance and lifecycle-publication failure, global and parent-scoped drain quiescence for materialization caught between Agent publication and Activation registration, sibling-forest isolation, exact ancestry after an intermediate Agent leaves the registry, provider-independent cold resume, final exact-parent reauthorization after cold-resume materialization, caller-signal and teardown ownership on both sides of acceptance, and the absence of automatic replay for accepted-but-unlogged messages.
-- Unit coverage pins the residency-only routing table, single-inbox ordering, `MessageId` correlation through inbox events, follow-up during an open turn, waiting wakeup, cold resume, ownership registration and release, child-first disposal, send-versus-dispose races, direct Agent turns, Session-only work, and maintenance accepted during the final-flush await, best-effort final flush with absent and failing listeners, and the absence of public subagent cancellation and steering.
+- Unit coverage pins follow-up and redirect ordering in one inbox, owner delegation, single-inbox ordering, `MessageId` correlation through inbox events, follow-up during an open turn, waiting wakeup, cold resume, ownership registration and release, child-first disposal, send-versus-dispose races, direct Agent turns, Session-only work, and maintenance accepted during the final-flush await, best-effort final flush with absent and failing listeners, and the absence of public subagent cancellation and steering.
 - Report-package unit coverage separately pins child-only visibility, setup revocation, authority, delivery modes, stable message identity, and lifecycle races.
-- A keyless assembled-app snapshot covers parent delegation and follow-up queueing, the absence of subagent steering and implicit report delivery, retained waiting `AgentHandle`, and child-first disposal. A separate report snapshot covers the optional explicit return channel.
+- Keyless assembled snapshots cover parent delegation, follow-up queueing, interrupting replacement through `steer_agent`, retained waiting `AgentHandle`, child-first disposal, and the optional explicit report channel.
 
 ### Accepted costs
 
@@ -207,8 +214,8 @@ Retaining an Activation while descendants run consumes Agent resources proportio
 
 The process-local inbox and ownership graph do not coordinate two harness processes. Deployments allowing concurrent access to one persistence store still require a durable lease and mailbox protocol.
 
-Without the optional report package, completing a child turn neither sends its content to nor wakes the historical parent. With the package, only an explicit `report` call sends selected content; quiet delivery does not wake the parent, while next-step delivery wakes it and joins its nearest step boundary. In every case the detailed child output remains in its durable Session.
+The optional report package sends selected content only through an explicit `report` call; quiet delivery does not wake the parent, while next-step delivery wakes it and joins its nearest step boundary. Activation settlement separately follows the descriptor's `adaptive`, `quiet`, or `none` policy. In every case the detailed child output remains in its durable Session.
 
-Queueing every continuation message means a parent cannot correct an in-progress child turn immediately; the correction runs as the next turn. A later UI steering action may reduce that latency without changing follow-up ordering.
+Redirect cancellation is cooperative, so a replacement can be accepted before the active turn reaches its cancellation boundary. The replacement remains ahead of queued ordinary turns, and follow-up FIFO order remains unchanged.
 
 A failed best-effort final flush is logged while the runtime ownership graph continues draining; the persisted child state may be missing or stale. Retry and repair require a separate recovery design.

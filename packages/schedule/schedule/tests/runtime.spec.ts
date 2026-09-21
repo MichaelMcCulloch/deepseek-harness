@@ -94,7 +94,7 @@ async function harness(): Promise<RuntimeHarness> {
       if (controls.throwFollowup) throw new Error('queue unavailable')
       followed.push(message)
     },
-    steer(_message: UserMessage) {},
+    steer(_message: UserMessage) {}, redirect() {},
     inject(_message: UserMessage) {},
   }
   // Dispatch callbacks remove registry visibility synchronously while the schedule is running.

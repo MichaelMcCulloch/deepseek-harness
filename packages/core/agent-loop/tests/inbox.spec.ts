@@ -30,7 +30,7 @@ function stubAgent(rawId: string, overrides: Partial<Agent> = {}): Agent {
     ctx,
     send: () => {},
     followup: () => {},
-    steer: () => {},
+    steer: () => {}, redirect: () => {},
     inject: () => {},
     cancel() {},
     runMaintenance: task => task(new AbortController().signal),

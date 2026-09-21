@@ -39,7 +39,7 @@ export {
 export type {
   InstructionFile,
   LoadedInstructionFile,
-} from './files.ts'
+} from './types.ts'
 export { renderAgentInstructions } from './render.ts'
 export type { RenderedAgentInstructions, TruncatedInstruction } from './render.ts'
 

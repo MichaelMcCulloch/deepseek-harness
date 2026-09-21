@@ -138,6 +138,10 @@ describe('the shipped preset root', () => {
         throw new TypeError(`${id} preset must configure tool-web.fetch`)
       }
       expect(toolWeb.config.fetch, id).toBe(true)
+      expect(entries).toContainEqual(expect.objectContaining({
+        id: 'tool-dag',
+        name: '@deepseek-ai/dsh-tool-dag',
+      }))
     }
   })
 

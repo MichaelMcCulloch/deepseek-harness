@@ -39,7 +39,7 @@ async function agent(ctx: Context, cwd: string | undefined): Promise<Agent> {
     get ctx() { return scope.ctx },
     send: () => {},
     followup: () => {},
-    steer: () => ({ outcome: Promise.resolve({ status: 'rejected' as const }) }),
+    steer: () => ({ outcome: Promise.resolve({ status: 'rejected' as const }) }), redirect: () => {},
     inject: () => {},
     cancel() {},
     runMaintenance: task => task(new AbortController().signal),

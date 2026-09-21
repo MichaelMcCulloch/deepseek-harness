@@ -571,6 +571,35 @@ export interface Config {
 
 Source: [`packages/credentials/credentials-local/src/index.ts:64`](../packages/credentials/credentials-local/src/index.ts)
 
+<a id="deepseek-aidsh-dag"></a>
+
+## `@deepseek-ai/dsh-dag`
+
+Requires: `agents` · `subagents` · `subprocess` · `sessions`
+
+```ts config-catalog
+/** Deployment choices for the local DAG runtime. */
+export interface Config extends DagRuntimeConfig {}
+
+/** Deployment choices accepted by the local DAG runtime. */
+export interface DagRuntimeConfig {
+  /** Optional DSH home. A blank value uses normal DSH_HOME resolution. */
+  readonly dshHome?: string
+  /** Git executable name or absolute path. */
+  readonly gitExecutable?: string
+  /** Deadline for each Git process. */
+  readonly commandDeadlineMs?: number
+  /** TERM-to-KILL grace for each Git process. */
+  readonly terminationGraceMs?: number
+  /** Per-stream collected Git output limit. */
+  readonly outputLimitBytes?: number
+  /** Continuable in-process provider used for DAG children. */
+  readonly subagentProvider?: string
+}
+```
+
+Source: [`packages/dag/dag/src/index.ts:107`](../packages/dag/dag/src/index.ts)
+
 <a id="deepseek-aidsh-experimental-agent-team"></a>
 
 ## `@deepseek-ai/dsh-experimental-agent-team`
@@ -1676,7 +1705,7 @@ export interface StdioConfig {
   env: Record<string, string>
   /** Working directory for the child process. */
   cwd: string
-  /** Timeout per tool call or resource request in milliseconds. */
+  /** Per-tool-call timeout in milliseconds. */
   toolCallTimeoutMs: number
   /** Fail plugin activation when the initial connection or tool synchronization fails. */
   failOnStartupError: boolean
@@ -1700,7 +1729,7 @@ export interface StreamableHttpConfig {
   url: string
   /** Additional headers attached to MCP requests. */
   headers: Record<string, string>
-  /** Timeout per tool call or resource request in milliseconds. */
+  /** Per-tool-call timeout in milliseconds. */
   toolCallTimeoutMs: number
   /** Fail plugin activation when the initial connection or tool synchronization fails. */
   failOnStartupError: boolean
@@ -1723,7 +1752,7 @@ export interface ReconnectConfig {
 }
 ```
 
-Source: [`packages/mcp/mcp-client/src/index.ts:104`](../packages/mcp/mcp-client/src/index.ts)
+Source: [`packages/mcp/mcp-client/src/index.ts:53`](../packages/mcp/mcp-client/src/index.ts)
 
 <a id="deepseek-aidsh-message-feedback"></a>
 
@@ -2672,7 +2701,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/subagent/subagent/src/index.ts:190`](../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:207`](../packages/subagent/subagent/src/index.ts)
 
 <a id="deepseek-aidsh-subagent-acp"></a>
 
@@ -3496,7 +3525,7 @@ export interface Config {
 export type ToolPresentationMode = 'native' | 'ptc' | 'both'
 ```
 
-Source: [`packages/core/tools/src/index.ts:656`](../packages/core/tools/src/index.ts)
+Source: [`packages/core/tools/src/index.ts:400`](../packages/core/tools/src/index.ts)
 
 <a id="deepseek-aidsh-typert-loader"></a>
 
@@ -3788,6 +3817,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-commands` ([`packages/client/ui-commands/src/index.ts`](../packages/client/ui-commands/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-conversation` ([`packages/client/ui-conversation/src/index.ts`](../packages/client/ui-conversation/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-cordis` ([`packages/extensions/ui-cordis/src/index.ts`](../packages/extensions/ui-cordis/src/index.ts))
+- `@deepseek-ai/dsh-client-ui-dag` ([`packages/client/ui-dag/src/index.ts`](../packages/client/ui-dag/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-deliverables` — requires `systemPrompt` · `connection` · `sessionQuery` · `sessionController` · `workspaceFiles` · `fs` · `sandboxPolicy` · `workspaceChanges` ([`packages/client/ui-deliverables/src/index.ts`](../packages/client/ui-deliverables/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-directory-picker-browse` ([`packages/client/ui-directory-picker-browse/src/index.ts`](../packages/client/ui-directory-picker-browse/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-directory-picker-native` ([`packages/client/ui-directory-picker-native/src/index.ts`](../packages/client/ui-directory-picker-native/src/index.ts))
@@ -3859,6 +3889,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-tool-ask-user` — requires `tools` · `userQuestions` ([`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts))
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — requires `tools` ([`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts))
 - `@deepseek-ai/dsh-tool-cordis` — requires `tools` · `systemPrompt` · `cordisInspect` ([`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts))
+- `@deepseek-ai/dsh-tool-dag` — requires `tools` · `dag` · `systemPrompt` ([`packages/dag/tool-dag/src/index.ts`](../packages/dag/tool-dag/src/index.ts))
 - `@deepseek-ai/dsh-tool-subagent-control` — requires `tools` · `subagents` ([`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts))
 - `@deepseek-ai/dsh-user-questions` ([`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts))
 - `@deepseek-ai/dsh-webhook` — requires `agents` · `agentDefaultModel` · `agentPresets` · `permissionPresets` · `sessionTitle` · `workspaceRegistry` ([`packages/webhook/webhook/src/index.ts`](../packages/webhook/webhook/src/index.ts))

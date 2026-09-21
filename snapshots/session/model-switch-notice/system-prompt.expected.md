@@ -5,6 +5,8 @@ You are a coding assistant powered by the deepseek-v4-flash model. Your working 
 Verify your work by running the code or tests. Keep answers brief and factual.
 
 
+Use the DAG tools for dependency work. After dispatch, call dag_wait with the last revision. Do not poll dag_status. A command response means that the command was accepted; Git and child effects continue in the background.
+
 Check the [exit code: N] marker on every bash result; investigate failures before moving on.
 
 Use the read tool — not shell commands like cat — to inspect text files. Results include line numbers. Use offset and limit to continue reading large files.
@@ -37,6 +39,8 @@ You are a coding assistant powered by the deepseek-v4-pro model. Your working di
 
 Verify your work by running the code or tests. Keep answers brief and factual.
 
+
+Use the DAG tools for dependency work. After dispatch, call dag_wait with the last revision. Do not poll dag_status. A command response means that the command was accepted; Git and child effects continue in the background.
 
 Check the [exit code: N] marker on every bash result; investigate failures before moving on.
 

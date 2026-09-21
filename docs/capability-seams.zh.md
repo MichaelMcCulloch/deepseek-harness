@@ -165,6 +165,9 @@ flowchart LR
   pkg_sdk_minimal["sdk-minimal"]
   pkg_goal["goal"]
   svc_goals["ctx.goals<br/>Same-session goal domain"]
+  pkg_dag["dag"]
+  svc_dag["ctx.dag<br/>Durable DAG orchestration domain"]
+  pkg_tool_dag["tool-dag"]
   pkg_ssh["ssh"]
   svc_ssh["ctx.ssh<br/>POSIX SSH connection owner"]
   pkg_fs_ssh["fs-ssh"]
@@ -290,6 +293,7 @@ flowchart LR
   pkg_cordis_host_runner --> svc_dynamicCordisRunner
   pkg_credentials --> svc_credentials
   pkg_credentials_local --> svc_credentials
+  pkg_dag --> svc_dag
   pkg_deepseek_llm_api_extensions --> svc_deepseekLlmApiExtensions
   pkg_experimental_agent_team --> svc_agentTeams
   pkg_experimental_browser_use_chrome_devtools_mcp --> svc_browserUse
@@ -423,6 +427,7 @@ flowchart LR
   svc_credentials --> pkg_api_settings_controller
   svc_credentials --> pkg_llm_deepseek
   svc_credentials --> pkg_llm_pi_ai
+  svc_dag --> pkg_tool_dag
   svc_deepseekLlmApiExtensions --> pkg_llm_deepseek
   svc_directoryPicker --> pkg_api_workspace_controller
   svc_dynamicCordisRunner --> pkg_tool_cordis
@@ -595,6 +600,7 @@ flowchart LR
 | `ctx.agentDefaultModel` | `core` | [`agent-default-model`](../packages/core/agent-default-model) | - | [`api-session-controller`](../packages/api/session-controller), [`headless`](../packages/bundle/headless) | - | 通过 settings 分层默认 `ModelSelection`，让直接入口与 Host 支撑的 Agent 入口共享同一个状态所有者。 |
 | `ctx.agentLoop` | `bundle` | [`agent-loop`](../packages/core/agent-loop) | - | [`base`](../packages/bundle/base), [`sdk-minimal`](../packages/bundle/sdk-minimal) | - | 唯一的具体循环插件；扩展包依赖 dsh-agent 的事件和服务，而不依赖此包。 |
 | `ctx.goals` | `core` | [`goal`](../packages/goal/goal) | - | - | - | 从会话日志折叠带修订版本的目标状态，并将实时延续激活保留在进程本地。 |
+| `ctx.dag` | `core` | [`dag`](../packages/dag/dag) | - | [`tool-dag`](../packages/dag/tool-dag) | - | 在调度受围栏约束的 Git、子级、通知和生命周期 effect 之前，先提交完整且带修订版本的图快照。 |
 | `ctx.ssh` | `core` | [`ssh`](../packages/ssh/ssh) | - | [`fs-ssh`](../packages/ssh/fs-ssh), [`subprocess-ssh`](../packages/ssh/subprocess-ssh), [`sandbox-ssh`](../packages/ssh/sandbox-ssh) | - | 负责一条经过认证的 OpenSSH 连接、已安装辅助程序身份、独立程序流，以及配套远端提供方的断连清理。 |
 | `ctx.subprocess` | `seam` | [`subprocess`](../packages/subprocess/subprocess) | [`subprocess-local`](../packages/subprocess/subprocess-local), [`subprocess-ssh`](../packages/ssh/subprocess-ssh) | [`bash-local`](../packages/shell/bash-local), [`bash-sandbox`](../packages/shell/bash-sandbox), [`terminal-bash`](../packages/terminal/terminal-bash), [`lsp-stdio`](../packages/lsp/lsp-stdio), [`subagent-acp`](../packages/subagent/subagent-acp), [`subagent-codex`](../packages/subagent/subagent-codex), [`subagent-claude-code`](../packages/subagent/subagent-claude-code) | - | Bash 执行器、PTY shell 后端、LSP Host，以及进程外 ACP、Codex 和 Claude Code subagent 后端都通过 ctx.subprocess 执行 spawn；该服务负责进程坐标、进程树／会话生命周期、stdio 处置、终端机制和 kill 升级。 |
 | `ctx.shell` | `seam` | [`shell`](../packages/shell/shell) | [`bash-local`](../packages/shell/bash-local), [`bash-sandbox`](../packages/shell/bash-sandbox), [`pwsh-local`](../packages/shell/pwsh-local) | [`tool-bash`](../packages/shell/tool-bash), [`tool-pwsh`](../packages/shell/tool-pwsh), [`hooks-claude-code`](../packages/hooks/hooks-claude-code), [`hooks-codex`](../packages/hooks/hooks-codex) | - | 面向模型的 shell 工具和钩子桥接消费此 seam；沙箱、远程或 PowerShell 执行器可以替换 bash-local，而无需改动这些消费方。 |

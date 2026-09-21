@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-10-dag-notice-namespace-across-session-seeding.md
+2026-09-10-dag-notice-namespace-across-session-seeding.md: f3b2f0f3cfad6d6d370e59f1a7e239b3b8a80ccb
+2026-09-10-dag-notice-namespace-across-session-seeding.zh.md: 7a563fb706a6370c02a801d25a90cd70ae0098b4

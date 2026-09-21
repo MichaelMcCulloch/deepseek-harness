@@ -107,7 +107,8 @@ The registry holds typed `ToolDefinition`s in scoped layers and projects them on
 | File | Role |
 |---|---|
 | [`src/index.ts`](src/index.ts) | Plugin entry: `ToolRuntime` service, config, registry, execution pipeline |
-| [`src/types.ts`](src/types.ts) | `ToolDefinition`, `ToolExecution`, `ToolExecutionResult`, guard and decision types |
+| [`src/pipeline-types.ts`](src/pipeline-types.ts) | `ToolDefinition`, `ToolExecution`, `ToolExecutionResult`, and the staged scheduler types |
+| [`src/types.ts`](src/types.ts) | Durable `tool/ptc-dispatch*` event payloads and their `SessionEventMap` augmentation |
 | [`src/schema.ts`](src/schema.ts) | The `defineTool` DSL: `ValueSchemaSpec`, `ParameterSchemaSpec`, `InferValue`, `InferArgs` |
 | [`src/json-schema.ts`](src/json-schema.ts) | The enforced raw JSON Schema subset and validation |
 | [`src/presentation.ts`](src/presentation.ts) | The `card`-tagged UI render intents |

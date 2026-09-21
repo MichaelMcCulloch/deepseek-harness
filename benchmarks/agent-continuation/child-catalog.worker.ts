@@ -39,7 +39,7 @@ async function seed(ctx: Context): Promise<void> {
       ...inherited,
       { type: 'session/end-seed', seq: SessionSeq(inherited.length), time: TIME_ZERO + inherited.length, data: { inherited: true } },
       { type: 'subagent/descriptor', seq: SessionSeq(inherited.length + 1), time: TIME_ZERO + inherited.length + 1, data: {
-        version: SUBAGENT_DESCRIPTOR_VERSION, mode: 'continuable', provider: 'fork', label: 'Synthetic child ' + String(child),
+        version: SUBAGENT_DESCRIPTOR_VERSION, mode: 'continuable', provider: 'fork', label: 'Synthetic child ' + String(child), settlementDelivery: 'adaptive',
       } },
     ]
     const handle = await ctx.sessionPersistence.create({

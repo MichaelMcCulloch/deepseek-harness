@@ -25,13 +25,16 @@ const FIXTURE: Record<string, string> = {
     },
     include: ['vendor/**/*.ts', 'packages/**/*.ts'],
   }),
-  'vendor/cordis/src/context.ts': 'export class Context { private brand!: void }\n',
-  'vendor/cordis/src/events.ts': [
+  'vendor/cordis/src/context.ts': [
+    'export class Context { private brand!: void }',
     'export class EventsService {',
     '  dispatch(type: string, args: unknown[]): unknown[] { return [type, args] }',
     '}',
     '',
   ].join('\n'),
+  // The collector resolves `EventsService` from the module that declares it,
+  // which is `context.ts`; `events.ts` stays a re-export facade, as vendored.
+  'vendor/cordis/src/events.ts': "export { EventsService } from './context.ts'\n",
   'packages/core/agent/src/dispatch.ts':
     'export interface AgentEventDispatch { emit(...args: unknown[]): void }\n',
   // fireLocal: every same-file reference is a direct callee, so the locality

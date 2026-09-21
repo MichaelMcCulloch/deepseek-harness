@@ -40,7 +40,7 @@ async function agent(ctx: Context): Promise<Agent> {
     get status() { return status },
     send: () => {},
     followup: () => {},
-    steer: () => {},
+    steer: () => {}, redirect: () => {},
     inject: () => {},
     cancel() { status = 'idle' },
     runMaintenance: task => task(new AbortController().signal),

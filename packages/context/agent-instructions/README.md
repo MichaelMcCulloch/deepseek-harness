@@ -92,6 +92,7 @@ The plugin is built on one principle: workspace instructions are durable convers
 | [`src/index.ts`](src/index.ts) | Plugin entry: pre-step listener, `tools/result` touch tracking, inbox composition |
 | [`src/config.ts`](src/config.ts) | `Config` schema, budget resolution, baseline identity |
 | [`src/files.ts`](src/files.ts) | Candidate discovery, project-root search, bounded streaming reads |
+| [`src/types.ts`](src/types.ts) | Instruction-file records shared by discovery, reconciliation, and rendering |
 | [`src/render.ts`](src/render.ts) | Instruction rendering, budget truncation, change records |
 | [`src/state.ts`](src/state.ts) | Durable message sources, version/digest cache, reconciliation |
 | [`src/digest.ts`](src/digest.ts) | SHA-1 content identity and per-directory duplicate keys |
