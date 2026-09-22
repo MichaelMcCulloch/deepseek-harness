@@ -1,7 +1,7 @@
 /** Local-only Git effects for native DAG node worktrees. */
 
-import { mkdir, realpath, stat } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { mkdir, realpath, rm, stat } from 'node:fs/promises'
+import { dirname, join, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { DagNodeSnapshot } from './types.ts'
 
@@ -104,23 +104,49 @@ export class DagGit {
     dependencyCommits: readonly string[],
     signal: AbortSignal,
   ): Promise<DagPreparedWorktree> {
+    const inspected = await this.inspectPreparation(root, node, branch, worktree, base, dependencyCommits, signal)
+    const merged = await this.mergeDependencies(node, worktree, dependencyCommits, signal)
+    return { ...inspected, head: merged.head, conflictedFiles: merged.conflictedFiles }
+  }
+
+  /**
+   * Create or verify one worktree without merging its dependency commits.
+   *
+   * This phase's result is durable before any merge runs: the returned
+   * `preparedFrom` and `head` are the worktree's pre-merge HEAD, and recording
+   * them first is what lets the completion guard survive a crash between the
+   * merges and their record.
+   * @param root - Clean root worktree directory.
+   * @param node - Node whose ownership rules apply.
+   * @param branch - Expected local node branch.
+   * @param worktree - Absolute node worktree directory.
+   * @param base - Frozen wave HEAD.
+   * @param dependencyCommits - Exact dependency commits in declaration order.
+   * @param signal - Cancellation for all Git processes.
+   * @returns Pre-merge worktree facts.
+   */
+  async inspectPreparation(
+    root: string,
+    node: DagNodeSnapshot,
+    branch: string,
+    worktree: string,
+    base: string,
+    dependencyCommits: readonly string[],
+    signal: AbortSignal,
+  ): Promise<DagPreparedWorktree> {
     await mkdir(dirname(worktree), { recursive: true })
-    const pathExists = await stat(worktree).then(entry => entry.isDirectory(), (error: unknown) => {
-      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return false
-      throw error
-    })
-    const registered = pathExists ? await this.tryRun(worktree, ['rev-parse', '--show-toplevel'], signal) : undefined
-    if (pathExists) {
-      if (registered === undefined || await realpath(registered.stdout.trim()) !== await realpath(worktree)) {
-        throw new DagGitError(`existing worktree path is not a registered Git worktree root: ${worktree}`, ['rev-parse'])
-      }
+    const registration = await this.worktreeRegistration(worktree, signal)
+    if (registration === 'unregistered') {
+      throw new DagGitError(`existing worktree path is not a registered Git worktree root: ${worktree}`, ['rev-parse'])
+    }
+    if (registration === 'registered') {
       const rootCommon = (await this.run(root, ['rev-parse', '--git-common-dir'], signal)).stdout.trim()
       const worktreeCommon = (await this.run(worktree, ['rev-parse', '--git-common-dir'], signal)).stdout.trim()
       if (await realpath(resolve(root, rootCommon)) !== await realpath(resolve(worktree, worktreeCommon))) {
         throw new DagGitError(`existing worktree belongs to a different repository: ${worktree}`, ['rev-parse'])
       }
     }
-    if (!pathExists) {
+    if (registration === 'absent') {
       const branchExists = await this.tryRun(root, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], signal)
       await this.run(root, branchExists === undefined
         ? ['worktree', 'add', '-b', branch, worktree, base]
@@ -153,6 +179,34 @@ export class DagGit {
       }
     }
 
+    return {
+      branch,
+      worktree,
+      dependencyCommits: [...dependencyCommits],
+      conflictedFiles: [],
+      preparedFrom: currentHead,
+      head: currentHead,
+    }
+  }
+
+  /**
+   * Merge every recorded dependency commit into one prepared worktree.
+   *
+   * Re-running this over a worktree that already merged some or all of those
+   * commits is a no-op per commit, so a retry after a crash resumes where the
+   * interrupted preparation stopped without changing `preparedFrom`.
+   * @param node - Node whose integration rules apply.
+   * @param worktree - Absolute prepared node worktree directory.
+   * @param dependencyCommits - Exact dependency commits in declaration order.
+   * @param signal - Cancellation for all Git processes.
+   * @returns Post-merge HEAD and the files a delegate integration left conflicted.
+   */
+  async mergeDependencies(
+    node: DagNodeSnapshot,
+    worktree: string,
+    dependencyCommits: readonly string[],
+    signal: AbortSignal,
+  ): Promise<{ readonly head: string; readonly conflictedFiles: readonly string[] }> {
     const conflictedFiles: string[] = []
     for (const commit of dependencyCommits) {
       const args = mergeArgs(node.kind, node.policy, commit)
@@ -170,14 +224,7 @@ export class DagGit {
       }
     }
     const head = (await this.run(worktree, ['rev-parse', 'HEAD'], signal)).stdout.trim()
-    return {
-      branch,
-      worktree,
-      dependencyCommits: [...dependencyCommits],
-      conflictedFiles: [...new Set(conflictedFiles)],
-      preparedFrom: currentHead,
-      head,
-    }
+    return { head, conflictedFiles: [...new Set(conflictedFiles)] }
   }
 
   /**
@@ -270,13 +317,78 @@ export class DagGit {
    * @param signal - Cancellation for all Git processes.
    * @returns Resolved target commit and remaining worktree dirt.
    */
-  async reset(node: DagNodeSnapshot, target: string, signal: AbortSignal): Promise<DagResetResult> {
+  /**
+   * Classify one node worktree path before preparation, repair, or reset.
+   * @param worktree - Absolute node worktree directory.
+   * @param signal - Cancellation for the Git probe.
+   * @returns `absent` when no directory exists, `unregistered` when one exists
+   *   without being a worktree root, and `registered` when the path is its own
+   *   worktree root.
+   */
+  private async worktreeRegistration(worktree: string, signal: AbortSignal): Promise<'absent' | 'unregistered' | 'registered'> {
+    const pathExists = await stat(worktree).then(entry => entry.isDirectory(), (error: unknown) => {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return false
+      throw error
+    })
+    if (!pathExists) return 'absent'
+    const registered = await this.tryRun(worktree, ['rev-parse', '--show-toplevel'], signal)
+    if (registered === undefined) return 'unregistered'
+    return await realpath(registered.stdout.trim()) === await realpath(worktree) ? 'registered' : 'unregistered'
+  }
+
+  /**
+   * Recreate one node worktree whose directory exists without a registration.
+   *
+   * `git worktree add` interrupted by process death can leave the directory
+   * behind without its administrative entry, and preparation refuses that path
+   * for every later generation. Removal is bounded to the DAG's own worktree
+   * root, so a path the dispatcher never created is refused instead of deleted.
+   * @param root - Dispatcher root worktree directory.
+   * @param node - Node whose worktree is being repaired.
+   * @param commit - Resolved target commit to check out.
+   * @param signal - Cancellation for all Git processes.
+   */
+  private async repairUnregisteredWorktree(root: string, node: DagNodeSnapshot, commit: string, signal: AbortSignal): Promise<void> {
+    const worktree = node.worktree
+    const branch = node.branch
+    if (worktree === undefined || branch === undefined) throw new DagGitError('node has no worktree to repair', ['reset'])
+    const ownedRoot = resolve(this.config.dshHome, 'dag', 'worktrees', 'v1') + sep
+    if (!resolve(worktree).startsWith(ownedRoot)) {
+      throw new DagGitError(`existing worktree path is not a registered Git worktree root: ${worktree}`, ['rev-parse'])
+    }
+    await this.run(root, ['worktree', 'prune'], signal)
+    if (await this.worktreeRegistration(worktree, signal) === 'registered') return
+    await rm(worktree, { recursive: true, force: true })
+    await mkdir(dirname(worktree), { recursive: true })
+    const branchExists = await this.tryRun(root, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], signal)
+    await this.run(root, branchExists === undefined
+      ? ['worktree', 'add', '-b', branch, worktree, commit]
+      : ['worktree', 'add', worktree, branch], signal)
+  }
+
+  /**
+   * Abort an active merge and reset tracked state to one allowed local target.
+   *
+   * A node worktree whose directory exists without a Git registration is the
+   * residue of an interrupted `worktree add`; preparation refuses that path, so
+   * this transition is also the one that repairs it.
+   * @param root - Dispatcher root worktree directory.
+   * @param node - Pending or failed node with a worktree.
+   * @param target - Frozen base, exact commit, or local branch ref.
+   * @param signal - Cancellation for all Git processes.
+   * @returns Resolved target commit and remaining worktree dirt.
+   */
+  async reset(root: string, node: DagNodeSnapshot, target: string, signal: AbortSignal): Promise<DagResetResult> {
     if (node.worktree === undefined || node.frozenWaveBase === undefined) throw new DagGitError('node has no worktree to reset', ['reset'])
     if (target.startsWith('refs/remotes/') || target.includes('@{upstream}') || target.startsWith('origin/')) {
       throw new DagGitError('DAG reset rejects remote refs', ['reset'])
     }
     const allowed = target === node.frozenWaveBase || /^[0-9a-fA-F]{40,64}$/.test(target) || /^refs\/heads\/[A-Za-z0-9._/-]+$/.test(target)
     if (!allowed) throw new DagGitError('DAG reset target must be the frozen base, an exact commit, or refs/heads/*', ['reset'])
+    if (await this.worktreeRegistration(node.worktree, signal) === 'unregistered') {
+      const targetCommit = (await this.run(root, ['rev-parse', '--verify', `${target}^{commit}`], signal)).stdout.trim()
+      await this.repairUnregisteredWorktree(root, node, targetCommit, signal)
+    }
     const merge = await this.tryRun(node.worktree, ['rev-parse', '--quiet', '--verify', 'MERGE_HEAD'], signal)
     if (merge !== undefined) await this.run(node.worktree, ['merge', '--abort'], signal)
     const commit = (await this.run(node.worktree, ['rev-parse', '--verify', `${target}^{commit}`], signal)).stdout.trim()

@@ -111,6 +111,8 @@ Status: proposed
 
 节点被记录为 `completed`，`completedCommit = M`，而这个 commit 只包含依赖的工作；依赖方随后把 `M` 当作该节点的贡献合并进来。失败是静默的：没有错误、没有通知，`validateDagState` 也看不到它，因为它只对 `preparedFrom` 做格式检查。该窗口内的任何进程重启都会到达这里，包括普通的会话重新打开。根因是「worktree 在准备前是否已经带有 commit」这个判别依据是在准备时观察的，并被重试销毁；修复必须把合并前的 HEAD 记录到崩溃无法抹去的地方，或从冻结 wave base 与依赖 commit 图推导出来。
 
+**已修复。** 准备工作现在通过同一条 `git-prepared` 命令记录两个阶段。`DagGit.inspectPreparation` 创建或校验 worktree 并返回合并前的 HEAD，不做任何合并；`DagGit.mergeDependencies` 执行合并，并且对每个已合并 commit 都是无操作。`prepareAndStart` 在合并之前先把合并前的 HEAD 同时追加为 `preparedFrom` 与 `preparedHead` 并 flush，之后再追加合并后的 head。reducer 仅在 `preparedHead === preparedFrom` 时接受第二阶段，且永不改写 `preparedFrom`，因此崩溃窗口是被关闭而不是被收窄：重试从合并阶段继续，而不是去重新观察一个已合并的 worktree。`packages/dag/dag/tests/git.spec.ts` 针对崩溃后的事实、重复合并的无操作性，以及服务不得执行的重新观察，分别锁定了该守卫。
+
 ### 撕裂尾部修复存在会丢弃已恢复事件的崩溃窗口
 
 默认持久化路径是带 checksum 的 Zstandard frame，每个持久追加批次一个。EOF 处被截断的最后一个 frame 由 frame 扫描发现，其中完整的事件行被恢复，修复在 `persistContiguous`（`packages/session/session-persistence-jsonl/src/storage.ts:328-337`）中分两次持久步骤执行：先由 `truncateTornTail` 截断并 fsync（`session-persistence-jsonl/src/index.ts:840-844`，`repair` 在 `:1287-1296`），然后才写回恢复的尾部。
@@ -119,11 +121,15 @@ Status: proposed
 
 对 DAG 的损害是有界的，因为每个 effect 都以确定性 id 为键、并从幸存快照重新推导：残留是属于已不存在命令的遗留 worktree 或子会话，而不是非法状态。这个论证并不严谨，应该由测试承担，这正是选项 4 显式包含该窗口的原因。
 
+**未修复。** 关闭它需要让截断与写回尾部成为同一个持久步骤，而实现它的两条路径都会改变会话日志的持久性协议：把「前缀加恢复帧」写入临时文件再 rename 覆盖原文件，或者把已恢复事件写入一个修复 sidecar，由下一次打开在截断前重新应用。`persistBatch` 目前不是纯编码器——它会物化或追加——因此两者都不是局部改动，且都属于持久化所有者，需要各自的崩溃测试与夹具评审。
+
 ### 被中断的 `git worktree add` 会搁死一个节点 id
 
 如果进程在 `git worktree add` 运行期间死亡（`packages/dag/dag/src/git.ts:123-127`），目录可能存在但不是已注册的 worktree。该节点之后每一次 `prepare` 都在 `git.ts:113-115` 抛异常，包括 redispatch 再 dispatch 的循环，因为 `dispatch` 清空 `preparedHead`（`packages/dag/dag/src/reducer.ts:535-545`），于是 `prepareAndStart` 在同一条路径上再次调用 `prepare`。
 
 没有任何转换能就地修复那个节点 id。`reset` 不能：`DagGit.reset` 在这个未注册目录内运行 `git rev-parse` 并失败（`git.ts:273-286`），而且 `dag_node_reset` 只在 `pending` 或 `failed` 下合法。逃逸方式是先用一次 `write` 丢弃该失败节点——这是允许的，因为移除拒绝只覆盖活跃节点（`reducer.ts:447-448`）——再用之后的一次 `write` 重新声明它：worktree 路径内嵌 `graphGeneration`（`packages/dag/dag/src/index.ts:445`），因此新 generation 会得到新目录。换用新的节点 id 重新声明可以不重连依赖方，但会放弃该 id。这个缺口会响亮失败且不产生非法状态，因此排在第一个缺陷之后；它需要的是一条针对「已存在但未注册路径」的显式修复转换，而不是藏在 `prepare` 里的静默修复。
+
+**已修复。** 该修复转换就是 `reset`。`DagGit.reset` 现在先对该路径分类；当目录存在但没有 Git 注册时，它会清理过期注册、删除残留，并在解析后的目标处重新添加 worktree——因此文档中的 `stop`、`redispatch`、`reset`、`dispatch` 序列可以就地修复该节点 id。删除被限制在 `<DSH_HOME>/dag/worktrees/v1/` 内，所以并非由调度器创建的路径会被拒绝而不是被删除。`packages/dag/dag/tests/git.spec.ts` 覆盖了该修复与拒绝。
 
 ## 验证选项
 
@@ -183,6 +189,8 @@ Status: proposed
 - `abstractDagState` 不再比较由生产推导的 command id 与状态，且差分断言仍然通过。
 - 本笔记中的每一处 file:line 主张仍指向所指代码，否则在移动该代码的同一变更中修正本笔记。
 
+其中两项现在由已交付代码满足，而不再是提案：`preparedFrom` 回归测试已经存在，并针对两阶段记录通过；被中断的 `worktree add` 既有了修复转换，也有了测试。
+
 ## 风险
 
 崩溃注入套件是最昂贵的部分，也最容易 flake。第 1 层在构造上就是确定性的——不 flush 就 dispose、截断到指定偏移、在两次修复步骤之间中止——但第 2 层依赖把 SIGKILL 落在特定窗口内以及子进程时序，因此必须保持可选，并且必须自己持有临时根目录、子进程与清理。
@@ -193,4 +201,4 @@ Status: proposed
 
 修复 `preparedFrom` 窗口会改变关于准备的持久记录内容，这是一个持久格式决策，并对已经携带 `dag/state` 快照的会话带来迁移问题。修复在发布前需要自己的 Agent Note。
 
-本笔记记录三个缺陷，并不修复它们。在步骤 5 落地前，`preparedFrom` 窗口中的崩溃仍会产生静默错误的完成，而这里提出的回归测试预期会失败（这正是它证明缺陷的方式）。
+本笔记记录三个缺陷。`preparedFrom` 窗口与被搁死的 worktree 缺口已修复；撕裂尾部修复窗口未修复，其上文给出了两种候选设计。在那项落地之前，恢复尾部在截断与写回之间的崩溃仍会丢弃一次读取已经提供过的事件。

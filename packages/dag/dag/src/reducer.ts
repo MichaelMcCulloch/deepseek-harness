@@ -812,12 +812,18 @@ export function reduceDagState(current: DagState | null, command: DagReducerComm
 
   if (command.type === 'git-prepared') {
     if (node.status !== 'starting' || (fenced.kind !== 'dispatch' && fenced.kind !== 'resume' && fenced.kind !== 'steer')) return { state: current }
-    if (node.preparedHead !== undefined) return { state: current }
+    // Preparation records two phases through this one command: the first sets
+    // `preparedFrom` and `preparedHead` to the same pre-merge HEAD, and the
+    // second advances only `preparedHead` past the dependency merges. A node
+    // whose merge is already recorded ignores a further phase.
+    const preMergePhase = node.preparedHead === undefined || node.preparedHead === node.preparedFrom
+    if (!preMergePhase) return { state: current }
     if (!startEvidenceMatches(node, command.evidence, false)
-      || !/^[0-9a-f]{40,64}$/iu.test(command.evidence.preparedHead)) {
+      || !/^[0-9a-f]{40,64}$/iu.test(command.evidence.preparedHead)
+      || (node.preparedFrom !== undefined && node.preparedFrom !== command.evidence.preparedFrom)) {
       throw new DagStateError('prepared Git evidence does not match the current node binding', 'dag-invalid-git-evidence')
     }
-    const next: DagNodeSnapshot = { ...node, ...command.evidence }
+    const next: DagNodeSnapshot = { ...node, ...command.evidence, preparedFrom: node.preparedFrom ?? command.evidence.preparedFrom }
     return { state: completeState({ ...current, revision: current.revision + 1, nodes: replaceNode(current.nodes, next) }) }
   }
 

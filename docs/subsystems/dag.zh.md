@@ -48,9 +48,11 @@ DAG 子节点是可续跑子智能体，具有绝对 worktree `cwd`、持久 JSO
 
 调度 wave 打开前，一个 porcelain-v2 探针要求根 worktree 干净、位于符号本地分支，并具有有效本地 HEAD。Wave 冻结该分支和提交。每个节点 worktree 从冻结提交开始。依赖合并按照声明顺序使用确切的已记录完成提交，而不使用分支 tip。
 
+准备工作通过一条 `git-prepared` 命令分两个持久阶段完成。第一阶段在任何依赖合并运行之前，把 worktree 合并前的 HEAD 同时记录为 `preparedFrom` 和 `preparedHead`；第二阶段只把 `preparedHead` 推进到合并之后。因此，在合并与其记录之间发生的崩溃无法改变 `preparedFrom` 的含义：重试会从合并阶段继续，而该阶段对每个已合并提交都是无操作，而不是去重新观察一个 HEAD 已成为合并提交的 worktree。已记录合并的节点会忽略后续阶段。
+
 任务完成要求预期分支、无活动合并、worktree 干净、每个已记录依赖提交都是祖先，并且 HEAD 是新的。准备工作开始时其 worktree 已带有提交的任务无需新 HEAD 即可完成：准备工作记录合并前的 HEAD，而从冻结 wave 基准创建的 worktree 仍要求一次提交。服务记录该确切 HEAD。任务节点必须将变更限制在其已声明文件内。集成节点使用已声明的 `ours`、`theirs` 或 `delegate` 策略。Delegate 模式记录确切提交和冲突，取消自动冲突合并，并将手动集成任务交给子节点。
 
-重置仅适用于待处理或失败节点。它接受冻结的 wave 基准、确切提交 id 或显式本地 `refs/heads/*` ref。它拒绝远程 ref 和歧义名称。它中止活动合并、硬重置已跟踪状态、保留未跟踪文件，并报告剩余脏状态。服务不会删除旧分支、worktree 或子会话。
+重置仅适用于待处理或失败节点。它接受冻结的 wave 基准、确切提交 id 或显式本地 `refs/heads/*` ref。它拒绝远程 ref 和歧义名称。它中止活动合并、硬重置已跟踪状态、保留未跟踪文件，并报告剩余脏状态。它还会修复存在但未注册为 Git worktree 的目录——那正是被中断的 `git worktree add` 留下的残留，也是此后每次准备工作都会拒绝的路径：重置会清理过期的注册、删除该残留，并重新添加 worktree。删除被限制在 DAG 自己的 worktree 根目录内，因此并非由调度器创建的路径会被拒绝，而不是被删除。服务不会删除旧分支、worktree 或子会话。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 

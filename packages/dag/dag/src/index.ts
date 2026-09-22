@@ -888,7 +888,9 @@ export class DagService extends Service implements SubagentOwnerController {
     }
     if (command.kind === 'reset') {
       if (command.target === undefined) throw new Error('reset requires a target')
-      const result = await this.git.reset(nodeAtStart, command.target, signal)
+      const resetRoot = dispatcher.session.header.cwd
+      if (resetRoot === undefined) throw new Error('DAG dispatcher session has no cwd')
+      const result = await this.git.reset(resetRoot, nodeAtStart, command.target, signal)
       signal.throwIfAborted()
       this.requireCurrentCommand(dispatcher, nodeAtStart.id, command)
       const detail = result.remainingDirt.length === 0
@@ -938,9 +940,8 @@ export class DagService extends Service implements SubagentOwnerController {
     const root = dispatcher.session.header.cwd
     if (root === undefined) throw new Error('DAG dispatcher session has no cwd')
     let prepared: DagPreparedWorktree
-    if (node.preparedHead === undefined) {
-      prepared = await this.git.prepare(root, node, node.branch, node.worktree, base, node.dependencyCommits, signal)
-    } else {
+    const mergeRecorded = node.preparedHead !== undefined && node.preparedHead !== node.preparedFrom
+    if (mergeRecorded) {
       // A snapshot recorded before pre-preparation evidence existed reports no
       // value, which is the same as a worktree created at the frozen base.
       const preparedFrom = node.preparedFrom ?? base
@@ -948,14 +949,55 @@ export class DagService extends Service implements SubagentOwnerController {
       prepared = {
         branch: node.branch,
         worktree: node.worktree,
-        head: node.preparedHead,
+        head: node.preparedHead ?? base,
         preparedFrom,
         dependencyCommits: node.dependencyCommits,
         conflictedFiles: node.conflictedFiles,
       }
-    }
-    signal.throwIfAborted()
-    if (node.preparedHead === undefined) {
+    } else {
+      // Preparation is durable in two phases through one command: the first
+      // records the pre-merge HEAD as both facts, and the second advances only
+      // the merged head. A crash between the dependency merges and their record
+      // therefore cannot destroy the discriminator the completion guard reads,
+      // because the retry re-reads `preparedFrom` from the node instead of
+      // observing a worktree that already carries the merge commits.
+      let inspected: DagPreparedWorktree
+      if (node.preparedHead === undefined) {
+        inspected = await this.git.inspectPreparation(root, node, node.branch, node.worktree, base, node.dependencyCommits, signal)
+      } else {
+        inspected = {
+          branch: node.branch,
+          worktree: node.worktree,
+          dependencyCommits: node.dependencyCommits,
+          conflictedFiles: node.conflictedFiles,
+          preparedFrom: node.preparedFrom ?? base,
+          head: node.preparedHead ?? base,
+        }
+      }
+      signal.throwIfAborted()
+      if (node.preparedHead === undefined) {
+        this.mutate(dispatcher, undefined, 'git-prepared', {
+          type: 'git-prepared',
+          nodeId: node.id,
+          commandId: command.id,
+          generation: command.generation,
+          bindingGeneration: command.bindingGeneration,
+          operationId: command.operationId,
+          evidence: {
+            branch: inspected.branch,
+            worktree: inspected.worktree,
+            frozenWaveBase: base,
+            preparedFrom: inspected.preparedFrom,
+            preparedHead: inspected.head,
+            dependencyCommits: inspected.dependencyCommits,
+            conflictedFiles: inspected.conflictedFiles,
+            childSessionId: node.childSessionId,
+          },
+        })
+        await this.ctx.sessions.flush(dispatcher.session)
+        signal.throwIfAborted()
+      }
+      const merged = await this.git.mergeDependencies(node, node.worktree, node.dependencyCommits, signal)
       this.mutate(dispatcher, undefined, 'git-prepared', {
         type: 'git-prepared',
         nodeId: node.id,
@@ -964,18 +1006,19 @@ export class DagService extends Service implements SubagentOwnerController {
         bindingGeneration: command.bindingGeneration,
         operationId: command.operationId,
         evidence: {
-          branch: prepared.branch,
-          worktree: prepared.worktree,
+          branch: inspected.branch,
+          worktree: inspected.worktree,
           frozenWaveBase: base,
-          preparedFrom: prepared.preparedFrom,
-          preparedHead: prepared.head,
-          dependencyCommits: prepared.dependencyCommits,
-          conflictedFiles: prepared.conflictedFiles,
+          preparedFrom: inspected.preparedFrom,
+          preparedHead: merged.head,
+          dependencyCommits: inspected.dependencyCommits,
+          conflictedFiles: merged.conflictedFiles,
           childSessionId: node.childSessionId,
         },
       })
       await this.ctx.sessions.flush(dispatcher.session)
       signal.throwIfAborted()
+      prepared = { ...inspected, head: merged.head, conflictedFiles: merged.conflictedFiles }
     }
     this.requireCurrentCommand(dispatcher, node.id, command)
     const instruction = command.kind === 'dispatch' ? undefined : command.message

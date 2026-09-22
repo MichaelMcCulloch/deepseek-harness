@@ -111,6 +111,8 @@ A crash anywhere in that window makes the retry record the wrong discriminator:
 
 The node is recorded `completed` with `completedCommit = M`, a commit containing only the dependency's work; dependents then merge `M` as this node's contribution. The failure is silent: no error, no notice, and `validateDagState` cannot see it because it only format-checks `preparedFrom`. Any process restart in that window reaches it, including an ordinary session reopen. The root cause is that the discriminator "did the worktree already carry commits before preparation?" is observed at preparation time and destroyed by the retry; a fix must record the pre-merge HEAD somewhere the crash cannot erase, or derive it from the frozen wave base and the dependency-commit graph.
 
+**Repaired.** Preparation now records its two phases through one `git-prepared` command. `DagGit.inspectPreparation` creates or verifies the worktree and returns the pre-merge HEAD without merging; `DagGit.mergeDependencies` performs the merges and is a no-op per already-merged commit. `prepareAndStart` appends the pre-merge HEAD as both `preparedFrom` and `preparedHead` and flushes before it merges, then appends the merged head. The reducer accepts a second phase only while `preparedHead === preparedFrom` and never rewrites `preparedFrom`, so the crash window is closed rather than narrowed: the retry resumes the merge phase instead of re-observing a merged worktree. `packages/dag/dag/tests/git.spec.ts` pins the guard against the crashed facts, the re-merge no-op, and the re-inspection that the service must not perform.
+
 ### The torn-tail repair has a crash window that drops recovered events
 
 The default persistence path is checksummed Zstandard frames, one per durable append batch. An EOF-truncated final frame is detected by the frame scan, its complete event lines are recovered, and the repair runs as two durable steps in `persistContiguous` (`packages/session/session-persistence-jsonl/src/storage.ts:328-337`): first `truncateTornTail` truncates and fsyncs (`session-persistence-jsonl/src/index.ts:840-844`, `repair` at `:1287-1296`), and only then is the recovered tail written back.
@@ -119,11 +121,15 @@ A crash between those two steps loses the recovered events permanently. A read h
 
 The damage to the DAG is bounded, because every effect is keyed by a deterministic id and re-derived from the surviving snapshot: the residue is an orphan worktree or child session for a command that no longer exists, not an invalid state. That argument is informal and belongs in a test, which is why option 4 includes the window explicitly.
 
+**Not repaired.** Closing it needs the truncation and the rewritten tail to become one durable step, and the two ways to get there both change the session log's durability protocol: replace the file by writing prefix-plus-recovered-frame to a temporary file and renaming it over the original, or write the recovered events to a repair sidecar that the next open re-applies before it truncates. `persistBatch` is not a pure encoder today — it materializes or appends — so neither is a local edit, and both belong to the persistence owner with their own crash tests and fixture review.
+
 ### An interrupted `git worktree add` strands a node id
 
 If the process dies while `git worktree add` is running (`packages/dag/dag/src/git.ts:123-127`), the directory can exist without being a registered worktree. Every later `prepare` for that node throws at `git.ts:113-115`, including a redispatch-and-dispatch cycle, because `dispatch` clears `preparedHead` (`packages/dag/dag/src/reducer.ts:535-545`) and `prepareAndStart` therefore calls `prepare` again on the same path.
 
 No transition repairs that node id in place. `reset` cannot: `DagGit.reset` runs `git rev-parse` inside the unregistered directory and fails (`git.ts:273-286`), and `dag_node_reset` is legal only from `pending` or `failed` anyway. The escape is a `write` that drops the failed node — allowed, because the removal refusal covers only active nodes (`reducer.ts:447-448`) — followed by a later `write` that re-declares it: the worktree path embeds `graphGeneration` (`packages/dag/dag/src/index.ts:445`), so the new generation gets a fresh directory. Re-declaring under a new node id avoids rewiring dependents but abandons the id. This gap fails loudly and produces no invalid state, so it ranks below the first defect; what it needs is an explicit repair transition for an existing but unregistered path, not a silent fix inside `prepare`.
+
+**Repaired.** That repair transition is `reset`. `DagGit.reset` now classifies the path first, and when the directory exists without a Git registration it prunes the stale registration, removes the residue, and adds the worktree again at the resolved target — so the documented `stop`, `redispatch`, `reset`, `dispatch` sequence repairs the node id in place. Removal is bounded to `<DSH_HOME>/dag/worktrees/v1/`, so a path the dispatcher did not create is refused rather than deleted. `packages/dag/dag/tests/git.spec.ts` covers the repair and the refusal.
 
 ## Verification options
 
@@ -183,6 +189,8 @@ Explicitly not doing:
 - `abstractDagState` no longer compares production-derived command ids and states, and the differential assertions still pass.
 - Every file:line claim in this note still resolves to the named code, or the note is corrected in the same change that moves it.
 
+Two of these are now satisfied by shipped code rather than proposed: the `preparedFrom` regression test exists and passes against the two-phase record, and the interrupted-`worktree add` case has both its repair transition and its test.
+
 ## Risks
 
 The crash-injection suite is the expensive part and the one most likely to be flaky. Layer 1 is deterministic by construction — dispose without flushing, truncate at a chosen offset, abort between two repair steps — but layer 2 depends on landing a SIGKILL inside a specific window and on subprocess timing, so it must stay opt-in and must own its temp roots, child processes, and teardown.
@@ -193,4 +201,4 @@ The refusal oracle multiplies the model test's work by the number of guard mutat
 
 Fixing the `preparedFrom` window changes what is recorded durably about preparation, which is a durable-format decision with a migration question for sessions that already carry a `dag/state` snapshot. The fix needs its own Agent Note before it ships.
 
-This note records three defects and does not fix them. Until step 5 lands, a crash in the `preparedFrom` window still produces a silently wrong completion, and the regression test proposed here is expected to fail (which is how it proves the defect).
+This note records three defects. The `preparedFrom` window and the stranded-worktree gap are repaired; the torn-tail repair window is not, and its two candidate designs are stated above. Until that one lands, a crash between the truncation and the rewrite of a recovered tail still drops events a read already served.

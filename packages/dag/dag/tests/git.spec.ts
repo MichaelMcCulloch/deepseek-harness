@@ -142,7 +142,7 @@ describe('local DAG Git effects', { timeout: 60_000 }, () => {
     const conflicting = await dependency('reset-conflict', { 'owned.txt': 'dependency conflict\n' })
     expect(() => run(worktree, 'merge', conflicting)).toThrow()
     expect(run(worktree, 'rev-parse', '--verify', 'MERGE_HEAD')).toBe(conflicting)
-    const reset = await git.reset({ ...executable, status: 'failed' }, base, signal)
+    const reset = await git.reset(root, { ...executable, status: 'failed' }, base, signal)
     expect(reset.targetCommit).toBe(base)
     expect(reset.remainingDirt.join('\n')).toContain('keep.txt')
     expect(() => run(worktree, 'rev-parse', '--verify', 'MERGE_HEAD')).toThrow()
@@ -170,10 +170,10 @@ describe('local DAG Git effects', { timeout: 60_000 }, () => {
     })
 
     for (const target of ['main', 'HEAD', 'origin/main', 'refs/remotes/origin/main', '@{upstream}']) {
-      await expect(git.reset(failed, target, signal)).rejects.toThrow(/reset target|remote refs/)
+      await expect(git.reset(root, failed, target, signal)).rejects.toThrow(/reset target|remote refs/)
     }
-    await expect(git.reset(failed, 'refs/heads/main', signal)).resolves.toMatchObject({ targetCommit: base })
-    await expect(git.reset(failed, base, signal)).resolves.toMatchObject({ targetCommit: base })
+    await expect(git.reset(root, failed, 'refs/heads/main', signal)).resolves.toMatchObject({ targetCommit: base })
+    await expect(git.reset(root, failed, base, signal)).resolves.toMatchObject({ targetCommit: base })
   })
 
   it('rejects dirty, uncommitted, merging, and dependency-incomplete completion evidence', async () => {
@@ -511,8 +511,8 @@ describe('local DAG Git effects', { timeout: 60_000 }, () => {
       frozenWaveBase: base,
       preparedHead: preparedUnrestricted.head,
     }, signal)).resolves.toBe(unrestrictedHead)
-    await expect(git.reset(snapshot('missing-reset'), base, signal)).rejects.toThrow(/no worktree to reset/)
-    await expect(git.reset({
+    await expect(git.reset(root, snapshot('missing-reset'), base, signal)).rejects.toThrow(/no worktree to reset/)
+    await expect(git.reset(root, {
       ...unrestricted,
       status: 'failed',
       branch: preparedUnrestricted.branch,
@@ -564,6 +564,48 @@ describe('local DAG Git effects', { timeout: 60_000 }, () => {
       preparedFrom: base,
       preparedHead: rearmed.head,
     }, signal)).rejects.toThrow(/commit after dependency preparation/)
+  })
+
+  it('keeps the pre-merge discriminator when preparation is retried after a crash', async () => {
+    const base = run(root, 'rev-parse', 'HEAD')
+    const dependencyCommit = await dependency('crash-dependency', { 'dependency.txt': 'dependency\n' })
+    const worktree = join(home, 'dag', 'worktrees', 'v1', 'session', 'g1', 'crash-task')
+    const branch = 'dsh/dag/session/g1/crash-task'
+    const task = snapshot('crash-task', {
+      deps: [DagNodeId('dependency')],
+      dependencyCommits: [dependencyCommit],
+    })
+
+    // Phase one is what the service records before it merges anything.
+    const inspected = await git.inspectPreparation(root, task, branch, worktree, base, [dependencyCommit], signal)
+    expect(inspected.preparedFrom).toBe(base)
+    expect(inspected.head).toBe(base)
+
+    // The process dies after the dependency merges and before their record.
+    const merged = await git.mergeDependencies(task, worktree, [dependencyCommit], signal)
+    expect(merged.head).not.toBe(base)
+
+    // The retry resumes the merge phase, which is a no-op per commit, and keeps
+    // the recorded pre-merge head, so a task that commits nothing is refused.
+    const retried = await git.mergeDependencies(task, worktree, [dependencyCommit], signal)
+    expect(retried.head).toBe(merged.head)
+    const crashed = {
+      ...task,
+      branch,
+      worktree,
+      frozenWaveBase: base,
+      preparedFrom: inspected.preparedFrom,
+      preparedHead: retried.head,
+    }
+    await expect(git.validateCompletion(crashed, signal)).rejects.toThrow(/commit after dependency preparation/)
+
+    // Re-inspecting the already-merged worktree reports the merge commit as the
+    // pre-merge head, which the guard must accept; recording phase one before
+    // merging is what keeps the service off that path.
+    const reobserved = await git.inspectPreparation(root, task, branch, worktree, base, [dependencyCommit], signal)
+    expect(reobserved.preparedFrom).toBe(merged.head)
+    await expect(git.validateCompletion({ ...crashed, preparedFrom: reobserved.preparedFrom }, signal))
+      .resolves.toBe(merged.head)
   })
 
   it('rejects missing and wrong-branch completion facts', async () => {
@@ -719,6 +761,34 @@ describe('local DAG Git effects', { timeout: 60_000 }, () => {
     const reason = new Error('cancel Git')
     controller.abort(reason)
     await expect(git.probeRoot(root, controller.signal)).rejects.toBe(reason)
+  })
+
+  it('repairs a worktree directory left behind by an interrupted worktree add', async () => {
+    const base = run(root, 'rev-parse', 'HEAD')
+    const worktree = join(home, 'dag', 'worktrees', 'v1', 'session', 'g1', 'stranded')
+    const branch = 'dsh/dag/session/g1/stranded'
+    // An interrupted `git worktree add` leaves the directory without a
+    // registration, and every later preparation refuses that path.
+    await mkdir(worktree, { recursive: true })
+    await writeFile(join(worktree, 'residue.txt'), 'partial checkout\n')
+    const node = snapshot('stranded', { branch, worktree, frozenWaveBase: base, status: 'pending' })
+    await expect(git.prepare(root, node, branch, worktree, base, [], signal))
+      .rejects.toThrow(/not a registered Git worktree root/)
+    await expect(git.reset(root, node, base, signal)).resolves.toMatchObject({ targetCommit: base })
+    expect(run(worktree, 'symbolic-ref', '--short', 'HEAD')).toBe(branch)
+    await expect(readFile(join(worktree, 'residue.txt'), 'utf8')).rejects.toThrow()
+    await expect(git.prepare(root, node, branch, worktree, base, [], signal))
+      .resolves.toMatchObject({ head: base, preparedFrom: base })
+  })
+
+  it('refuses to remove an unregistered path outside the DAG worktree root', async () => {
+    const base = run(root, 'rev-parse', 'HEAD')
+    const worktree = join(temporary, 'foreign-directory')
+    await mkdir(worktree, { recursive: true })
+    await writeFile(join(worktree, 'keep.txt'), 'keep\n')
+    const node = snapshot('foreign', { branch: 'dsh/dag/session/g1/foreign', worktree, frozenWaveBase: base, status: 'pending' })
+    await expect(git.reset(root, node, base, signal)).rejects.toThrow(/not a registered Git worktree root/)
+    await expect(readFile(join(worktree, 'keep.txt'), 'utf8')).resolves.toBe('keep\n')
   })
 
   it('builds the versioned local worktree root', () => {
