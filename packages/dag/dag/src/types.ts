@@ -280,7 +280,12 @@ declare module '@deepseek-ai/dsh-session/types' {
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionStateMap {
-    dag: DagProjection | null
+    /**
+     * Complete durable DAG state, or null before the first write. The fold
+     * replaces it with each `dag/state` value, so host readers never scan
+     * event history for it.
+     */
+    dag: DagState | null
   }
   interface SessionProjectionMap {
     /** Current native DAG board, or null before the first write. */

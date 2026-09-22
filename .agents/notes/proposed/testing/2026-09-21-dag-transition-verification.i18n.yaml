@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/testing/2026-09-21-dag-transition-verification.md
-2026-09-21-dag-transition-verification.md: 33974cebf37aa25867273a006623b807bb49b9bd
-2026-09-21-dag-transition-verification.zh.md: c0290b5176cade61fdcfe6fc6b7b8004ec2a2d8c
+2026-09-21-dag-transition-verification.md: 9d6bd34c5103e552add9341fe3d42130415d3cac
+2026-09-21-dag-transition-verification.zh.md: 7929652c6e544b52918e9d090e6477952db78780

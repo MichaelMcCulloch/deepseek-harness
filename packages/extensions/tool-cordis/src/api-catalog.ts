@@ -970,7 +970,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'turnSettled(settlement: SubagentOwnerTurnSettlement): void',
-        description: 'Fail one current child turn that ended without a final DAG report.',
+        description: 'Fail one current child turn that ended without a final DAG report.\n\nA settlement that decided to end the turn cancels the child even when the durable transition fails: an authorized child turn must not keep running because this service could not record that it ended.',
         parameters: [{ name: 'settlement', description: 'Authorized ordinary-turn settlement facts.' }],
       },
     ],

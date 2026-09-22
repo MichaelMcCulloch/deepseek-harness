@@ -6,7 +6,7 @@
 
 ## 持久状态
 
-调度器会话日志是 DAG 状态的唯一来源。每个获准的变更都会追加一个完整且不可变的 `dag/state` 快照，格式版本为 `1`。第一次写入前，`dag` 会话投影为 `null`。此后，投影包含修订号、按拓扑排序的节点行、状态计数、就绪节点和开放 wave。浏览器投影不包含 worktree 绝对路径。
+调度器会话日志是 DAG 状态的唯一来源。每个获准的变更都会追加一个完整且不可变的 `dag/state` 快照，格式版本为 `1`。`dag` 会话投影持有该完整状态：第一次写入前为 `null`，之后为最新追加的快照；注册表在折叠一次会话日志后，随每个已提交事件推进该状态。因此领域读取针对维护中的投影状态进行，而不扫描事件历史。由其派生的浏览器值包含修订号、按拓扑排序的节点行、状态计数、就绪节点和开放 wave，且不含 worktree 绝对路径。
 
 每个快照包含单调递增的修订号、图代数、操作计数器、完整节点面板、拓扑顺序、就绪节点列表、状态计数、wave、活动命令 id、操作回执和通知。每个节点还保存其代数、持久子会话 id、分支、worktree、冻结的 wave 基准、确切依赖提交、当前操作、结算信息和完成提交。
 
@@ -28,7 +28,7 @@
 
 状态追加后，服务将会话刷新、Git 工作、子节点实体化、消息传递和生命周期发布安排为可取消效果。每个获准变更后都会发出 `dag/committed` Cordis 事件，其中包含调度器会话、修订号、图代数、原因和不可变快照。
 
-会话重新打开时，服务折叠最新快照并重新启动已获准或正在运行的命令。确定性子节点 id 和消息 id 使子节点创建和消息传递可以安全重试。每次重试在改变状态前检查当前 Git 和子会话证据。
+会话重新打开时，服务读取投影折叠或恢复出的状态，并重新启动已获准或正在运行的命令。确定性子节点 id 和消息 id 使子节点创建和消息传递可以安全重试。每次重试在改变状态前检查当前 Git 和子会话证据。
 
 ## 通知与等待
 
@@ -230,6 +230,10 @@ settled(settlement: SubagentOwnerSettlement): void
 
 /**
  * Fail one current child turn that ended without a final DAG report.
+ *
+ * A settlement that decided to end the turn cancels the child even when the
+ * durable transition fails: an authorized child turn must not keep running
+ * because this service could not record that it ended.
  * @param settlement - Authorized ordinary-turn settlement facts.
  */
 turnSettled(settlement: SubagentOwnerTurnSettlement): void

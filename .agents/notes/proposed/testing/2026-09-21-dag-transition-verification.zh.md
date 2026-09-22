@@ -6,7 +6,7 @@ Status: proposed
 
 ## 问题
 
-原生 DAG 编排器（[事件溯源编排器决策](../../implemented/architecture/2026-08-29-event-sourced-native-dag-orchestrator.zh.md)）把全部状态放在每次被接受变更对应的一条持久会话事件里：`dag/state` 携带完整的 `DagState` 快照（`packages/dag/dag/src/types.ts:138-153`）。每一次被接受的状态转换都是 `DagService.mutate`（`packages/dag/dag/src/index.ts:730-757`）中一次同步的读取-reduce-追加，恢复则折叠持久前缀，并从找到的快照重新运行每个未结算的 mailbox 命令。只有当每一次被接受的状态转换都产生满足流不变量的状态时，这个设计才成立，而今天已发布产品中没有任何东西检查这一点。
+原生 DAG 编排器（[事件溯源编排器决策](../../implemented/architecture/2026-08-29-event-sourced-native-dag-orchestrator.zh.md)）把全部状态放在每次被接受变更对应的一条持久会话事件里：`dag/state` 携带完整的 `DagState` 快照（`packages/dag/dag/src/types.ts:138-153`）。每一次被接受的状态转换都是 `DagService.mutate`（`packages/dag/dag/src/index.ts:838-865`）中一次同步的读取-reduce-追加，恢复则读取 `dag` 会话投影从持久前缀折叠出的状态，并据此重新运行每个未结算的 mailbox 命令。只有当每一次被接受的状态转换都产生满足流不变量的状态时，这个设计才成立，而今天已发布产品中没有任何东西检查这一点。
 
 本笔记回答的问题是：要验证每一次 DAG 状态转换都留下合法状态，需要做什么。状态转换通过三种途径进入系统：
 
@@ -33,7 +33,7 @@ Status: proposed
 
 ## 状态模型与当前检查的内容
 
-`dag/state` 通过模块增强声明并加入已知会话事件词汇；它不携带 `ignorable: true`，因此不认识该事件的构建会拒绝整个日志，而不是误读快照。该事件只有一个读取方 `latestState`（`packages/dag/dag/src/index.ts:1379-1386`）：它反向扫描会话快照取最后一条 `dag/state`，不存在进程本地镜像。`DagService.mutate`（`index.ts:730-757`）读取该快照，调用 `reduceDagState`（`packages/dag/dag/src/reducer.ts:432`），当 reducer 返回同一对象时原样返回（`index.ts:733`），否则在一个没有 `await` 的同步块内追加新快照（`index.ts:737`）。
+`dag/state` 通过模块增强声明并加入已知会话事件词汇；它不携带 `ignorable: true`，因此不认识该事件的构建会拒绝整个日志，而不是误读快照。该事件只有一个读取方，即 `dag` 会话投影单元（`packages/dag/dag/src/index.ts:299-309`）：其折叠在每条 `dag/state` 上把自身状态替换为该事件的值；该单元同时也是服务自身的读取路径，因此没有任何代码为取最新快照而扫描日志，每次服务读取都是一次 `stateOf` 查找。`DagService.mutate`（`index.ts:838-865`）读取该状态，调用 `reduceDagState`（`packages/dag/dag/src/reducer.ts:432`），当 reducer 返回同一对象时原样返回（`index.ts:841`），否则在一个没有 `await` 的同步块内追加新快照（`index.ts:845`）。
 
 节点字段中有一部分是权威值，另一部分是派生值。`counts`、`readyNodeIds` 与 `activeCommandIds` 由 `completeState` 在每次被接受的命令上重新计算。`settlement`、`currentOperationId` 与 `dependencyCommits` 可从其他字段推导，但被存储下来，不变量把它们当作权威值，只检查格式与单调性。
 
@@ -71,7 +71,7 @@ Status: proposed
 
 `Session.append` 是内存操作：它先把事件推入会话日志，再分发 `session/event`（`packages/core/session/src/index.ts:756-759`），其自身文档也说明热路径从不阻塞在 I/O 上。持久性是单独的、被 await 的步骤。JSONL 后端缓冲实时事件，并在 200 毫秒定时器或 `session/flush` 时排空（`packages/session/session-persistence-jsonl/src/storage.ts:36`）；落地的批次是全有或全无：`appendLines` 先写入再 fsync，写入或 sync 失败会截断回追加前的大小、重新 fsync，然后重新抛出。
 
-每个外部 effect 都在其命令持久之后运行：`pump` 追加 `command-running` 后 flush（`packages/dag/dag/src/index.ts:819`），`prepareAndStart` 在 `git-prepared` 之后 flush（`index.ts:977`），`ensureWave` 在 `wave-probed` 之后 flush（`index.ts:1025`），`deliverOwnerRedirect` 在接纳替换消息之前 flush（`packages/dag/dag/src/index.ts:627`）。`ctx.sessions.flush` 返回的是「是否至少有一个持久性监听者参与」（`packages/core/session/src/index.ts:1205-1235`），它之所以是真实屏障，是因为 agent loop 的已存储会话持有 JSONL 写句柄；这是 agent loop 的性质，不是 `flush` 的性质。
+每个外部 effect 都在其命令持久之后运行：`pump` 追加 `command-running` 后 flush（`packages/dag/dag/src/index.ts:917-927`），`prepareAndStart` 在 `git-prepared` 之后 flush（`index.ts:1105`），`ensureWave` 在 `wave-probed` 之后 flush（`index.ts:1176`），`deliverOwnerRedirect` 在接纳替换消息之前 flush（`packages/dag/dag/src/index.ts:715`）。`ctx.sessions.flush` 返回的是「是否至少有一个持久性监听者参与」（`packages/core/session/src/index.ts:1205-1235`），它之所以是真实屏障，是因为 agent loop 的已存储会话持有 JSONL 写句柄；这是 agent loop 的性质，不是 `flush` 的性质。
 
 由于每份快照都是完整的、revision 是连续的，被接受 revision 序列的任何持久前缀本身就是合法的 DAG 状态。正是这个性质让崩溃恢复可行，而它成立的条件恰恰是每一次被接受的状态转换都满足 `validateDagState`。重新打开时，构造函数调度 `reconcile`，后者调度 pump 并投递通知；pump 为每个节点取最旧的未结算 mailbox 行，从头重放整个 effect，重新读取 Git 与子级状态，而不是信任已记录事实。重放是幂等的，因为每个标识符都是确定性的：命令 id、子会话 id、`MessageId(`${command.id}-message`)` 与通知 id。
 
@@ -99,7 +99,7 @@ Status: proposed
 
 ### `preparedFrom` 窗口击败空操作完成守卫
 
-`DagGit.prepare` 在 `packages/dag/dag/src/git.ts:135` 捕获 `currentHead`，早于 `:157` 的依赖合并循环，并在 `:178` 把它作为 `preparedFrom` 返回。只要持久节点没有 `preparedHead`，`prepareAndStart` 就重新运行 `prepare`——而绝不运行 `verifyPrepared`（`packages/dag/dag/src/index.ts:941`），记录结果的 `git-prepared` 追加发生得更晚（`index.ts:959`，flush 在 `:977`）。
+`DagGit.prepare` 在 `packages/dag/dag/src/git.ts:135` 捕获 `currentHead`，早于 `:157` 的依赖合并循环，并在 `:178` 把它作为 `preparedFrom` 返回。只要持久节点没有 `preparedHead`，`prepareAndStart` 就重新运行 `prepare`——而绝不运行 `verifyPrepared`（`packages/dag/dag/src/index.ts:1073`），记录结果的 `git-prepared` 追加发生得更晚（`index.ts:1087`，flush 在 `:1105`）。
 
 该窗口内任意位置的崩溃都会让重试记录错误的判别依据：
 
@@ -127,7 +127,7 @@ Status: proposed
 
 如果进程在 `git worktree add` 运行期间死亡（`packages/dag/dag/src/git.ts:123-127`），目录可能存在但不是已注册的 worktree。该节点之后每一次 `prepare` 都在 `git.ts:113-115` 抛异常，包括 redispatch 再 dispatch 的循环，因为 `dispatch` 清空 `preparedHead`（`packages/dag/dag/src/reducer.ts:535-545`），于是 `prepareAndStart` 在同一条路径上再次调用 `prepare`。
 
-没有任何转换能就地修复那个节点 id。`reset` 不能：`DagGit.reset` 在这个未注册目录内运行 `git rev-parse` 并失败（`git.ts:273-286`），而且 `dag_node_reset` 只在 `pending` 或 `failed` 下合法。逃逸方式是先用一次 `write` 丢弃该失败节点——这是允许的，因为移除拒绝只覆盖活跃节点（`reducer.ts:447-448`）——再用之后的一次 `write` 重新声明它：worktree 路径内嵌 `graphGeneration`（`packages/dag/dag/src/index.ts:445`），因此新 generation 会得到新目录。换用新的节点 id 重新声明可以不重连依赖方，但会放弃该 id。这个缺口会响亮失败且不产生非法状态，因此排在第一个缺陷之后；它需要的是一条针对「已存在但未注册路径」的显式修复转换，而不是藏在 `prepare` 里的静默修复。
+没有任何转换能就地修复那个节点 id。`reset` 不能：`DagGit.reset` 在这个未注册目录内运行 `git rev-parse` 并失败（`git.ts:273-286`），而且 `dag_node_reset` 只在 `pending` 或 `failed` 下合法。逃逸方式是先用一次 `write` 丢弃该失败节点——这是允许的，因为移除拒绝只覆盖活跃节点（`reducer.ts:447-448`）——再用之后的一次 `write` 重新声明它：worktree 路径内嵌 `graphGeneration`（`packages/dag/dag/src/index.ts:533`），因此新 generation 会得到新目录。换用新的节点 id 重新声明可以不重连依赖方，但会放弃该 id。这个缺口会响亮失败且不产生非法状态，因此排在第一个缺陷之后；它需要的是一条针对「已存在但未注册路径」的显式修复转换，而不是藏在 `prepare` 里的静默修复。
 
 **已修复。** 该修复转换就是 `reset`。`DagGit.reset` 现在先对该路径分类；当目录存在但没有 Git 注册时，它会清理过期注册、删除残留，并在解析后的目标处重新添加 worktree——因此文档中的 `stop`、`redispatch`、`reset`、`dispatch` 序列可以就地修复该节点 id。删除被限制在 `<DSH_HOME>/dag/worktrees/v1/` 内，所以并非由调度器创建的路径会被拒绝而不是被删除。`packages/dag/dag/tests/git.spec.ts` 覆盖了该修复与拒绝。
 
@@ -153,7 +153,7 @@ Status: proposed
 4. **构建崩溃注入套件（三至四天）。** 第 1 层在进程内且确定性，在 `ci-primary` 把关；第 2 层是进程外 SIGKILL，作为可选门禁。不要重复测试 JSONL 格式。价值最高的单个测试是 `preparedFrom` 窗口的回归测试：在依赖合并与 `git-prepared` 追加之间终止进程，然后断言空操作完成仍被拒绝。它今天应当失败。接下来加入被中断 worktree 的用例、撕裂尾部修复窗口与通知注入窗口。
 5. **修复缺陷（三至四天）。** 在 `git.prepare` 前持久记录合并前的 HEAD，加入显式的 worktree 修复转换，把撕裂尾部修复变成一次持久步骤；每个都需要各自的 Agent Note。
 6. **关闭退出路径缺口（一天）。** 把 `settlement.stop()` 移入 `finally`，决定并记录抛异常的 owner 控制器对子级做什么，并补上缺失测试：真实 Activation 驱动 `ownerStop`、抛异常的 owner 控制器，以及 settlement 与挂起 redirect 竞争。
-7. **迁移 DAG 的同步 Session 读取（一到两天）。** 七处生产调用——`latestState`、`dispatcherFor`、子级轮次边界、`messageRecorded`、`noticeRecorded`、不变量的安装期 seed，以及 `SubagentContinuationManager.recordsMessage`——直接读取事件历史，并携带本仓库的延迟迁移豁免。它们所需的既有状态，正是面向客户端的 `dag` 投影有意不携带的内容：完整的 `DagState`、已记录的消息与通知标识、子级描述符，以及当前轮次边界。因此迁移它们是一次持久状态与投影的设计变更，并带有自己的格式问题，而不是机械替换。
+7. **迁移 DAG 其余同步 Session 读取（一到两天）。** 完整的 `DagState` 现在位于 `dag` 会话投影上，服务通过 `stateOf` 读取它，因此 `latestState` 及其十二处调用点已经消失。仍有六处生产读取在延迟迁移豁免下直接读取事件历史。`dispatcherFor`（`index.ts:1476-1486`）与 `assertCurrentChildTurn`（`index.ts:1502-1528`）中的子级轮次边界读取子会话的 `subagent/descriptor`、轮次边界和消息 id，而 `dag` 单元从不折叠这些内容。`messageRecorded` 与 `noticeRecorded`（`packages/dag/dag/src/runtime.ts:177-198`）检查某个确定性消息 id 是否已记入日志，可能在子会话中，也可能在调度器自身会话中。不变量的安装期 seed（`packages/dag/dag/src/invariant.ts:393-398`）折叠原始事件流，而且必须如此：它校验的是持久事件本身，而不是服务从这些事件读到的状态。`SubagentContinuationManager.recordsMessage`（`packages/subagent/subagent/src/continuation-activation.ts:677`）属于 subagent 包。每处剩余读取所需的子级描述符、已记录消息标识或当前轮次消息集合都需要成为受维护的状态，这是一次持久状态与投影的设计变更，而不是机械替换。
 
 明确不做：
 

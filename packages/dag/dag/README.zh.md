@@ -80,7 +80,7 @@ dispatch wave 先记录意图，再检查一次 porcelain-v2 根状态。根 wor
 
 ### 持久状态与回放
 
-调度器日志是唯一持久权威。每个 `dag/state` 事件包含完整的版本 1 快照：revision、graph generation、operation counter、节点面板、拓扑顺序、就绪列表、状态计数、wave、命令、receipt 与通知。第一次状态前 `dag` projection 为 `null`；之后它提供不含绝对 worktree 路径的浏览器安全视图。
+调度器日志是唯一持久权威。每个 `dag/state` 事件包含完整的版本 1 快照：revision、graph generation、operation counter、节点面板、拓扑顺序、就绪列表、状态计数、wave、命令、receipt 与通知。`dag` 会话投影持有该完整状态——第一条事件前为 `null`——注册表随每个已提交事件推进它，因此服务通过 `stateOf` 读取状态，无需扫描日志。其 wire 值是不含绝对 worktree 路径的浏览器安全视图。
 
 生产 reducer 与独立 reference reducer 都是纯函数。测试在有界的命令、effect、陈旧回调与重启历史上比较两者。每次 append 被接受后，服务发布非阻塞 `dag/committed` Cordis 事件，供其他插件观察不可变结果。
 

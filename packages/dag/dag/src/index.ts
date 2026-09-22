@@ -63,6 +63,7 @@ import type {
   DagWriteRequest,
   DagWriteResult,
 } from './types.ts'
+import { DAG_STATE_VERSION } from './types.ts'
 
 export type * from './types.ts'
 export { DAG_STATE_VERSION } from './types.ts'
@@ -165,18 +166,22 @@ const waveSchema = zod.object({
   completedNodeIds: zod.array(zod.string()),
   failedNodeIds: zod.array(zod.string()),
 })
+/** Node row fields the durable state and its browser projection both carry. */
+const nodeRowFields = {
+  id: zod.string(),
+  content: zod.string(),
+  deps: zod.array(zod.string()),
+  kind: zod.enum(['task', 'integration']),
+  policy: zod.enum(['delegate', 'ours', 'theirs']),
+  files: zod.array(zod.string()),
+  status: statusSchema,
+  generation: zod.number().int().nonnegative(),
+}
 const dagProjectionSchema = zod.object({
   revision: zod.number().int().positive(),
   graphGeneration: zod.number().int().positive(),
   nodes: zod.array(zod.object({
-    id: zod.string(),
-    content: zod.string(),
-    deps: zod.array(zod.string()),
-    kind: zod.enum(['task', 'integration']),
-    policy: zod.enum(['delegate', 'ours', 'theirs']),
-    files: zod.array(zod.string()),
-    status: statusSchema,
-    generation: zod.number().int().nonnegative(),
+    ...nodeRowFields,
     branch: zod.string().optional(),
     waveId: zod.string().optional(),
     dependencyCommits: zod.array(zod.string()),
@@ -188,10 +193,72 @@ const dagProjectionSchema = zod.object({
   readyNodeIds: zod.array(zod.string()),
   openWaves: zod.array(waveSchema),
 }) as unknown as ZodType<DagProjection>
+const commandSchema = zod.object({
+  id: zod.string(),
+  operationId: zod.string(),
+  kind: zod.enum(['dispatch', 'resume', 'steer', 'stop', 'reset', 'complete']),
+  state: zod.enum(['accepted', 'running', 'settled']),
+  generation: zod.number().int().nonnegative(),
+  bindingGeneration: zod.number().int().nonnegative(),
+  message: zod.string().optional(),
+  target: zod.string().optional(),
+  acceptedRevision: zod.number().int().nonnegative(),
+  outcome: zod.enum(['succeeded', 'failed', 'cancelled']).optional(),
+  detail: zod.string().optional(),
+  error: zod.string().optional(),
+})
+const noticeSchema = zod.object({
+  id: zod.string(),
+  kind: zod.enum(['node-failed', 'node-blocked', 'node-interrupted', 'node-completed', 'wave-settled']),
+  revision: zod.number().int().positive(),
+  graphGeneration: zod.number().int().positive(),
+  nodeId: zod.string().optional(),
+  waveId: zod.string().optional(),
+  text: zod.string(),
+  delivered: zod.boolean(),
+  deliveredRevision: zod.number().int().positive().optional(),
+})
+const dagStateSchema = zod.object({
+  version: zod.literal(DAG_STATE_VERSION),
+  noticeNamespace: zod.string(),
+  revision: zod.number().int().positive(),
+  graphGeneration: zod.number().int().positive(),
+  operationCounter: zod.number().int().nonnegative(),
+  nodes: zod.array(zod.object({
+    ...nodeRowFields,
+    brief: zod.string(),
+    bindingGeneration: zod.number().int().nonnegative(),
+    childSessionId: zod.string().optional(),
+    branch: zod.string().optional(),
+    worktree: zod.string().optional(),
+    waveId: zod.string().optional(),
+    frozenWaveBase: zod.string().optional(),
+    preparedFrom: zod.string().optional(),
+    preparedHead: zod.string().optional(),
+    dependencyCommits: zod.array(zod.string()),
+    conflictedFiles: zod.array(zod.string()),
+    currentOperationId: zod.string().optional(),
+    settlement: settlementSchema.optional(),
+    completedCommit: zod.string().optional(),
+    commands: zod.array(commandSchema),
+  })),
+  topologicalOrder: zod.array(zod.string()),
+  readyNodeIds: zod.array(zod.string()),
+  counts: countsSchema,
+  waves: zod.array(waveSchema),
+  activeCommandIds: zod.array(zod.string()),
+  receipts: zod.array(zod.object({
+    id: zod.string(),
+    cause: zod.string(),
+    acceptedRevision: zod.number().int().nonnegative(),
+    nodeIds: zod.array(zod.string()),
+  })),
+  notices: zod.array(noticeSchema),
+}).strict() as unknown as ZodType<DagState>
 
 /** Native DAG service backed only by complete session-log state values. */
 export class DagService extends Service implements SubagentOwnerController {
-  static inject = ['agents', 'subagents', 'subprocess', 'sessions']
+  static inject = ['agents', 'subagents', 'subprocess', 'sessions', 'sessionProjections']
 
   static Config: z<Config> = z.object({
     dshHome: z.string().default(''),
@@ -229,20 +296,21 @@ export class DagService extends Service implements SubagentOwnerController {
       outputLimitBytes: this.config.outputLimitBytes,
     }
     this.git = new DagGit(ctx, gitConfig)
-    ctx.inject(['sessionProjections'], (projectionCtx) => {
-      projectionCtx.sessionProjections.register<'dag', DagProjection | null>({
-        key: 'dag',
-        stateSchema: zod.union([dagProjectionSchema, zod.null()]),
-        init: () => null,
-        apply: (state, event) => event.type === 'dag/state' ? projectDag(event.data.state) : state,
-        wire: { viewSchema: zod.union([dagProjectionSchema, zod.null()]), view: state => state },
-        stateVersion: 1,
-      })
+    ctx.sessionProjections.register<'dag', DagState | null>({
+      key: 'dag',
+      stateSchema: zod.union([dagStateSchema, zod.null()]),
+      init: () => null,
+      apply: (state, event) => event.type === 'dag/state' ? event.data.state : state,
+      wire: {
+        viewSchema: zod.union([dagProjectionSchema, zod.null()]),
+        view: state => state === null ? null : projectDag(state),
+      },
+      stateVersion: 2,
     })
     ctx.subagents.registerOwnerController('dag', this)
     ctx.on('agent/created', ({ agent }) => { this.reconcile(agent) })
     for (const agent of ctx.agents.list()) {
-      if (latestState(agent.session) !== null) this.scheduleFlush(agent)
+      if (this.projectionState(agent.session) !== null) this.scheduleFlush(agent)
     }
     ctx.effect(() => async () => {
       this.disposed = true
@@ -266,7 +334,27 @@ export class DagService extends Service implements SubagentOwnerController {
    */
   state(agent: Agent): DagState | null {
     this.assertLive(agent)
-    return latestState(agent.session)
+    return this.projectionState(agent.session)
+  }
+
+  /**
+   * Read the maintained DAG state for one session from the `dag` projection.
+   *
+   * The registry folds a session's log once and then advances the cell with
+   * every committed event, so this read is one lookup and never walks event
+   * history. A registered key state is `DagState | null`, which keeps "no
+   * declaration yet" distinct from a missing projection: `undefined` means the
+   * unit is absent and is a defect, not an empty board.
+   * @param session - Session whose projection state is read.
+   * @returns Latest complete state, or null before the first write.
+   */
+  private projectionState(session: Session): DagState | null {
+    const state = this.ctx.sessionProjections.stateOf(session, 'dag')
+    /* v8 ignore next 3 -- the registration rides this service's own fiber, so the key exists while the service is active. */
+    if (state === undefined) {
+      throw new DagStateError('DAG has no registered session projection', 'dag-projection-missing')
+    }
+    return state
   }
 
   /**
@@ -647,7 +735,7 @@ export class DagService extends Service implements SubagentOwnerController {
     const metadata = ownerMetadata(settlement.binding)
     const dispatcher = this.ctx.agents.get(metadata.dispatcherSessionId)
     if (dispatcher === undefined) return
-    const node = latestState(dispatcher.session)?.nodes.find(row => row.id === metadata.nodeId)
+    const node = this.projectionState(dispatcher.session)?.nodes.find(row => row.id === metadata.nodeId)
     if (node === undefined || node.childSessionId !== settlement.childId || settlement.messageId === undefined
       || (node.status !== 'starting' && node.status !== 'in_progress') || node.settlement?.kind === 'completed') return
     const messageCommand = node.commands.find(row => `${row.id}-message` === settlement.messageId)
@@ -702,7 +790,7 @@ export class DagService extends Service implements SubagentOwnerController {
     const metadata = ownerMetadata(settlement.binding)
     const dispatcher = this.ctx.agents.get(metadata.dispatcherSessionId)
     if (dispatcher === undefined) return
-    const node = latestState(dispatcher.session)?.nodes.find(row => row.id === metadata.nodeId)
+    const node = this.projectionState(dispatcher.session)?.nodes.find(row => row.id === metadata.nodeId)
     if (node === undefined || node.childSessionId !== settlement.child.id) return
     const messageCommand = node.commands.find(row => `${row.id}-message` === settlement.messageId)
     if (messageCommand !== undefined && (messageCommand.operationId !== node.currentOperationId
@@ -779,7 +867,7 @@ export class DagService extends Service implements SubagentOwnerController {
   /** Read one mutation base and fail before other command validation on conflict. */
   private assertRevision(agent: Agent, ifRevision: number | undefined): DagState | null {
     this.assertLive(agent)
-    const current = latestState(agent.session)
+    const current = this.projectionState(agent.session)
     const currentRevision = current?.revision ?? 0
     if (this.committing.has(agent.session) || (ifRevision !== undefined && ifRevision !== currentRevision)) {
       throw new DagStateError(`DAG revision conflict; current revision is ${currentRevision}`, 'dag-revision-conflict')
@@ -791,7 +879,7 @@ export class DagService extends Service implements SubagentOwnerController {
   private schedule(agent: Agent): void {
     if (this.disposed) return
     if (this.ctx.agents.get(agent.id) !== agent) return
-    const state = latestState(agent.session)
+    const state = this.projectionState(agent.session)
     if (state === null) return
     let active = this.pumps.get(agent.session)
     if (active === undefined) {
@@ -821,7 +909,7 @@ export class DagService extends Service implements SubagentOwnerController {
   /** Reconcile and execute one node mailbox in FIFO order. */
   private async pump(agent: Agent, nodeId: DagNodeId): Promise<void> {
     while (!this.disposed && this.ctx.agents.get(agent.id) === agent) {
-      const state = latestState(agent.session)
+      const state = this.projectionState(agent.session)
       const node = state?.nodes.find(row => row.id === nodeId)
       const command = node?.commands.find(row => row.state !== 'settled')
       if (state === null || node === undefined || command === undefined) return
@@ -849,7 +937,7 @@ export class DagService extends Service implements SubagentOwnerController {
         await this.executeCommand(agent, node, command, controller.signal)
       } catch (error) {
         if (!this.canRun(agent)) return
-        const currentNode = latestState(agent.session)?.nodes.find(row => row.id === nodeId)
+        const currentNode = this.projectionState(agent.session)?.nodes.find(row => row.id === nodeId)
         if (controller.signal.aborted && currentNode?.status === 'interrupted') {
           this.mutate(agent, undefined, `${command.kind}-cancelled`, {
             type: 'command-settled', nodeId, commandId: command.id, generation: command.generation, bindingGeneration: command.bindingGeneration, operationId: command.operationId,
@@ -1105,7 +1193,7 @@ export class DagService extends Service implements SubagentOwnerController {
       probe.waiters--
       if (probe.waiters === 0
         && this.waveProbes.get(key) === probe
-        && !hasActiveFence(latestState(dispatcher.session), probe.fences)) {
+        && !hasActiveFence(this.projectionState(dispatcher.session), probe.fences)) {
         probe.controller.abort(new Error('DAG wave has no active node effects'))
       }
     }
@@ -1191,7 +1279,7 @@ export class DagService extends Service implements SubagentOwnerController {
   /** Inject each pending notice once, then resolve a matching waiter. */
   private deliverNotices(agent: Agent): void {
     if (this.ctx.agents.get(agent.id) !== agent) return
-    let state = latestState(agent.session)
+    let state = this.projectionState(agent.session)
     if (state === null) return
     for (const notice of state.notices) {
       if (notice.delivered) continue
@@ -1206,7 +1294,7 @@ export class DagService extends Service implements SubagentOwnerController {
       }
       this.mutate(agent, undefined, 'notice-delivered', { type: 'notice-delivered', noticeId: notice.id })
       state = requiredValue(
-        latestState(agent.session),
+        this.projectionState(agent.session),
         new DagStateError('notice delivery lost the committed DAG state', 'dag-invalid-state'),
       )
     }
@@ -1221,7 +1309,7 @@ export class DagService extends Service implements SubagentOwnerController {
 
   /** Reconcile durable commands and notices when a dispatcher session starts. */
   private reconcile(agent: Agent): void {
-    const state = latestState(agent.session)
+    const state = this.projectionState(agent.session)
     if (state === null) return
     queueMicrotask(() => {
       if (this.disposed) return
@@ -1462,21 +1550,6 @@ export class DagService extends Service implements SubagentOwnerController {
   private childSessionId(dispatcherSessionId: SessionIdType, graphGeneration: number, nodeId: DagNodeId): SessionIdType {
     return SessionId(`dag-${dispatcherHash(dispatcherSessionId)}-g${graphGeneration}-${shortHash(nodeId)}`)
   }
-}
-
-/**
- * Return the last state event without a process-local mirror.
- * @param session - Dispatcher session log.
- * @returns Latest complete state, or null before the first declaration.
- */
-export function latestState(session: Session): DagState | null {
-  // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
-  const events = session.snapshotEvents()
-  for (let index = events.length - 1; index >= 0; index--) {
-    const event = events[index]
-    if (event?.type === 'dag/state') return event.data.state
-  }
-  return null
 }
 
 export default DagService

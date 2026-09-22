@@ -9,7 +9,7 @@ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { LlmAdapter, MessageId, freezeMessage } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SubagentRuntime, { SubagentError } from '@deepseek-ai/dsh-subagent'
 import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
@@ -18,7 +18,7 @@ import { textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import { TestSessionQuery } from '../../../subagent/subagent/tests/test-session-query.ts'
 import DagService from '../src/index.ts'
 import { DagCommandId, DagNodeId, DagOperationId } from '../src/ids.ts'
-import { DagStateError, reduceDagState } from '../src/reducer.ts'
+import { DagStateError, projectDag, reduceDagState } from '../src/reducer.ts'
 import { validateDagDeclaration, dependencyOwnershipViolations } from '../src/validation.ts'
 import type { DagNodeDefinition, DagNodeInput, DagNodeSnapshot, DagNotice, DagState } from '../src/types.ts'
 
@@ -715,6 +715,76 @@ describe('native DAG service', { timeout: 60_000 }, () => {
     release.resolve(undefined)
   })
 
+  it('answers state and reconcile from the maintained projection instead of session history', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const other = await harness.ctx.agentLoop.create(
+      SessionId('dag-projection-reader'),
+      { provider: 'mock', model: 'mock' },
+      { cwd: harness.root },
+    )
+    const reconcile = serviceMethod<[Agent], unknown>(harness.ctx.dag, 'reconcile')
+    harness.ctx.dag.write(harness.dispatcher, { nodes: [node()] })
+    await settleServiceDelivery(harness)
+    const history = vi.spyOn(harness.dispatcher.session, 'snapshotEvents').mockImplementation(() => {
+      throw new Error('DAG rescanned Session history')
+    })
+    try {
+      expect(harness.ctx.dag.state(harness.dispatcher)?.revision).toBe(1)
+      expect(harness.ctx.dag.status(harness.dispatcher)?.revision).toBe(1)
+      expect(harness.ctx.dag.state(other)).toBeNull()
+      reconcile(other)
+      reconcile(harness.dispatcher)
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(history).not.toHaveBeenCalled()
+    } finally {
+      history.mockRestore()
+    }
+  })
+
+  it('keeps the durable worktree facts on the host projection and out of the client board', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    harness.ctx.dag.write(harness.dispatcher, { nodes: [node()] })
+    harness.ctx.dag.dispatch(harness.dispatcher, [DagNodeId('a')])
+    const durable = harness.ctx.dag.state(harness.dispatcher)
+    if (durable === null) throw new Error('test DAG declaration is missing')
+    const registry = harness.ctx.sessionProjections
+
+    const host = registry.stateOf(harness.dispatcher.session, 'dag')
+    const wire = registry.snapshot(harness.dispatcher.session, ['dag']).values.dag
+
+    expect(host).toBe(durable)
+    expect(JSON.stringify(host)).toContain(harness.temporary)
+    expect(wire).toEqual(projectDag(durable))
+    expect(JSON.stringify(wire)).not.toContain(harness.temporary)
+    expect(Object.keys(wire?.nodes[0] ?? {})).not.toContain('worktree')
+  })
+
+  it('validates persisted projection rows against the complete DAG state', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    harness.ctx.dag.write(harness.dispatcher, { nodes: [node()] })
+    const registry = harness.ctx.sessionProjections
+    const row = registry.checkpoint(harness.dispatcher.session).dag
+    if (row === undefined) throw new Error('test DAG checkpoint row is missing')
+    const board = harness.ctx.dag.status(harness.dispatcher)
+
+    expect(registry.viewCheckpoint({ dag: row }, ['dag']).dag).toEqual(board)
+    const restored = registry.restore(
+      { dag: row },
+      harness.dispatcher.session.snapshotEvents(),
+      SessionLogOffset(0),
+      harness.dispatcher.session.header,
+      harness.dispatcher.session.inheritedEventCount,
+    )
+    expect(restored.snapshot.values.dag).toEqual(board)
+    expect(restored.checkpoint['dag']?.val).toEqual(harness.ctx.dag.state(harness.dispatcher))
+
+    expect(registry.viewCheckpoint({ dag: { ...row, val: { revision: 1 } } }, ['dag'])).toEqual({})
+    expect(registry.viewCheckpoint({ dag: { ...row, val: board } }, ['dag'])).toEqual({})
+    expect(registry.viewCheckpoint({ dag: { ...row, ver: row.ver - 1 } }, ['dag'])).toEqual({})
+  })
+
   it('does not create a wave when the root Git probe fails', async () => {
     const { ctx, dispatcher, root } = await setup(new GatedAdapter([]))
     await writeFile(join(root, 'dirty.txt'), 'untracked\n')
@@ -1114,10 +1184,14 @@ describe('native DAG service', { timeout: 60_000 }, () => {
     await expect(ensureWave(harness.dispatcher, owner.node, signal))
       .rejects.toThrow(`wave ${waveId} has no active dispatch commands`)
 
+    // The service reads state through the session projection, so this stub
+    // carries the real log cursor as well as the real log itself.
     const missingRootDispatcher = {
       id: harness.dispatcher.id,
       session: {
         header: { ...harness.dispatcher.session.header, cwd: undefined },
+        seq: harness.dispatcher.session.seq,
+        inheritedEventCount: harness.dispatcher.session.inheritedEventCount,
         snapshotEvents: () => harness.dispatcher.session.snapshotEvents(),
       },
     } as unknown as Agent

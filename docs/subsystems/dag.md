@@ -6,7 +6,7 @@ The native DAG subsystem runs a declared dependency graph through continuable su
 
 ## Durable state
 
-The dispatcher session log is the only source of DAG state. Each accepted change appends one complete immutable `dag/state` snapshot with format version `1`. The `dag` session projection is `null` before the first write. It then contains the revision, topological node rows, status counts, ready nodes, and open waves. The browser projection does not contain absolute worktree paths.
+The dispatcher session log is the only source of DAG state. Each accepted change appends one complete immutable `dag/state` snapshot with format version `1`. The `dag` session projection holds that complete state: `null` before the first write, then the newest appended snapshot, which the registry advances with every committed event after folding a session's log once. Domain reads therefore resolve against maintained projection state instead of scanning event history. The browser value derived from it contains the revision, topological node rows, status counts, ready nodes, and open waves, and no absolute worktree path.
 
 Each snapshot contains a monotonic revision, graph generation, operation counter, complete node board, topological order, ready-node list, status counts, waves, active command ids, operation receipts, and notices. Each node also stores its generation, durable child session id, branch, worktree, frozen wave base, exact dependency commits, current operation, settlement, and completed commit.
 
@@ -28,7 +28,7 @@ Each node owns a durable FIFO mailbox. A command has a deterministic id and move
 
 After a state append, the service schedules session flushes, Git work, child materialization, message delivery, and lifecycle publication as cancellable effects. A `dag/committed` Cordis event follows each accepted change and carries the dispatcher session, revision, graph generation, cause, and immutable snapshot.
 
-On session reopen, the service folds the newest snapshot and restarts accepted or running commands. Deterministic child ids and message ids make child creation and message delivery safe to repeat. Each retry checks current Git and child-session evidence before it makes a change.
+On session reopen, the service reads the state the projection folded or restored and restarts accepted or running commands. Deterministic child ids and message ids make child creation and message delivery safe to repeat. Each retry checks current Git and child-session evidence before it makes a change.
 
 ## Notices and waiting
 
@@ -230,6 +230,10 @@ settled(settlement: SubagentOwnerSettlement): void
 
 /**
  * Fail one current child turn that ended without a final DAG report.
+ *
+ * A settlement that decided to end the turn cancels the child even when the
+ * durable transition fails: an authorized child turn must not keep running
+ * because this service could not record that it ended.
  * @param settlement - Authorized ordinary-turn settlement facts.
  */
 turnSettled(settlement: SubagentOwnerTurnSettlement): void

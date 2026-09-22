@@ -80,7 +80,7 @@ Each node has a durable FIFO mailbox and one process-local effect pump. Reopen r
 
 ### Durable state and replay
 
-The dispatcher log is the only durable authority. Every `dag/state` event contains the complete version-1 snapshot: revisions, graph generation, operation counter, node board, topological order, ready list, status counts, waves, commands, receipts, and notices. The `dag` projection is `null` before the first state and then exposes a browser-safe view without absolute worktree paths.
+The dispatcher log is the only durable authority. Every `dag/state` event contains the complete version-1 snapshot: revisions, graph generation, operation counter, node board, topological order, ready list, status counts, waves, commands, receipts, and notices. The `dag` session projection holds that complete state — `null` before the first event — and the registry advances it with each committed event, so the service reads state through `stateOf` without scanning the log. Its wire value is a browser-safe view without absolute worktree paths.
 
 The production reducer and the independent reference reducer are pure. Tests compare them across bounded command, effect, stale-callback, and restart histories. The service publishes a non-blocking `dag/committed` Cordis event after each accepted append so other plugins can observe the immutable result.
 
