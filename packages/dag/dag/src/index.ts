@@ -676,9 +676,29 @@ export class DagService extends Service implements SubagentOwnerController {
 
   /**
    * Fail one current child turn that ended without a final DAG report.
+   *
+   * A settlement that decided to end the turn cancels the child even when the
+   * durable transition fails: an authorized child turn must not keep running
+   * because this service could not record that it ended.
    * @param settlement - Authorized ordinary-turn settlement facts.
    */
   turnSettled(settlement: SubagentOwnerTurnSettlement): void {
+    let stopped = false
+    const stopOnce = (): void => {
+      if (stopped) return
+      stopped = true
+      settlement.stop()
+    }
+    try {
+      this.settleOwnerTurn(settlement, stopOnce)
+    } catch (error: unknown) {
+      stopOnce()
+      throw error
+    }
+  }
+
+  /** Apply one owner turn settlement; {@link turnSettled} owns the cancellation guarantee. */
+  private settleOwnerTurn(settlement: SubagentOwnerTurnSettlement, stop: () => void): void {
     const metadata = ownerMetadata(settlement.binding)
     const dispatcher = this.ctx.agents.get(metadata.dispatcherSessionId)
     if (dispatcher === undefined) return
@@ -689,12 +709,12 @@ export class DagService extends Service implements SubagentOwnerController {
       || messageCommand.generation !== node.generation
       || messageCommand.bindingGeneration !== node.bindingGeneration)) {
       if (node.status === 'blocked' || node.status === 'failed' || node.status === 'completed'
-        || node.status === 'interrupted' || node.settlement?.kind === 'completed') settlement.stop()
+        || node.status === 'interrupted' || node.settlement?.kind === 'completed') stop()
       return
     }
     if (node.status === 'blocked' || node.status === 'failed' || node.status === 'completed'
       || node.status === 'interrupted' || node.settlement?.kind === 'completed') {
-      settlement.stop()
+      stop()
       return
     }
     const command = requiredValue(
@@ -717,7 +737,7 @@ export class DagService extends Service implements SubagentOwnerController {
       operationId: command.operationId,
       reason: error,
     })
-    settlement.stop()
+    stop()
   }
 
   /** Shared immediate acknowledgement for a public mutation. */
@@ -1266,16 +1286,44 @@ export class DagService extends Service implements SubagentOwnerController {
     }
   }
 
-  /** Owner hook for Web and generic interrupt calls. */
+  /**
+   * Owner hook for Web and generic interrupt calls.
+   *
+   * Once the request's live child is verified as this node's child, a durable
+   * stop transition that fails must not leave that child's turn running. A child
+   * the node does not own is refused without cancelling it, because cancelling
+   * whatever the request carried would stop an unrelated agent.
+   * @param request - Authorized owner stop request.
+   */
   private ownerStop(request: SubagentOwnerStopRequest): void {
     const metadata = ownerMetadata(request.binding)
     const dispatcher = this.liveDispatcher(metadata.dispatcherSessionId)
-    const state = this.requireState(dispatcher)
-    const node = state.nodes.find(row => row.id === metadata.nodeId)
+    const node = this.requireState(dispatcher).nodes.find(row => row.id === metadata.nodeId)
     if (node === undefined) throw new DagStateError(`unknown DAG node ${JSON.stringify(metadata.nodeId)}`, 'dag-node-not-found')
     if (node.childSessionId !== request.child.id) {
       throw new DagStateError('DAG child binding is stale', 'dag-stale-child-binding')
     }
+    let cancelled = false
+    const cancelOnce = (): void => {
+      if (cancelled) return
+      cancelled = true
+      request.stop()
+    }
+    try {
+      this.commitOwnerStop(request, dispatcher, node, cancelOnce)
+    } catch (error: unknown) {
+      cancelOnce()
+      throw error
+    }
+  }
+
+  /** Commit one verified owner stop; {@link ownerStop} owns the cancellation guarantee. */
+  private commitOwnerStop(
+    request: SubagentOwnerStopRequest,
+    dispatcher: Agent,
+    node: DagNodeSnapshot,
+    cancel: () => void,
+  ): void {
     let operationId = node.currentOperationId
     let generation = node.generation
     let commandId = node.commands.find(row => row.operationId === operationId && row.kind === 'stop' && row.state !== 'settled')?.id
@@ -1292,7 +1340,7 @@ export class DagService extends Service implements SubagentOwnerController {
         new DagStateError('accepted DAG stop lacks its mailbox command', 'dag-invalid-state'),
       ).id
     }
-    request.stop()
+    cancel()
     if (operationId !== undefined && commandId !== undefined) {
       const currentNode = requiredValue(
         this.requireState(dispatcher).nodes.find(row => row.id === node.id),

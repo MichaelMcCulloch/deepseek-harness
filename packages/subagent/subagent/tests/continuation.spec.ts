@@ -2612,6 +2612,33 @@ describe('continuable review regressions', () => {
     await waitNoActivation(ctx, started.childId)
   })
 
+  it('cancels an owned child when its owner controller throws during an authorized stop', async () => {
+    const release = Promise.withResolvers<undefined>()
+    const adapter = new GatedAdapter([{ chunks: textResponse('working'), gate: release.promise }])
+    const { ctx, parent } = await setupWith(adapter)
+    ctx.subagents.registerOwnerController('throwing-owner', ownerController({
+      stop() { throw new Error('owner controller failed') },
+    }))
+    const started = await ctx.subagents.startContinuable({
+      ...startSpec(parent),
+      owner: { controller: 'throwing-owner', metadata: {} },
+      settlementDelivery: 'none',
+    })
+    await vi.waitFor(() => { expect(adapter.requests).toHaveLength(1) })
+    const child = ctx.agents.get(started.childId)!
+    const cancel = vi.spyOn(child, 'cancel')
+    // The stop was already authorized, so a controller that throws must not
+    // leave the child turn running: the child is cancelled, then the failure
+    // still reaches the caller.
+    expect(() => {
+      ctx.subagents.interrupt(started.childId, { kind: 'user', parentSessionId: parent.id })
+    }).toThrow('owner controller failed')
+    expect(cancel).toHaveBeenCalledOnce()
+    release.resolve(undefined)
+    await child.whenIdle()
+    await waitNoActivation(ctx, started.childId)
+  })
+
   it('keeps an idle child resident while plugin-sourced steering stays unclaimed', async () => {
     const release = Promise.withResolvers<undefined>()
     const adapter = new GatedAdapter([{ chunks: textResponse('working'), gate: release.promise }])

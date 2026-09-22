@@ -1357,6 +1357,28 @@ describe('native DAG service', { timeout: 60_000 }, () => {
     })
   })
 
+  it('cancels an ordinary child turn when the durable settlement transition fails', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const owner = appendStartingOwner(harness)
+    const child = { id: owner.node.childSessionId } as unknown as Agent
+    const command = owner.node.commands[0]!
+    const failure = new DagStateError('settlement refused', 'dag-invalid-state')
+    vi.spyOn(harness.ctx.dag as unknown as { mutate: () => never }, 'mutate').mockImplementation(() => { throw failure })
+    const stop = vi.fn()
+    expect(() => {
+      harness.ctx.dag.turnSettled({
+        binding: owner.binding,
+        child,
+        parentSessionId: harness.dispatcher.id,
+        turn: 1,
+        stopReason: 'completed',
+        messageId: MessageId(`${command.id}-message`),
+        stop,
+      })
+    }).toThrow(failure)
+    expect(stop).toHaveBeenCalledOnce()
+  })
+
   it('stops terminal ordinary settlements and ignores stale or cancelled steer turns', async () => {
     const harness = await setup(new GatedAdapter([]))
     const owner = appendStartingOwner(harness)
@@ -1568,14 +1590,36 @@ describe('native DAG service', { timeout: 60_000 }, () => {
     expect(activeHarness.ctx.dag.state(activeHarness.dispatcher)?.nodes[0]?.commands.at(-1))
       .toMatchObject({ kind: 'stop', state: 'settled', outcome: 'succeeded' })
 
+    const missingStop = vi.fn()
     expect(() => {
       activeHarness.ctx.dag.stop({
         binding: { ...activeOwner.binding, metadata: { ...activeOwner.binding.metadata, nodeId: 'missing' } },
         child: { id: activeOwner.node.childSessionId } as unknown as Agent,
         authority: { kind: 'user', parentSessionId: activeHarness.dispatcher.id },
-        stop: vi.fn(),
+        stop: missingStop,
       })
     }).toThrow(expect.objectContaining({ code: 'dag-node-not-found' }))
+    // A request whose node the durable graph does not carry is refused before
+    // the cancellation guarantee: cancelling it would stop whatever agent the
+    // request happened to carry.
+    expect(missingStop).not.toHaveBeenCalled()
+  })
+
+  it('cancels a verified child when the durable stop transition fails', async () => {
+    const harness = await setup(new GatedAdapter([]))
+    const owner = appendStartingOwner(harness)
+    const failure = new DagStateError('stop refused', 'dag-invalid-transition')
+    vi.spyOn(harness.ctx.dag as unknown as { mutate: () => never }, 'mutate').mockImplementation(() => { throw failure })
+    const cancel = vi.fn()
+    expect(() => {
+      harness.ctx.dag.stop({
+        binding: owner.binding,
+        child: { id: owner.node.childSessionId } as unknown as Agent,
+        authority: { kind: 'user', parentSessionId: harness.dispatcher.id },
+        stop: cancel,
+      })
+    }).toThrow(failure)
+    expect(cancel).toHaveBeenCalledOnce()
   })
 
   it('guards scheduler entry points for empty, stale, and disposed activations', async () => {

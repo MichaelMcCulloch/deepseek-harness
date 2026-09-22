@@ -320,6 +320,10 @@ export class ContinuableActivationRegistry {
 
   /**
    * Interrupt one live continuable child's current turn under the supplied authority.
+   *
+   * A bound owner controller decides how the turn ends. When that controller is
+   * unavailable or throws, the child is still cancelled before the failure
+   * propagates, because the stop was already authorized.
    * @param targetSessionId - the durable child session id to interrupt.
    * @param authority - the human parent address or exact live ancestor Agent.
    */
@@ -372,12 +376,20 @@ export class ContinuableActivationRegistry {
       stop()
       return
     }
-    this.requireOwnerController(activation.owner).stop({
-      binding: activation.owner,
-      child: activation.handle.agent,
-      authority,
-      stop,
-    })
+    // An authorized stop reached this service, so an owner controller that is
+    // missing or throws must not leave the child running: cancel it here and
+    // report the controller failure to the caller.
+    try {
+      this.requireOwnerController(activation.owner).stop({
+        binding: activation.owner,
+        child: activation.handle.agent,
+        authority,
+        stop,
+      })
+    } catch (error: unknown) {
+      stop()
+      throw error
+    }
   }
 
   /** Resolve one durable child's mounted owner controller or fail loud. */
