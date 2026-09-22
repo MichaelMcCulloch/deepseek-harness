@@ -10,6 +10,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+const MOVEFILE_REPLACE_EXISTING = 0x00000001
 const MOVEFILE_WRITE_THROUGH = 0x00000008
 const ERROR_FILE_NOT_FOUND = 2
 const ERROR_PATH_NOT_FOUND = 3
@@ -156,6 +157,31 @@ describe('Windows durable namespace helpers', () => {
       const { publishNewFileWin32 } = await importWithError(win32Code)
       await expect(publishNewFileWin32('from', 'to')).rejects.toMatchObject({ code, win32Code, path: 'from', dest: 'to' })
     }
+  })
+
+  it('replaces an existing file with write-through MoveFileExW semantics', async () => {
+    const { replaceFileWin32 } = await importWithMove((existing, replacement, flags, setLastError) => {
+      expect(flags).toBe(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
+      const from = stripNamespace(existing)
+      const to = stripNamespace(replacement)
+      if (!existsSync(from)) { setLastError(ERROR_FILE_NOT_FOUND); return 0 }
+      renameSync(from, to) // replaces an existing destination, unlike link()
+      return 1
+    })
+    const root = await tempRoot()
+    const tmp = join(root, 'log.repair.tmp')
+    const final = join(root, 'session.v3.jsonl.zstd')
+    await writeFile(tmp, 'replacement')
+    await writeFile(final, 'torn')
+
+    await replaceFileWin32(tmp, final)
+    expect(existsSync(tmp)).toBe(false)
+    expect(readFileSync(final, 'utf8')).toBe('replacement')
+  })
+
+  it('maps Win32 replacement failures to Node-style errno codes', async () => {
+    const { replaceFileWin32 } = await importWithError(ERROR_ACCESS_DENIED)
+    await expect(replaceFileWin32('from', 'to')).rejects.toMatchObject({ code: 'EACCES', win32Code: ERROR_ACCESS_DENIED, path: 'from', dest: 'to' })
   })
 
   it('creates missing directories through staging siblings and tolerates an already-created race', async () => {

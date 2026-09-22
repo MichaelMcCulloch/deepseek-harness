@@ -58,7 +58,7 @@ await ctx.sessionPersistence.flush()                           // backend-wide d
 
 ### 恢复与崩溃恢复
 
-持久化返回物理上有效的日志；语义修复属于读方。中途崩溃的会话保留其未闭合的最终轮次——单个轮次可能很大，而这些事件在崩溃前已持久追加；只有从未确认的撕裂尾部中不完整的碎片会被丢弃——从中恢复的完整记录由写路径在句柄的第一次新 append 之前持久重写。恢复（agent-loop）通过其写句柄读取已存储日志，计算 `interruptedTurnClosers`——合成 `tool/result` 错误、任何未闭合的 `step/end`，以及 `turn/end {interrupted}`——并把它们作为普通批次通过同一句柄追加。只读观察方（session-query）仅在内存中用同样的 closer 配平被中断的冷日志。
+持久化返回物理上有效的日志；语义修复属于读方。中途崩溃的会话保留其未闭合的最终轮次——单个轮次可能很大，而这些事件在崩溃前已持久追加；只有从未确认的撕裂尾部中不完整的碎片会被丢弃——从中恢复的完整记录会保留下来，因为写路径在句柄的第一次新 append 之前，把产物前缀与这些记录作为一个持久替换发布。恢复（agent-loop）通过其写句柄读取已存储日志，计算 `interruptedTurnClosers`——合成 `tool/result` 错误、任何未闭合的 `step/end`，以及 `turn/end {interrupted}`——并把它们作为普通批次通过同一句柄追加。只读观察方（session-query）仅在内存中用同样的 closer 配平被中断的冷日志。
 
 ### 失败与恢复
 
@@ -81,7 +81,7 @@ await ctx.sessionPersistence.flush()                           // backend-wide d
 ### 每个后端必须遵守的不变量
 
 - **仅追加，连续 `seq`。** 已提交事件绝不重写；`append` 的第一个 `seq` 必须等于已存储 next-seq，缺口会被拒绝。
-- **撕裂的物理尾部绝不到达读取方。** 它属于一次从未完成的 append；写路径在第一次新 append 之前将其持久截断。
+- **撕裂的物理尾部绝不到达读取方。** 它属于一次从未完成的 append；写路径在第一次新 append 之前，连同其中完整的记录一起，以一个持久步骤替换它。
 - **无损 JSON 数据。** 批次与 header 经过共享的单遍校验并快照边界（`materializeAppendBatch`/`materializeCreateHeader`）；无法序列化的载荷在调用处被拒绝。
 - **持久性。** `append` 尽力而为地持久化；`flush`——逐句柄或服务级——是承诺存储并同时把空会话实体化的屏障。
 - **遇到未知或无效格式时拒绝读取。** `validateStoredEvents` 拒绝未知事件词汇与已废弃的预发布形态；`assertVersion` 拒绝外来格式版本。

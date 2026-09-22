@@ -13,7 +13,7 @@ import {
   sessionFormatCatalog,
 } from '@deepseek-ai/dsh-session-format-catalog'
 import { readdirSync, type Dirent } from 'node:fs'
-import { open, mkdir, readdir, realpath, link, rm, stat, truncate } from 'node:fs/promises'
+import { open, mkdir, readdir, readFile, realpath, link, rename, rm, stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { scheduler } from 'node:timers/promises'
@@ -30,19 +30,19 @@ import {
   type SessionPersistenceSnapshot, type SessionPersistenceStatOptions,
   type SessionPersistenceRevision as PersistenceRevision,
 } from '@deepseek-ai/dsh-session-persistence'
-import { JsonlBackendTracker, JsonlSessionHandle, type StorageHandleState } from './storage.ts'
+import { JsonlBackendTracker, JsonlSessionHandle, type StorageHandleState, type TornTailRepair } from './storage.ts'
 import { SessionWriteLease } from './lease.ts'
 import { SESSION_FORMAT_VERSION, SessionId as makeSessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionId, SessionHeader, SessionLogOffset as SessionLogOffsetType } from '@deepseek-ai/dsh-session'
 import {
   assertNoRetiredHeaderFields, encodeSegment, eventLines, generationLogFilename, generationLogPath, logPath, logSuffix,
-  parseGenerationLogFilename, projectDir, scanLog, sessionDir, SessionLogScanner, toHeaderLine,
+  parseGenerationLogFilename, projectDir, repairReplacementPath, scanLog, sessionDir, SessionLogScanner, toHeaderLine,
   type JsonlCompression,
 } from './format.ts'
 import {
   compressZstdFrame, createZstdFrameDecoder, decompressZstdFrame, decompressZstdPrefix, scanZstdFrames,
 } from './zstd.ts'
-import { ensureDurableDirectoryWin32, publishNewFileWin32 } from './win32.ts'
+import { ensureDurableDirectoryWin32, publishNewFileWin32, replaceFileWin32 } from './win32.ts'
 import { verifyCurrentGenerationInWorker } from './migration-verifier.ts'
 import {
   JsonlGenerationSourceChangedError,
@@ -189,6 +189,11 @@ function isENOENT(error: unknown): boolean {
 /** Whether a filesystem-owned failure should retain its original errno and path. */
 function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
   return typeof (error as NodeJS.ErrnoException | null)?.code === 'string'
+}
+
+/** The bytes one encoded batch occupies: a compressed frame, or its raw lines. */
+function asBytes(content: Buffer | string): Buffer {
+  return typeof content === 'string' ? Buffer.from(content, 'utf8') : content
 }
 
 /** Preserve an Error abort reason and normalize hostile non-Error reasons. */
@@ -368,6 +373,7 @@ class JsonlSessionPersistence extends SessionPersistence {
       const resolved = await this.findLog(id, options?.signal)
       if (resolved === undefined) throw new SessionPersistenceNotFoundError(id)
       lease = await this.acquireLease(id, undefined, dirname(resolved.currentPath))
+      await this.clearRepairResidue(resolved.currentPath)
       const prepared = await this.requireStoredLog(id, options?.signal)
       options?.signal?.throwIfAborted()
       let stored: CurrentStoredLog
@@ -380,8 +386,9 @@ class JsonlSessionPersistence extends SessionPersistence {
       return this.tracker.adopt(new JsonlSessionHandle(this, id, stored.meta, 'write', {
         cursor: stored.events.length,
         materialized: true,
-        tornTruncateTo: stored.tornTruncateTo,
-        recoveredTail: stored.recoveredTail,
+        tornTail: stored.tornTruncateTo === undefined
+          ? undefined
+          : { truncateTo: stored.tornTruncateTo, recoveredTail: stored.recoveredTail },
         inheritedEventCount: stored.inheritedEventCount,
         primed: stored,
       }, lease))
@@ -803,15 +810,25 @@ class JsonlSessionPersistence extends SessionPersistence {
    * @param events - the validated contiguous batch, in seq order.
    * @param isMaterialized - whether the session already has a durable artifact.
    * @param inheritedEventCount - the exact fork-inherited prefix length written into a materializing header line.
+   * @param repair - the pending torn-tail repair to publish in the same durable step as this batch.
    */
   async persistBatch(
     header: SessionHeader,
     events: readonly SessionEvent[],
     isMaterialized: boolean,
     inheritedEventCount: SessionLogOffsetType,
+    repair?: TornTailRepair,
   ): Promise<void> {
     this.coldLogMemo.delete(header.id)
     await this.ensureRootEncoding()
+    // A pending repair always describes an artifact some read already opened,
+    // so this path replaces an existing generation and never materializes one:
+    // isMaterialized selects between creating and extending, and a repair is
+    // neither.
+    if (repair !== undefined) {
+      await this.replaceTornTail(header, repair, events)
+      return
+    }
     if (isMaterialized) {
       await this.appendLines(header, events)
     } else {
@@ -830,17 +847,6 @@ class JsonlSessionPersistence extends SessionPersistence {
     await this.ensureRootEncoding()
     await this.materialize(header, inheritedEventCount, [])
     this.tracker.materialized(header.id)
-  }
-
-  /**
-   * Truncate a torn physical tail durably before this session's first new append.
-   * @param header - the session's stored header.
-   * @param truncateTo - the byte offset the artifact is truncated to.
-   */
-  async truncateTornTail(header: SessionHeader, truncateTo: number): Promise<void> {
-    this.coldLogMemo.delete(header.id)
-    await this.repair(header, truncateTo)
-    this.ctx.logger.warn(`${this.name}: session "${header.id}" recovered from a torn tail; incomplete tail bytes were discarded`)
   }
 
   /**
@@ -1193,6 +1199,12 @@ class JsonlSessionPersistence extends SessionPersistence {
 
   private async writeSyncedTempFile(finalPath: string, content: Buffer | string): Promise<string> {
     const tmp = `${finalPath}.${randomBytes(6).toString('hex')}.tmp`
+    await this.writeSyncedFile(tmp, content)
+    return tmp
+  }
+
+  /** Create `tmp` exclusively with `content` written and fsynced into it. */
+  private async writeSyncedFile(tmp: string, content: Buffer | string): Promise<void> {
     const handle = await open(tmp, 'wx', 0o600)
     try {
       await handle.writeFile(content)
@@ -1200,7 +1212,6 @@ class JsonlSessionPersistence extends SessionPersistence {
     } finally {
       await handle.close()
     }
-    return tmp
   }
 
   /** Encode the header and first batch without combining their frame boundaries. */
@@ -1283,16 +1294,92 @@ class JsonlSessionPersistence extends SessionPersistence {
     }
   }
 
-  /** Truncate the log file to `offset` bytes and fsync (discard the crash tail). */
-  private async repair(meta: SessionHeader, offset: number): Promise<void> {
-    const path = logPath(this.root, meta.cwd, meta.id, this.compression)
-    await truncate(path, offset)
-    const handle = await open(path, 'r+')
+  /**
+   * Publish a torn-tail repair and its batch as one durable replacement of the
+   * generation log. The replacement is the artifact's complete prefix, the
+   * complete events recovered from its torn tail, and the batch, each encoded
+   * exactly as an append encodes it.
+   *
+   * The rename is the commit point: before it the artifact keeps the bytes a
+   * reader already served, and after it the artifact holds those events and the
+   * batch. No crash can observe a truncated artifact whose recovered events are
+   * missing, which is why this is one operation rather than a truncation
+   * followed by a rewrite.
+   * @param header - the session's stored header.
+   * @param repair - the torn-tail repair this batch publishes.
+   * @param events - the validated contiguous batch, in seq order.
+   */
+  private async replaceTornTail(
+    header: SessionHeader,
+    repair: TornTailRepair,
+    events: readonly SessionEvent[],
+  ): Promise<void> {
+    const path = logPath(this.root, header.cwd, header.id, this.compression)
+    const content = await this.encodeReplacement(path, repair, events)
+    const tmp = repairReplacementPath(path)
+    let published = false
     try {
-      await handle.sync()
+      await this.writeSyncedFile(tmp, content)
+      await this.publishReplacement(tmp, path, header)
+      published = true
     } finally {
-      await handle.close()
+      // The replacement is unpublished, so its temp file is residue: remove it
+      // so the retry starts from the state this attempt found. Cleanup failure
+      // must not replace the failure that rejected the append.
+      if (!published) await rm(tmp, { force: true })
     }
+    this.ctx.logger.warn(`${this.name}: session "${header.id}" recovered from a torn tail; incomplete tail bytes were discarded`)
+  }
+
+  /** Encode the replacement artifact: complete prefix bytes, recovered events, then the batch. */
+  private async encodeReplacement(
+    path: string,
+    repair: TornTailRepair,
+    events: readonly SessionEvent[],
+  ): Promise<Buffer> {
+    // The prefix is copied byte for byte, so a repaired artifact differs from
+    // the pre-repair one only where the torn bytes were.
+    const parts: Buffer[] = [(await readFile(path)).subarray(0, repair.truncateTo)]
+    if (repair.recoveredTail.length > 0) {
+      parts.push(asBytes(await this.encodeEventBatch(repair.recoveredTail)))
+    }
+    parts.push(asBytes(await this.encodeEventBatch(events)))
+    return Buffer.concat(parts)
+  }
+
+  /**
+   * Replace the generation log with `tmp` and confirm the namespace change is
+   * durable; see {@link replaceTornTail} for the commit point. A directory
+   * fsync that fails after the rename is reported, not rejected: the caller
+   * cannot retry a published replacement, because re-encoding it would store
+   * the recovered events and the batch a second time.
+   * @param tmp - the synced replacement file beside the log.
+   * @param path - the generation log to replace.
+   * @param header - the session's stored header, for diagnostics.
+   */
+  private async publishReplacement(tmp: string, path: string, header: SessionHeader): Promise<void> {
+    /* v8 ignore next 3 -- native Windows coverage exercises the write-through replacement; POSIX covers this peer */
+    if (process.platform === 'win32') {
+      await replaceFileWin32(tmp, path)
+      return
+    }
+    await rename(tmp, path)
+    try {
+      await this.syncDirPosix(dirname(path))
+    } catch (error: unknown) {
+      this.ctx.logger.warn(`${this.name}: session "${header.id}" torn-tail replacement is published but its directory entry could not be synced: ${String(error)}`)
+    }
+  }
+
+  /**
+   * Remove the replacement file an interrupted repair left beside one
+   * generation log. Generation discovery reads filenames, so the residue is
+   * invisible until a write open clears it; the caller holds the session's
+   * write lock, so the residue cannot belong to a live repair.
+   * @param currentPath - the resolved current-generation log path.
+   */
+  private async clearRepairResidue(currentPath: string): Promise<void> {
+    await rm(repairReplacementPath(currentPath), { force: true })
   }
 
   // --- discovery helpers ---

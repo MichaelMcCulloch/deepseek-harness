@@ -115,13 +115,13 @@ Status: proposed
 
 ### 撕裂尾部修复存在会丢弃已恢复事件的崩溃窗口
 
-默认持久化路径是带 checksum 的 Zstandard frame，每个持久追加批次一个。EOF 处被截断的最后一个 frame 由 frame 扫描发现，其中完整的事件行被恢复，修复在 `persistContiguous`（`packages/session/session-persistence-jsonl/src/storage.ts:328-337`）中分两次持久步骤执行：先由 `truncateTornTail` 截断并 fsync（`session-persistence-jsonl/src/index.ts:840-844`，`repair` 在 `:1287-1296`），然后才写回恢复的尾部。
+默认持久化路径是带 checksum 的 Zstandard frame，每个持久追加批次一个。EOF 处被截断的最后一个 frame 由 frame 扫描发现，其中完整的事件行被恢复，修复在 `persistContiguous`（`packages/session/session-persistence-jsonl/src/storage.ts`）中分两次持久步骤执行：先截断并 fsync 撕裂字节，然后才写回恢复的尾部。
 
 这两步之间的崩溃会永久丢失已恢复事件。一次读取已经提供过它们，resume 打开的句柄把它们带进内存日志，DAG 折叠它们并可能据此运行 effect；下一次重新打开只能看到被截断的前缀。只有撕裂尾部读取后的第一次写入被中断时该窗口才可达，而现有测试覆盖的是失败重写后重试，不是窗口内的崩溃。
 
 对 DAG 的损害是有界的，因为每个 effect 都以确定性 id 为键、并从幸存快照重新推导：残留是属于已不存在命令的遗留 worktree 或子会话，而不是非法状态。这个论证并不严谨，应该由测试承担，这正是选项 4 显式包含该窗口的原因。
 
-**未修复。** 关闭它需要让截断与写回尾部成为同一个持久步骤，而实现它的两条路径都会改变会话日志的持久性协议：把「前缀加恢复帧」写入临时文件再 rename 覆盖原文件，或者把已恢复事件写入一个修复 sidecar，由下一次打开在截断前重新应用。`persistBatch` 目前不是纯编码器——它会物化或追加——因此两者都不是局部改动，且都属于持久化所有者，需要各自的崩溃测试与夹具评审。
+**已修复。** 修复现在是一个持久步骤。`replaceTornTail`（`packages/session/session-persistence-jsonl/src/index.ts`）把产物的完整前缀、从其撕裂尾部恢复出的完整记录以及待写入批次编码进日志旁的已同步替换文件，再将该文件 rename 覆盖日志并 fsync 目录——在 Windows 上同一发布动作是 `MoveFileExW(..., MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)`。rename 即提交点，因此在任意时刻崩溃都只会留下撕裂的产物或修复后的产物；`persistContiguous` 通过 `persistBatch` 的 repair 参数一次到达存储接缝，独立的 `truncateTornTail` 步骤已不复存在。成功的修复保持两步协议产生的磁盘字节——相同的前缀字节，后接每批一个编码帧——而崩溃遗留的替换文件对代际发现不可见，并由下一次写打开清除。`packages/session/session-persistence-jsonl/tests/zstd.spec.ts` 钉住该窗口：修复被中断后重新打开必须仍能提供先前读取已提供过的记录，重新打开的写入方必须完成修复且每条事件只存储一次。[持久性决策](../../implemented/bug-fix/2026-09-21-atomic-torn-tail-replacement.zh.md)拥有该设计。
 
 ### 被中断的 `git worktree add` 会搁死一个节点 id
 
@@ -189,7 +189,7 @@ Status: proposed
 - `abstractDagState` 不再比较由生产推导的 command id 与状态，且差分断言仍然通过。
 - 本笔记中的每一处 file:line 主张仍指向所指代码，否则在移动该代码的同一变更中修正本笔记。
 
-其中两项现在由已交付代码满足，而不再是提案：`preparedFrom` 回归测试已经存在，并针对两阶段记录通过；被中断的 `worktree add` 既有了修复转换，也有了测试。
+其中三项现在由已交付代码满足，而不再是提案：`preparedFrom` 回归测试已经存在，并针对两阶段记录通过；被中断的 `worktree add` 既有了修复转换，也有了测试；撕裂尾部修复已是一个持久步骤，并有钉住它的崩溃测试。最后一项不在 DAG 之内：它是持久化持久性决策，记录在自己的 Agent Note 中。
 
 ## 风险
 
@@ -201,4 +201,4 @@ Status: proposed
 
 修复 `preparedFrom` 窗口会改变关于准备的持久记录内容，这是一个持久格式决策，并对已经携带 `dag/state` 快照的会话带来迁移问题。修复在发布前需要自己的 Agent Note。
 
-本笔记记录三个缺陷。`preparedFrom` 窗口与被搁死的 worktree 缺口已修复；撕裂尾部修复窗口未修复，其上文给出了两种候选设计。在那项落地之前，恢复尾部在截断与写回之间的崩溃仍会丢弃一次读取已经提供过的事件。
+本笔记记录三个缺陷。三者都已修复：`preparedFrom` 窗口、被搁死的 worktree 缺口，以及撕裂尾部修复窗口——后者现在是一个持久步骤。选项 4 的崩溃注入套件仍是提案；它点名的三个回归测试都已存在。

@@ -58,7 +58,7 @@ The backend owns the live write path: it installs the session listeners once and
 
 ### Resuming and crash recovery
 
-Persistence returns the physically valid log; semantic repair belongs to the reader. A session that crashed mid-turn keeps its open final turn — a single turn can be large, and those events were durably appended before the crash; only the incomplete fragment of a never-acknowledged torn tail is discarded — complete records recovered from it are durably rewritten by the write path before the handle's first new append. Resume (agent-loop) reads the stored log through its write handle, computes `interruptedTurnClosers` — synthetic `tool/result` errors, any open `step/end`, and `turn/end {interrupted}` — and appends them through the same handle as an ordinary batch. Read-only observers (session-query) balance an interrupted cold log with the same closers in memory only.
+Persistence returns the physically valid log; semantic repair belongs to the reader. A session that crashed mid-turn keeps its open final turn — a single turn can be large, and those events were durably appended before the crash; only the incomplete fragment of a never-acknowledged torn tail is discarded — the complete records recovered from it survive, because the write path publishes the artifact's prefix and those records as one durable replacement before the handle's first new append. Resume (agent-loop) reads the stored log through its write handle, computes `interruptedTurnClosers` — synthetic `tool/result` errors, any open `step/end`, and `turn/end {interrupted}` — and appends them through the same handle as an ordinary batch. Read-only observers (session-query) balance an interrupted cold log with the same closers in memory only.
 
 ### Failures and recovery
 
@@ -81,7 +81,7 @@ The package is a seam, not a backend framework: it exports the abstract `Session
 ### The invariants every backend honors
 
 - **Append-only, contiguous `seq`.** Committed events are never rewritten; `append`'s first `seq` must equal the stored next-seq, and a gap rejects.
-- **A torn physical tail never reaches a reader.** It belongs to an append that never resolved; the write path truncates it durably before its first new append.
+- **A torn physical tail never reaches a reader.** It belongs to an append that never resolved; the write path replaces it, together with the complete records it carried, in one durable step before its first new append.
 - **Lossless JSON data.** Batches and headers pass the shared one-pass validate-and-snapshot boundary (`materializeAppendBatch`/`materializeCreateHeader`); non-serializable payloads reject at the call site.
 - **Durability.** `append` persists best-effort; `flush` — per handle or service-wide — is the barrier that promises storage and also materializes an empty session.
 - **Fail-closed reads.** `validateStoredEvents` refuses unknown event vocabulary and retired pre-release shapes; `assertVersion` refuses foreign format versions.

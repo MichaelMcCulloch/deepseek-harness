@@ -76,6 +76,18 @@ export function parseGenerationLogFilename(
 }
 
 /**
+ * Path of the transient file a torn-tail repair writes its synced replacement
+ * into before renaming it over the generation log. The suffix keeps the name
+ * outside {@link parseGenerationLogFilename}, so generation discovery, listing,
+ * and the opposite-encoding check never read it as an artifact.
+ * @param path - the generation log path being repaired.
+ * @returns the replacement path beside that log.
+ */
+export function repairReplacementPath(path: string): string {
+  return `${path}.repair.tmp`
+}
+
+/**
  * The current physical header stored as the first JSONL record. The exact
  * inherited cut lives on the last tagged `session/end-seed` event.
  */

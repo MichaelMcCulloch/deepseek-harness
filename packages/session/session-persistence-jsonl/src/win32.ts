@@ -5,8 +5,9 @@
  * fsyncing the parent directory. Windows does not expose that parent-directory
  * fsync contract through Node, so the Windows path uses the native durable
  * namespace primitive instead: create a staging object in the target directory
- * and publish it with `MoveFileExW(..., MOVEFILE_WRITE_THROUGH)` without
- * replacement or cross-volume copy fallback.
+ * and publish it with `MoveFileExW(..., MOVEFILE_WRITE_THROUGH)`, without
+ * replacement or cross-volume copy fallback for a new artifact, and with
+ * replacement for a torn-tail repair that replaces an existing one.
  *
  * @module dsh-session-persistence-jsonl/win32
  */
@@ -36,6 +37,7 @@ interface Win32ErrnoException extends NodeJS.ErrnoException {
   dest: string
 }
 
+const MOVEFILE_REPLACE_EXISTING = 0x00000001
 const MOVEFILE_WRITE_THROUGH = 0x00000008
 const WAIT_OBJECT_0 = 0
 const WAIT_TIMEOUT = 0x00000102
@@ -134,6 +136,23 @@ async function assertDirectory(path: string): Promise<boolean> {
 export async function publishNewFileWin32(existing: string, replacement: string): Promise<void> {
   const api = await win32()
   const ok = api.moveFileExW(toNamespacedPath(existing), toNamespacedPath(replacement), MOVEFILE_WRITE_THROUGH)
+  if (ok === 0) throw win32Error('MoveFileExW', api.getLastError(), existing, replacement)
+}
+
+/**
+ * Replace `replacement` with `existing` through Windows write-through rename
+ * semantics. The destination is expected to exist; the move must stay within
+ * the volume (no copy fallback flag is set).
+ * @param existing - the synced staging path to move.
+ * @param replacement - the final path, which must already exist.
+ */
+export async function replaceFileWin32(existing: string, replacement: string): Promise<void> {
+  const api = await win32()
+  const ok = api.moveFileExW(
+    toNamespacedPath(existing),
+    toNamespacedPath(replacement),
+    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+  )
   if (ok === 0) throw win32Error('MoveFileExW', api.getLastError(), existing, replacement)
 }
 

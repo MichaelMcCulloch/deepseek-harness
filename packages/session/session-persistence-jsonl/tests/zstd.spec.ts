@@ -3,14 +3,14 @@ import { Context } from '@deepseek-ai/cordis'
 import { appendFile, mkdir, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { SessionSeq, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import {
-  generationLogPath, logPath, scanLog, sessionDir, toHeaderLine, type JsonlCompression,
+  generationLogPath, logPath, repairReplacementPath, scanLog, sessionDir, toHeaderLine, type JsonlCompression,
 } from '../src/format.ts'
 import {
   compressZstdFrame, createZstdFrameDecoder, decompressZstdFrame, decompressZstdPrefix, scanZstdFrames,
@@ -146,6 +146,67 @@ function emptyStructuralFrame(descriptor: number): Buffer {
   const lastEmptyRawBlock = Buffer.from([1, 0, 0])
   const checksum = (descriptor & 0x04) === 0 ? Buffer.alloc(0) : Buffer.alloc(4)
   return Buffer.concat([MAGIC, Buffer.from([descriptor]), variableHeader, lastEmptyRawBlock, checksum])
+}
+
+/**
+ * Append one EOF-torn final frame whose complete JSONL records are
+ * `[turn/start, step/start]` and whose half-written third record never decodes
+ * to an event.
+ * @param path - the Zstandard generation log to append the torn tail to.
+ * @param turn - the turn number both complete records carry.
+ * @returns the two complete records the torn frame yields to a reader.
+ */
+async function appendTornSecondTurnStart(path: string, turn = 2): Promise<SessionEvent[]> {
+  const complete: SessionEvent[] = [
+    { type: 'turn/start', seq: SessionSeq(6), time: 7, data: { turn } },
+    { type: 'step/start', seq: SessionSeq(7), time: 8, data: { turn, step: 1 } },
+  ]
+  const partial = JSON.stringify({
+    type: 'assistant/chunk',
+    seq: 8,
+    time: 9,
+    data: { turn, step: 1, chunk: { type: 'text-delta', index: 0, text: deterministicNoise(300_000) } },
+  })
+  await appendFile(path, await tornFrame(
+    [...complete.map(event => JSON.stringify(event)), partial].join('\n'),
+    decoded => (decoded.match(/\n/g) ?? []).length >= 2 && !decoded.endsWith('\n'),
+  ))
+  return complete
+}
+
+/** The two events continuing a session whose torn tail recovered seqs 6 and 7. */
+function secondTurnClosers(): SessionEvent[] {
+  return [
+    { type: 'step/end', seq: SessionSeq(8), time: 10, data: { turn: 2, step: 1 } },
+    { type: 'turn/end', seq: SessionSeq(9), time: 11, data: { turn: 2, reason: { kind: 'interrupted' } } },
+  ]
+}
+
+/** The two events continuing a session whose torn tail recovered no record. */
+function secondTurn(): SessionEvent[] {
+  return [
+    { type: 'turn/start', seq: SessionSeq(6), time: 9, data: { turn: 2 } },
+    { type: 'turn/end', seq: SessionSeq(7), time: 10, data: { turn: 2, reason: { kind: 'completed' } } },
+  ]
+}
+
+/** The bytes the append path encodes for one batch, as a repaired log stores them. */
+async function encodedBatch(events: readonly SessionEvent[]): Promise<Buffer> {
+  return compressZstdFrame(events.map(event => JSON.stringify(event)).join('\n') + '\n')
+}
+
+/** Open a write handle over a torn artifact and abandon it after one rejected append. */
+async function appendAfterCrash(
+  ctx: Context,
+  id: SessionId,
+  batch: readonly SessionEvent[],
+  crash: Error,
+): Promise<void> {
+  const service = ctx.sessionPersistence as unknown as { persistBatch: () => Promise<void> }
+  vi.spyOn(service, 'persistBatch').mockRejectedValueOnce(crash)
+  const handle = await ctx.sessionPersistence.open(id, 'write')
+  await expect(handle.append(batch)).rejects.toBe(crash)
+  await handle.close()
 }
 
 afterEach(async () => {
@@ -691,6 +752,170 @@ describe('JsonlSessionPersistence: default Zstandard encoding', () => {
     expect(scanZstdFrames(repaired).tornStart).toBeUndefined()
     expect(scanLog(await decodeCompleteFrames(repaired)).events.map(e => e.seq))
       .toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+  })
+
+  it('a crash inside the torn-tail repair cannot drop the records a read served', async () => {
+    const root = await freshRoot()
+    const ctx = await mount(root)
+    const header = meta('repair-crash-window', '/proj')
+    vi.spyOn(ctx.logger, 'warn').mockImplementation(() => undefined)
+    await writeLog(ctx.sessionPersistence, header, oneTurnLog())
+    const path = logPath(root, header.cwd, header.id, 'zstd')
+    const committed = await readFile(path)
+    const recovered = await appendTornSecondTurnStart(path)
+
+    // A read handle serves the complete records the torn frame already carried.
+    const served = await readAll(ctx.sessionPersistence, header.id)
+    expect(served.events.map(event => event.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+    expect(served.events.slice(6)).toEqual(recovered)
+
+    // The process dies with the repair unfinished: the durable step that owns
+    // it rejects, and the handle is abandoned without another flush.
+    await appendAfterCrash(ctx, header.id, secondTurnClosers(), new Error('simulated crash inside the torn-tail repair'))
+
+    // Reopening serves every event the earlier read served. A repair split into
+    // a truncation and a rewrite has already destroyed them here; one durable
+    // replacement only ever publishes both parts together.
+    const reopened = await mount(root)
+    const reloaded = await readAll(reopened.sessionPersistence, header.id)
+    expect(reloaded.events.map(event => event.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+    expect(reloaded.events.slice(6)).toEqual(recovered)
+    expect((await readFile(path)).subarray(0, committed.length)).toEqual(committed)
+  })
+
+  it('a writer reopened after that crash completes the repair exactly once', async () => {
+    const root = await freshRoot()
+    const ctx = await mount(root)
+    const header = meta('repair-crash-continue', '/proj')
+    vi.spyOn(ctx.logger, 'warn').mockImplementation(() => undefined)
+    await writeLog(ctx.sessionPersistence, header, oneTurnLog())
+    const path = logPath(root, header.cwd, header.id, 'zstd')
+    const committed = await readFile(path)
+    const recovered = await appendTornSecondTurnStart(path)
+    await appendAfterCrash(ctx, header.id, secondTurnClosers(), new Error('simulated crash inside the torn-tail repair'))
+
+    const reopened = await mount(root)
+    await appendBatch(reopened.sessionPersistence, header.id, secondTurnClosers())
+
+    // One frame for the recovered records and one for the batch, after the
+    // committed prefix byte for byte: the artifact the truncate-then-append
+    // protocol produced, with each event stored exactly once.
+    const repaired = await readFile(path)
+    expect(repaired).toEqual(Buffer.concat([
+      committed,
+      await encodedBatch(recovered),
+      await encodedBatch(secondTurnClosers()),
+    ]))
+    expect(scanLog(await decodeCompleteFrames(repaired)).events)
+      .toEqual([...oneTurnLog(), ...recovered, ...secondTurnClosers()])
+  })
+
+  it('keeps the torn artifact and no replacement residue when the replacement never publishes', async () => {
+    const root = await freshRoot()
+    const ctx = await mount(root)
+    const header = meta('repair-unpublished', '/proj')
+    vi.spyOn(ctx.logger, 'warn').mockImplementation(() => undefined)
+    await writeLog(ctx.sessionPersistence, header, oneTurnLog())
+    const path = logPath(root, header.cwd, header.id, 'zstd')
+    await appendTornSecondTurnStart(path)
+    const withTornTail = await readFile(path)
+
+    const handle = await ctx.sessionPersistence.open(header.id, 'write')
+    try {
+      const probe = await open(path, 'r')
+      const prototype = Object.getPrototypeOf(probe) as { sync: () => Promise<void> }
+      await probe.close()
+      const realSync = prototype.sync
+      let failed = false
+      const spy = vi.spyOn(prototype, 'sync').mockImplementation(async function (this: unknown) {
+        if (!failed) { failed = true; throw new Error('simulated replacement fsync failure') }
+        return realSync.call(this)
+      })
+      await expect(handle.append(secondTurnClosers())).rejects.toThrow(/simulated replacement fsync failure/)
+      spy.mockRestore()
+
+      // Nothing published: the torn artifact keeps its bytes and the synced
+      // replacement that was never renamed is gone, so a retry starts from the
+      // state this attempt found.
+      expect(await readFile(path)).toEqual(withTornTail)
+      expect(await readdir(dirname(path))).not.toContain(basename(repairReplacementPath(path)))
+    } finally {
+      await handle.close()
+    }
+  })
+
+  it('keeps a published replacement when its directory entry cannot be synced', async () => {
+    const root = await freshRoot()
+    const ctx = await mount(root)
+    const header = meta('repair-dir-sync', '/proj')
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => undefined)
+    await writeLog(ctx.sessionPersistence, header, oneTurnLog())
+    const path = logPath(root, header.cwd, header.id, 'zstd')
+    const committed = await readFile(path)
+    const recovered = await appendTornSecondTurnStart(path)
+
+    const handle = await ctx.sessionPersistence.open(header.id, 'write')
+    try {
+      const probe = await open(path, 'r')
+      const prototype = Object.getPrototypeOf(probe) as { sync: () => Promise<void> }
+      await probe.close()
+      const realSync = prototype.sync
+      let syncs = 0
+      const spy = vi.spyOn(prototype, 'sync').mockImplementation(async function (this: unknown) {
+        syncs += 1
+        // The replacement file syncs first, the directory that publishes it by
+        // rename syncs second.
+        if (syncs === 2) throw new Error('simulated directory fsync failure')
+        return realSync.call(this)
+      })
+      await handle.append(secondTurnClosers())
+      spy.mockRestore()
+    } finally {
+      await handle.close()
+    }
+
+    // The rename already published the replacement, so an unconfirmed directory
+    // entry is reported instead of rejected: a rejected repair is retried, and
+    // re-encoding it would store the recovered records and the batch twice.
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('directory entry could not be synced'))
+    expect(await readFile(path)).toEqual(Buffer.concat([
+      committed,
+      await encodedBatch(recovered),
+      await encodedBatch(secondTurnClosers()),
+    ]))
+  })
+
+  it('clears a replacement residue and repairs a torn frame that recovered no record', async () => {
+    const root = await freshRoot()
+    const ctx = await mount(root)
+    const header = meta('repair-residue', '/proj')
+    vi.spyOn(ctx.logger, 'warn').mockImplementation(() => undefined)
+    await writeLog(ctx.sessionPersistence, header, oneTurnLog())
+    const path = logPath(root, header.cwd, header.id, 'zstd')
+    const committed = await readFile(path)
+    // A frame torn before it produced plaintext recovers no record, and the
+    // residue is what a crash inside an earlier replacement left behind.
+    await appendFile(path, MAGIC.subarray(0, 2))
+    const residue = repairReplacementPath(path)
+    await writeFile(residue, 'abandoned replacement')
+
+    // Discovery selects generations by filename, so listing sees one session.
+    expect((await ctx.sessionPersistence.list()).map(snapshot => snapshot.header.id)).toEqual([header.id])
+
+    // The write open holds the session's lock and clears the residue before any
+    // append publishes from that path.
+    const handle = await ctx.sessionPersistence.open(header.id, 'write')
+    try {
+      expect(await readdir(dirname(path))).not.toContain(basename(residue))
+      await handle.append(secondTurn())
+    } finally {
+      await handle.close()
+    }
+
+    const repaired = await readFile(path)
+    expect(repaired).toEqual(Buffer.concat([committed, await encodedBatch(secondTurn())]))
+    expect(scanLog(await decodeCompleteFrames(repaired)).events.map(event => event.seq))
+      .toEqual([0, 1, 2, 3, 4, 5, 6, 7])
   })
 
   it('drops a frame torn in its header before it has produced plaintext', async () => {

@@ -115,13 +115,13 @@ The node is recorded `completed` with `completedCommit = M`, a commit containing
 
 ### The torn-tail repair has a crash window that drops recovered events
 
-The default persistence path is checksummed Zstandard frames, one per durable append batch. An EOF-truncated final frame is detected by the frame scan, its complete event lines are recovered, and the repair runs as two durable steps in `persistContiguous` (`packages/session/session-persistence-jsonl/src/storage.ts:328-337`): first `truncateTornTail` truncates and fsyncs (`session-persistence-jsonl/src/index.ts:840-844`, `repair` at `:1287-1296`), and only then is the recovered tail written back.
+The default persistence path is checksummed Zstandard frames, one per durable append batch. An EOF-truncated final frame is detected by the frame scan, its complete event lines are recovered, and the repair took two durable steps in `persistContiguous` (`packages/session/session-persistence-jsonl/src/storage.ts`): it truncated and fsynced the torn bytes, and only then wrote the recovered tail back.
 
 A crash between those two steps loses the recovered events permanently. A read had already served them, the handle a resume opened carries them into the in-memory log, and the DAG folds them and may run effects from them; the next reopen sees only the truncated prefix. The window is reachable only when the first write after a torn-tail read is interrupted, and the existing tests cover a failed rewrite with retry, not a crash inside the window.
 
 The damage to the DAG is bounded, because every effect is keyed by a deterministic id and re-derived from the surviving snapshot: the residue is an orphan worktree or child session for a command that no longer exists, not an invalid state. That argument is informal and belongs in a test, which is why option 4 includes the window explicitly.
 
-**Not repaired.** Closing it needs the truncation and the rewritten tail to become one durable step, and the two ways to get there both change the session log's durability protocol: replace the file by writing prefix-plus-recovered-frame to a temporary file and renaming it over the original, or write the recovered events to a repair sidecar that the next open re-applies before it truncates. `persistBatch` is not a pure encoder today — it materializes or appends — so neither is a local edit, and both belong to the persistence owner with their own crash tests and fixture review.
+**Repaired.** The repair is now one durable step. `replaceTornTail` (`packages/session/session-persistence-jsonl/src/index.ts`) encodes the artifact's complete prefix, the complete records recovered from its torn tail, and the pending batch into a synced replacement file beside the log, renames that file over the log, and fsyncs the directory — on Windows the same publication is `MoveFileExW(..., MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)`. The rename is the commit point, so a crash at any point leaves either the torn artifact or the repaired one; `persistContiguous` reaches the storage seam once through `persistBatch`'s repair argument, and the separate `truncateTornTail` step no longer exists. Successful repairs keep the on-disk bytes the two-step protocol produced — the same prefix bytes followed by one encoded frame per batch — and a leftover replacement file is invisible to generation discovery and cleared by the next write open. `packages/session/session-persistence-jsonl/tests/zstd.spec.ts` pins the window: after the interrupted repair, reopening must still serve the records the earlier read served, and a reopened writer must complete the repair with each event stored exactly once. The [durability decision](../../implemented/bug-fix/2026-09-21-atomic-torn-tail-replacement.md) owns the design.
 
 ### An interrupted `git worktree add` strands a node id
 
@@ -189,7 +189,7 @@ Explicitly not doing:
 - `abstractDagState` no longer compares production-derived command ids and states, and the differential assertions still pass.
 - Every file:line claim in this note still resolves to the named code, or the note is corrected in the same change that moves it.
 
-Two of these are now satisfied by shipped code rather than proposed: the `preparedFrom` regression test exists and passes against the two-phase record, and the interrupted-`worktree add` case has both its repair transition and its test.
+Three of these are now satisfied by shipped code rather than proposed: the `preparedFrom` regression test exists and passes against the two-phase record, the interrupted-`worktree add` case has both its repair transition and its test, and the torn-tail repair is one durable step with the crash test that pins it. The last one lives outside the DAG: it is a persistence durability decision, recorded in its own Agent Note.
 
 ## Risks
 
@@ -201,4 +201,4 @@ The refusal oracle multiplies the model test's work by the number of guard mutat
 
 Fixing the `preparedFrom` window changes what is recorded durably about preparation, which is a durable-format decision with a migration question for sessions that already carry a `dag/state` snapshot. The fix needs its own Agent Note before it ships.
 
-This note records three defects. The `preparedFrom` window and the stranded-worktree gap are repaired; the torn-tail repair window is not, and its two candidate designs are stated above. Until that one lands, a crash between the truncation and the rewrite of a recovered tail still drops events a read already served.
+This note records three defects. All three are repaired: the `preparedFrom` window, the stranded-worktree gap, and the torn-tail repair window, which is now one durable step. The crash-injection suite of option 4 remains the proposal; the three regression tests it named exist.
