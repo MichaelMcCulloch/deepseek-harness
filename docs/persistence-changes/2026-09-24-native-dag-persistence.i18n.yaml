@@ -1,0 +1,28 @@
+# Bilingual-pair consistency record for 2026-09-24-native-dag-persistence.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/persistence-changes/2026-09-24-native-dag-persistence.md
+/:
+  en: 3d5a424ae7d7e46b
+  zh: c22a8e4a62d8cc1a
+/2026-09-24-native-dag-persistence:
+  en: 5e8118115f253fe7
+  zh: ccc5a1502b99b22a
+/2026-09-24-native-dag-persistence/summary:
+  en: 83024b33acededa3
+  zh: 6143a11534167e0e
+/2026-09-24-native-dag-persistence/table-of-contents:
+  en: 6cf314a069ceb451
+  zh: 9adff678e9ecab3b
+/2026-09-24-native-dag-persistence/declaration:
+  en: 6907136f28e48c90
+  zh: 02f8298485f3d8e7
+/2026-09-24-native-dag-persistence/compatibility:
+  en: 93028cb855e633a1
+  zh: 20b08f5a852b6454
+/2026-09-24-native-dag-persistence/verification:
+  en: 2a4e8869c75f5a17
+  zh: 3a7e7f27c26e2e1d
+/2026-09-24-native-dag-persistence/dev-note:
+  en: b75c8458928b72b9
+  zh: 003ba4e17b4b5269

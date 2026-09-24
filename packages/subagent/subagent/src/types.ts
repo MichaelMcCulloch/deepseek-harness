@@ -138,8 +138,8 @@ export interface ContinuableSubagentDescriptorData extends SubagentDescriptorBas
   readonly persona?: string
   /** Child tool scoping reapplied on resume. */
   readonly toolFilter?: ToolRestriction
-  /** Generic settlement notice policy reapplied on every activation. */
-  readonly settlementDelivery: SubagentSettlementDelivery
+  /** Generic settlement notice policy reapplied on every activation; a historical descriptor without one resolves to `adaptive`. */
+  readonly settlementDelivery?: SubagentSettlementDelivery
   /** Optional durable capability ownership. */
   readonly owner?: SubagentOwnerBinding
 }

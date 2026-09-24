@@ -208,7 +208,7 @@ export class SubagentContinuationManager {
         const activation = await this.activations.materialize({
           childId,
           provider: spec.provider,
-          settlementDelivery: descriptor.settlementDelivery,
+          settlementDelivery: descriptor.settlementDelivery ?? 'adaptive',
           ...descriptor.owner === undefined ? {} : { owner: descriptor.owner },
           parent,
           create: {
@@ -506,7 +506,7 @@ export class SubagentContinuationManager {
       activation = await this.activations.materialize({
         childId,
         provider: descriptor.provider,
-        settlementDelivery: descriptor.settlementDelivery,
+        settlementDelivery: descriptor.settlementDelivery ?? 'adaptive',
         ...descriptor.owner === undefined ? {} : { owner: descriptor.owner },
         parent,
         agentOptions: {

@@ -1,10 +1,29 @@
 /** Resolve producer opt-ins and core-owned source bindings before schema extraction. */
 
-import { relative, resolve, sep } from 'node:path'
+import { relative, sep } from 'node:path'
 import ts from 'typescript'
 import type { SourceCompatibility } from './persistence-schema-model.ts'
 
-const CORE_SOURCE = 'packages/llm/llm/src/message.ts'
+const CORE_PACKAGE_DIRECTORY = 'packages/llm/llm/src'
+
+/**
+ * Locate the package module declaring the message vocabulary the core binding annotates.
+ * The declaration's file inside the package may move between layouts, so the
+ * binding resolves from the `MessageSourceMap` declaration instead of a fixed path.
+ * @param root - repository root.
+ * @param program - the complete source-only persistence compiler program.
+ * @returns the declaring module, or undefined when the package declares none.
+ * @throws when more than one module in the package declares the vocabulary.
+ */
+function coreMessageSource(root: string, program: ts.Program): ts.SourceFile | undefined {
+  const declared = program.getSourceFiles().filter((file) => {
+    const path = relative(root, file.fileName).split(sep).join('/')
+    if (!path.startsWith(`${CORE_PACKAGE_DIRECTORY}/`)) return false
+    return file.statements.some(node => ts.isInterfaceDeclaration(node) && node.name.text === 'MessageSourceMap')
+  })
+  if (declared.length > 1) throw new Error('persistence schema: ambiguous @persistenceSource owner: the LLM package declares MessageSourceMap in more than one module')
+  return declared[0]
+}
 
 /**
  * Resolve explicit authoring annotations without using type names in recorded history.
@@ -18,7 +37,7 @@ export function sourceCompatibilityAnnotations(
   const checker = program.getTypeChecker()
   const bindings = new Map<ts.Declaration, readonly ('user' | 'developer')[]>()
   const qualifications = new Set<ts.Node>()
-  const core = program.getSourceFile(resolve(root, CORE_SOURCE))
+  const core = coreMessageSource(root, program)
   for (const file of program.getSourceFiles()) {
     const path = relative(root, file.fileName).split(sep).join('/')
     if (!path.startsWith('packages/') || path.includes('/node_modules/')) continue

@@ -237,7 +237,7 @@ function parseSubagentDescriptor(value: unknown): SubagentDescriptorData | undef
   const toolFilter = Object.hasOwn(value, 'toolFilter')
     ? parseToolFilter(value['toolFilter'])
     : undefined
-  const settlementDelivery = value['settlementDelivery']
+  const settlementDelivery = Object.hasOwn(value, 'settlementDelivery') ? value['settlementDelivery'] : 'adaptive'
   if (settlementDelivery !== 'adaptive' && settlementDelivery !== 'quiet' && settlementDelivery !== 'none') {
     throw new Error('persisted subagent descriptor settlementDelivery is invalid')
   }

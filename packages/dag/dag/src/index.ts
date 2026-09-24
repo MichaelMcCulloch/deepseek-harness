@@ -100,6 +100,9 @@ export interface DagNoticeMessageSource {
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
+    /** Durable DAG notice attribution; readers preserve the notice text without this producer.
+     * @persistenceAttribution
+     */
     'dag-notice': DagNoticeMessageSource
   }
 }
