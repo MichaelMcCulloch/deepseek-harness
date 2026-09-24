@@ -63,6 +63,7 @@ kind: "package-reference"
 | [`src/index.ts`](src/index.ts) | 作用域提供方选择与服务器名称提示词上下文 |
 | [`src/tools.ts`](src/tools.ts) | 共享资源操作与参数 schema |
 | [`src/render.ts`](src/render.ts) | 带归属信息且不内联二进制载荷的文本投影 |
+| [`src/types.ts`](src/types.ts) | 运行时与共享工具共同引用的资源操作词汇 |
 
 不发布 `./invariant` 配套入口：工具、提示词名称与派发均源于同一组由 effect 拥有的提供方注册。它们没有可供核对的独立观测值；注册表 effect 检查不属于运行时不变式。
 

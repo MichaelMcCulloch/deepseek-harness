@@ -768,7 +768,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-dag`
 
 - `inject`: `agents` · `subagents` · `subprocess` · `sessions` · `sessionProjections`
-- `source`: [`packages/dag/dag/src/index.ts:108`](../packages/dag/dag/src/index.ts)
+- `source`: [`packages/dag/dag/src/index.ts:111`](../packages/dag/dag/src/index.ts)
 
 ```ts config-catalog
 /** Deployment choices for the local DAG runtime. */
@@ -839,7 +839,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-experimental-agent-team`
 
 - `inject`: `agents` · `sessions` · `sessionPersistence` · `sessionProjections` · `subagents`
-- `source`: [`packages/experimental/agent-team/src/types.ts:152`](../packages/experimental/agent-team/src/types.ts)
+- `source`: [`packages/experimental/agent-team/src/types.ts:166`](../packages/experimental/agent-team/src/types.ts)
 
 ```ts config-catalog
 /** Team-service deployment limits. */
@@ -2117,7 +2117,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-office-to-pdf`
 
-- `source`: [`packages/document/office-to-pdf/src/index.ts:31`](../packages/document/office-to-pdf/src/index.ts)
+- `source`: [`packages/document/office-to-pdf/src/index.ts:26`](../packages/document/office-to-pdf/src/index.ts)
 
 ```ts config-catalog
 /** Provider concurrency and kit rendering/font configuration. */
@@ -2502,7 +2502,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-schedule`
 
 - `inject`: `agents` · `sessions` · `tools` · `storageDomain` · `sessionController` · `sessionPersistence`
-- `source`: [`packages/schedule/schedule/src/index.ts:73`](../packages/schedule/schedule/src/index.ts)
+- `source`: [`packages/schedule/schedule/src/index.ts:79`](../packages/schedule/schedule/src/index.ts)
 
 ```ts config-catalog
 /** Configuration for the Host Schedule domain. */

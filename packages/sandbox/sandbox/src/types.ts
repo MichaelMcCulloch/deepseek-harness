@@ -1,13 +1,30 @@
 /**
- * The sandbox file-effect vocabulary shared by the Service Definition and the
- * enforcement modules that read a policy without going through the package
- * barrel: the mode ladder, its confining subset, and the per-call policy the
- * provider wraps an argv under.
+ * The sandbox file-effect and runner-failure vocabulary shared by the Service
+ * Definition and the enforcement modules that read a policy without going
+ * through the package barrel: the mode ladder, its confining subset, the
+ * per-call policy the provider wraps an argv under, and the runner-failure
+ * evidence a consumer classifies against.
  *
  * @module @deepseek-ai/dsh-sandbox/types
  */
 
 import type { SessionId } from '@deepseek-ai/dsh-session'
+
+/**
+ * Evidence that identifies a sandbox runner failing before it executes the
+ * wrapped command. A consumer first applies {@link allowedExitCodes} when
+ * present, removes {@link informationalLines} by case-insensitive exact line
+ * equality, then matches {@link fatalSignatures} case-insensitively within
+ * each remaining stderr line. Exit status alone never proves runner failure.
+ */
+export interface RunnerFailureRule {
+  /** Nonzero process exit codes on which this rule may match; omitted permits any nonzero exit. */
+  allowedExitCodes?: readonly number[]
+  /** Non-empty substrings identifying a fatal runner diagnostic on one stderr line. */
+  fatalSignatures: readonly string[]
+  /** Benign stderr lines excluded by exact full-line equality before fatal matching. */
+  informationalLines?: readonly string[]
+}
 
 /**
  * File-effect policy for confined processes. `read-only` permits only required

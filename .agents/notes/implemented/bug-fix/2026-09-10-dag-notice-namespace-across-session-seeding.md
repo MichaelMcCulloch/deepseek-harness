@@ -15,7 +15,13 @@ The service stamped each write with the live dispatcher agent id, and the reduce
 `DagService.write` resolves the namespace from the folded state and falls back to the live agent id only before the first declaration:
 
 ```ts
-noticeNamespace: this.state(agent)?.noticeNamespace ?? agent.id,
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { DagService } from '@deepseek-ai/dsh-dag'
+
+declare const service: DagService
+declare const agent: Agent
+
+const noticeNamespace = service.state(agent)?.noticeNamespace ?? agent.id
 ```
 
 The first declaration establishes the namespace; every later write, whether it runs in the declaring session or in a session seeded from it, keeps that value. The reducer's stability rule is unchanged — a state value never changes namespace after its first write — so notice ids stay stable and inherited delivery records stay matchable.

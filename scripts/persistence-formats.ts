@@ -9,29 +9,16 @@ import { parseHistoricalPersistenceSnapshot, parsePersistenceSnapshot } from './
 import { persistenceFormatFactArtifacts } from './persistence-format-facts.ts'
 import { canonicalizeSchema, schemaDigest } from './persistence-schema-model.ts'
 import type { PersistenceSchemaInventory } from './persistence-schema-model.ts'
+import type { PersistenceFormatEntry, PersistenceFormatSource, PersistenceFormats } from './persistence-format-types.ts'
 import { withoutPersistenceSourceLines } from './persistence-source-metadata.ts'
+
+export type {
+  PersistenceFormatEntry, PersistenceFormatSource, PersistenceFormats,
+} from './persistence-format-types.ts'
 
 const DIRECTORY = 'docs/persistence-changes/historical-formats'
 const CURRENT_DOCUMENT = 'docs/persistence-catalog.md'
 const CURRENT_SCHEMA = 'docs/persistence-schema.json'
-
-/** Historical checkout that supplies a format's complete declared persistence inventory. */
-export type PersistenceFormatSource = { readonly tag: string } | { readonly pullRequest: number }
-
-/** One complete format reference; the current catalog follows the historical entries. */
-export interface PersistenceFormatEntry {
-  readonly version: number
-  readonly document: string
-  readonly schemaPath: string
-  readonly inventory: PersistenceSchemaInventory
-  readonly source?: PersistenceFormatSource
-}
-
-/** Contiguous format references ending at the source-declared writer version. */
-export interface PersistenceFormats {
-  readonly currentVersion: number
-  readonly entries: readonly PersistenceFormatEntry[]
-}
 
 interface PersistenceFormatRecord {
   readonly source: PersistenceFormatSource

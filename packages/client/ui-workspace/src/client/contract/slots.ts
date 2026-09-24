@@ -54,6 +54,10 @@ import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/cli
 import type { WorkspaceShortcutState } from '../shortcuts.ts'
 import type { createWorkspaceViewStore } from '../stores.ts'
 
+import type { RowToast } from './row-toast.ts'
+
+export type { RowToast } from './row-toast.ts'
+
 /**
  * Owner share of the directory-flow holes: the complete conversation between
  * the trigger surface and the picking interaction. The occupant reads `open`
@@ -285,21 +289,6 @@ export type SessionRowActionProps<Injected extends object = object> =
   PropsRuntime<'sidebar.workspaces.session.row.action'>
   & PropsLocale<'workspace'>
   & InjectFace<Injected>
-
-/** One transient Workspace notice rendered by the overlay toast entry. */
-export type RowToast =
-  | { kind: 'archived'; sessionId: SessionId }
-  | { kind: 'stoppedAndArchived'; sessionId: SessionId }
-  | { kind: 'pinFailed' }
-  | { kind: 'unpinFailed' }
-  | { kind: 'archivedNotOpenable' }
-  | { kind: 'defaultWorkspaceFailed' }
-  /**
-   * An explicit New Session request that failed. `message` is untranslated:
-   * a Host refusal as `code: message` — the stable code stays in the copy so
-   * a report can be searched by it — and any other failure's own message.
-   */
-  | { kind: 'createFailed'; message: string }
 
 /** The notice on display; `seq` keys remounts so a repeated notice restarts its hold. */
 export type RowToastState = RowToast & { seq: number }

@@ -88,5 +88,9 @@ declare module '@deepseek-ai/cordis' {
      * @mode emit
      */
     'deepseek-account/model-sign-in-required'(): void
+    /** Local grant removal has completed.
+     * @mode emit
+     */
+    'deepseek-account/signed-out'(): void
   }
 }

@@ -3,7 +3,22 @@ import { createHash } from 'node:crypto'
 import { OfficeToPdfError } from './errors.ts'
 import { OfficeToPdfKey, type OfficeToPdfGeneration } from './identity.ts'
 import type { OfficeExtension, OfficeToPdfRequest, OfficeToPdfResult } from './types.ts'
-import type { Config } from './index.ts'
+/**
+ * The bounds one converter generation reads: admission, concurrency, and
+ * retained-cache limits. Structural on purpose — the provider's `Config` is
+ * assignable to it, so the two stay in step at the construction site.
+ */
+interface QueueBounds {
+  readonly maxConcurrentConversions: number
+  readonly maxQueuedJobs: number
+  readonly maxReaders: number
+  readonly maxSourceBytes: number
+  readonly maxBackgroundConversions: number
+  readonly maxCachedEntries: number
+  readonly maxCachedBytes: number
+  readonly maxSourceEntries: number
+  readonly maxInputBytes: number
+}
 
 type Converted = Pick<OfficeToPdfResult, 'pdf' | 'missingFonts'>
 type Convert = (bytes: Uint8Array, extension: OfficeExtension, signal: AbortSignal) => Promise<Converted>
@@ -45,7 +60,7 @@ export class ConversionQueue {
    * @param generation - provider lifetime; prevents reuse after engine or font replacement.
    * @param convert - executes one admitted conversion and settles after scratch cleanup.
    */
-  constructor(private readonly config: Config, private readonly generation: OfficeToPdfGeneration,
+  constructor(private readonly config: QueueBounds, private readonly generation: OfficeToPdfGeneration,
     private readonly convert: Convert) {}
 
   /**

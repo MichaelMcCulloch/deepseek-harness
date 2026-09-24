@@ -5,7 +5,7 @@ import { ShortcutKeys, focusWithoutRing, observeComposition } from '@deepseek-ai
 import type { ShortcutBinding, ShortcutCommandId, ShortcutEdit, ShortcutRevision } from '@deepseek-ai/dsh-client-shortcuts/protocol'
 import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ReferenceInjected } from './Reference.tsx'
+import type { ReferenceInjected } from './reference-injected.ts'
 import { shortcutFailure, shortcutReadFailure } from './feedback.ts'
 import css from './Reference.module.css'
 

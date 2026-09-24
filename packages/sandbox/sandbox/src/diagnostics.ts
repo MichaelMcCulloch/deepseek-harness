@@ -1,6 +1,6 @@
 /** Classify observed sandbox runner failures and file-effect denials. */
 import { accessSync, constants, statSync } from 'node:fs'
-import type { RunnerFailureRule } from './index.ts'
+import type { RunnerFailureRule } from './types.ts'
 
 /** Node-local spawn codes proven to identify executable resolution or permission failure. */
 const EXECUTABLE_SPAWN_CODES = new Set(['EACCES', 'ENOENT'])

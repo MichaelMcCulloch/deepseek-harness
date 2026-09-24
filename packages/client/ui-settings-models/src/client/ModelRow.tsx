@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import {
   IconChevronDownOutlineRegular, IconChevronRightOutlineRegular, IconTrashOutlineRegular,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { DeepSeekModelDraft } from './DeepSeekModelsEditor.tsx'
+import type { DeepSeekModelDraft } from './model-draft.ts'
 import type { ModelsKey } from './locales.ts'
 import { ModelInputTypes } from './ModelInputTypes.tsx'
 import styles from './ModelsSection.module.css'

@@ -5,12 +5,6 @@ export type { AccountBonusBatch, AccountBonusNotification, AccountBonusOrderId, 
 export { isRunningAccountTask, installAccountTaskCancellation } from './account-tasks.ts'
 
 declare module '@deepseek-ai/cordis' {
-  interface Events {
-    /** Local grant removal has completed.
-     * @mode emit
-     */
-    'deepseek-account/signed-out'(): void
-  }
   interface Context {
     deepseekAccount: DeepSeekAccount
   }

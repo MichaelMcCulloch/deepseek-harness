@@ -8,23 +8,29 @@ import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionActivity } from '@deepseek-ai/dsh-workspace'
 import { ScheduleRuntime } from './runtime.ts'
-import { registerScheduleTools } from './tools.ts'
+import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import {
+  CREATE_DESCRIPTION, CREATE_OUTPUT_SCHEMA, DELETE_DESCRIPTION, DELETE_OUTPUT_SCHEMA, LIST_DESCRIPTION,
+  LIST_OUTPUT_SCHEMA, SELECTOR_PARAMETERS, UPDATE_DESCRIPTION, UPDATE_OUTPUT_SCHEMA, internalError, operationError,
+  present, renderValue, timingChangeFrom, validateCreateArgs, validateUpdateArgs,
+} from './tools.ts'
 import { scheduleDomain } from './storage.ts'
 import { deliveryHistoryPage } from './delivery-history.ts'
 import { resolveScheduleUpdate } from './update.ts'
 import {
   foldScheduleEvents, ScheduleInputError, ScheduleLogError, ScheduleId, createAfterScheduleRecord, createAtScheduleRecord,
   createEveryScheduleRecord, createDailyScheduleRecord, createWeeklyScheduleRecord, createCronScheduleRecord,
-  scheduleTitle,
+  scheduleTitle, MAX_TITLE_LENGTH, scheduleView,
 } from './domain.ts'
 import type {
   DeliveryRetentionBounds, ScheduleCatalogEntry, ScheduleCreateRequest, ScheduleDeleteRequest, ScheduleDeleteResult,
   ScheduleDeliveryHistoryRequest, ScheduleDeliveryHistoryResult, ScheduleListRequest, ScheduleRecord,
-  ScheduleUpdateRequest, ScheduleUpdateResult,
+  ScheduleUpdateRequest, ScheduleUpdateResult, ScheduleCreateValue, ScheduleDeleteValue, ScheduleListValue,
+  ScheduleUpdateValue,
 } from './types.ts'
 
 export type * from './types.ts'
-export { registerScheduleTools } from './tools.ts'
 export { scheduleDomain } from './storage.ts'
 export type { ScheduleTask } from './storage.ts'
 export type { RecurringOccurrence } from './domain.ts'
@@ -456,6 +462,159 @@ export class ScheduleService extends TypertRemoteService {
     const pending = this.chain.then(work)
     this.chain = pending.catch(() => undefined) // Preserve FIFO progress after the caller receives the failure.
     return pending
+  }
+}
+
+/**
+ * Register all four Schedule tools in one exact agent scope.
+ * @param rootCtx - Host context owning the shared Schedule service.
+ * @param toolCtx - Exact agent-scoped context receiving the definitions.
+ * @param agent - Exact live owner whose session the tools mutate.
+ * @returns Idempotent aggregate disposer for the four registrations.
+ */
+export function registerScheduleTools(
+  rootCtx: Context,
+  toolCtx: Context,
+  agent: Agent,
+): () => void {
+  const disposers: Array<() => void> = []
+
+  try {
+    disposers.push(toolCtx.tools.register(defineTool({
+      name: 'schedule_create',
+      description: CREATE_DESCRIPTION,
+      parameters: {
+        prompt: {
+          type: 'string',
+          required: true,
+          description: 'Reminder content to present when the target becomes due.',
+        },
+        title: {
+          type: 'string',
+          required: true,
+          description: `Task name of at most ${MAX_TITLE_LENGTH} characters, shown on the task card and in task lists.`,
+        },
+        after_seconds: {
+          type: 'number',
+          description: 'Delay in whole seconds.',
+        },
+        ...SELECTOR_PARAMETERS,
+      },
+      output: { schema: CREATE_OUTPUT_SCHEMA, render: renderValue },
+      async execute(args, exec): Promise<ScheduleCreateValue> {
+        if (exec.agent !== agent) return internalError()
+        const invalid = validateCreateArgs(args)
+        if (invalid !== undefined) return invalid
+        if (exec.signal.aborted) return internalError()
+        try {
+          return scheduleView(await rootCtx.schedule.create(agent.session.id, args, exec.signal), Date.now())
+        } catch (error: unknown) {
+          return operationError(error)
+        }
+      },
+      presentCall: args => present('Create reminder', 'other', args.prompt),
+    })))
+
+    disposers.push(toolCtx.tools.register(defineTool({
+      name: 'schedule_list',
+      description: LIST_DESCRIPTION,
+      parameters: {},
+      output: { schema: LIST_OUTPUT_SCHEMA, render: renderValue },
+      async execute(_args, exec): Promise<ScheduleListValue> {
+        if (exec.agent !== agent) return internalError()
+        if (exec.signal.aborted) return internalError()
+        try {
+          const records = await rootCtx.schedule.list({ sessionId: agent.session.id })
+          return records.map(record => scheduleView(record, Date.now()))
+        } catch (error: unknown) {
+          return operationError(error)
+        }
+      },
+      presentCall: () => present('List reminders', 'read'),
+    })))
+
+    disposers.push(toolCtx.tools.register(defineTool({
+      name: 'schedule_delete',
+      description: DELETE_DESCRIPTION,
+      parameters: {
+        id: { type: 'string', required: true, description: 'Schedule id returned by schedule_list.' },
+      },
+      output: { schema: DELETE_OUTPUT_SCHEMA, render: renderValue },
+      async execute(args, exec): Promise<ScheduleDeleteValue> {
+        if (args.id.length === 0 || args.id.trim() !== args.id) {
+          return { code: 'invalid_rule', message: 'schedule_delete id must be non-empty without surrounding whitespace.' }
+        }
+        const id = ScheduleId(args.id)
+        if (exec.agent !== agent) return internalError()
+        if (exec.signal.aborted) return internalError()
+        try {
+          return await rootCtx.schedule.delete({ sessionId: agent.session.id, id }, exec.signal)
+        } catch (error: unknown) {
+          return operationError(error)
+        }
+      },
+      presentCall: args => present('Delete reminder', 'other', args.id),
+    })))
+
+    disposers.push(toolCtx.tools.register(defineTool({
+      name: 'schedule_update',
+      description: UPDATE_DESCRIPTION,
+      parameters: {
+        id: { type: 'string', required: true, description: 'Schedule id returned by schedule_list.' },
+        title: {
+          type: 'string',
+          description: `New task name of at most ${MAX_TITLE_LENGTH} characters.`,
+        },
+        prompt: {
+          type: 'string',
+          description: 'New reminder content.',
+        },
+        ...SELECTOR_PARAMETERS,
+      },
+      output: { schema: UPDATE_OUTPUT_SCHEMA, render: renderValue },
+      async execute(args, exec): Promise<ScheduleUpdateValue> {
+        if (exec.agent !== agent) return internalError()
+        const invalid = validateUpdateArgs(args)
+        if (invalid !== undefined) return invalid
+        if (exec.signal.aborted) return internalError()
+        const id = ScheduleId(args.id)
+        try {
+          const sessionId = agent.session.id
+          const expected = (await rootCtx.schedule.list({ sessionId }))
+            .find(record => record.id === id)
+          if (expected === undefined) {
+            // The catalog also holds inactive reminders, which is the one not-found
+            // case the model can act on: it has to create a new reminder instead.
+            const ended = (await rootCtx.schedule.catalog())
+              .some(entry => entry.sessionId === sessionId && entry.id === id)
+            return { id, updated: false, code: ended ? 'schedule_ended' : 'schedule_not_found' }
+          }
+          const change = timingChangeFrom(args)
+          const result = await rootCtx.schedule.update({
+            sessionId,
+            id,
+            expected,
+            ...(change === undefined ? {} : { change }),
+            ...(args.title === undefined ? {} : { title: args.title }),
+            ...(args.prompt === undefined ? {} : { prompt: args.prompt }),
+          }, exec.signal)
+          return 'record' in result ? scheduleView(result.record, Date.now()) : result
+        } catch (error: unknown) {
+          return operationError(error)
+        }
+      },
+      presentCall: args => present('Update reminder', 'other', args.id),
+    })))
+  } catch (error) {
+    for (const dispose of disposers.reverse()) dispose()
+    throw error
+  }
+
+  let active = true
+  return () => {
+    if (!active) return
+    active = false
+    for (const dispose of disposers.reverse()) dispose()
   }
 }
 

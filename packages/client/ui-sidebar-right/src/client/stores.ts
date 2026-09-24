@@ -37,14 +37,9 @@ import {
   planSetMode, planSettle, planSplitPane, planUnfloatPane, record, replay, stepBack, stepForward,
 } from '@deepseek-ai/dsh-client-ui-dockkit'
 import { GUIDE_KIND, pageAddress, type SidebarRightSeed } from './contract/seed.ts'
+import type { SurfaceState } from './contract/surface.ts'
 
-/** One session's docking surface: the layout, its sequence, and the id counter. */
-export interface SurfaceState {
-  readonly layout: LayoutState
-  readonly history: History
-  /** How many ids this surface has minted; carried so replay stays reproducible. */
-  readonly minted: number
-}
+export type { SurfaceState } from './contract/surface.ts'
 
 /**
  * Every session's surface, keyed by session id.

@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs'
 import { basename, join, posix } from 'node:path'
 import { renderPersistencePair, type PersistenceArtifact } from './persistence-artifacts.ts'
-import type { PersistenceFormatEntry, PersistenceFormats } from './persistence-formats.ts'
+import type { PersistenceFormatEntry, PersistenceFormats } from './persistence-format-types.ts'
 import { renderPersistenceSchemaDefinitions, renderPersistenceSchemaIndex } from './render-persistence-schema.ts'
 
 type Language = 'en' | 'zh'

@@ -7,7 +7,9 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
-import type { ConfinedSandboxMode, SandboxPolicy } from './types.ts'
+import type { ConfinedSandboxMode, RunnerFailureRule, SandboxPolicy } from './types.ts'
+
+export type { RunnerFailureRule } from './types.ts'
 
 export {
   ESCALATION_TARGETS,
@@ -28,22 +30,6 @@ export type { ConfinedSandboxMode, SandboxExecutionPolicy, SandboxMode, SandboxP
  * an absolute boundary must not treat it as `full`.
  */
 export type SandboxEnforcement = 'full' | 'partial'
-
-/**
- * Evidence that identifies a sandbox runner failing before it executes the
- * wrapped command. A consumer first applies {@link allowedExitCodes} when
- * present, removes {@link informationalLines} by case-insensitive exact line
- * equality, then matches {@link fatalSignatures} case-insensitively within
- * each remaining stderr line. Exit status alone never proves runner failure.
- */
-export interface RunnerFailureRule {
-  /** Nonzero process exit codes on which this rule may match; omitted permits any nonzero exit. */
-  allowedExitCodes?: readonly number[]
-  /** Non-empty substrings identifying a fatal runner diagnostic on one stderr line. */
-  fatalSignatures: readonly string[]
-  /** Benign stderr lines excluded by exact full-line equality before fatal matching. */
-  informationalLines?: readonly string[]
-}
 
 /**
  * A {@link SandboxProvider.confine} result: the argv to spawn in place of

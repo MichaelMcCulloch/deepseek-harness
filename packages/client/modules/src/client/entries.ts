@@ -2,8 +2,7 @@
 import type { FiberState } from '@deepseek-ai/cordis'
 import type { Entry, Loader } from '@deepseek-ai/cordis-plugin-loader'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
-import { parseBootManifest } from './manifest.ts'
-import type { BootManifest, ClientModuleLoader } from './manifest.ts'
+import { parseBootManifest, type BootManifest } from './boot-manifest.ts'
 import { removeOwnedStyles, tearDownEntryFiber } from './entry-lifecycle.ts'
 
 /** Page-local failures do not change the Host's bundle enablement. */
@@ -19,6 +18,14 @@ interface ModuleIndex {
   update(manifest: BootManifest, managed: Iterable<string>): void
   invalidateForReplacement(id: string, rev: string): void
   prune(roots: Iterable<string>): void
+}
+
+/** The module table entry reconciliation drives: the manifest it reads and the arrival, materialization, and invalidation it requests. */
+interface ClientModuleTable {
+  readonly manifest: BootManifest
+  prefetch(id: string): Promise<void>
+  import(specifier: string, parentURL: string, attrs: Record<string, unknown>): Promise<unknown>
+  invalidate(id: string, rev?: string): void
 }
 
 /** Numeric values mirror Cordis's const enum, which bundle loaders cannot import as a runtime object. */
@@ -56,7 +63,7 @@ export class ClientEntries {
    * @param modules - Module arrival and materialization owner.
    * @param index - Private descriptor replacement and unused-module cleanup.
    */
-  constructor(private readonly modules: ClientModuleLoader, private readonly index: ModuleIndex) {
+  constructor(private readonly modules: ClientModuleTable, private readonly index: ModuleIndex) {
     this.desired = modules.manifest
   }
 

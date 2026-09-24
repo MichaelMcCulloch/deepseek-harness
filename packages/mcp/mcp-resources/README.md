@@ -63,6 +63,7 @@ Canonical results retain the complete JSON for programmatic callers. The pure te
 | [`src/index.ts`](src/index.ts) | Scoped provider selection and server-name prompt context |
 | [`src/tools.ts`](src/tools.ts) | Shared resource operations and argument schemas |
 | [`src/render.ts`](src/render.ts) | Attributed text projection without inline binary payloads |
+| [`src/types.ts`](src/types.ts) | The resource-operation vocabulary the runtime and the shared tools both name |
 
 No runtime invariant companion is published: tools, prompt names, and dispatch derive from the same effect-owned provider registrations. They supply no independent observation to reconcile; registry-effect checks are not runtime invariants.
 

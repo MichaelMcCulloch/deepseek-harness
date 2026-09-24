@@ -1,21 +1,18 @@
 /**
- * Agent-scoped consumers of the shared Host Schedule management service.
+ * The Schedule tools' model-facing schemas, descriptions, and argument
+ * validation, shared by the service that registers them.
  * @module @deepseek-ai/dsh-schedule
  */
 
-import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { GenericCallView } from '@deepseek-ai/dsh-tools'
-import { MAX_TITLE_LENGTH, MIN_EVERY_INTERVAL_SECONDS, REQUIRED_TITLE_MESSAGE, ScheduleId, ScheduleInputError, scheduleView } from './domain.ts'
-import type {} from './index.ts'
+import { MAX_TITLE_LENGTH, MIN_EVERY_INTERVAL_SECONDS, REQUIRED_TITLE_MESSAGE, ScheduleInputError } from './domain.ts'
 import type {
-  AtInput, CronInput, DailyInput, WeeklyInput, InternalScheduleError, ScheduleCreateValue, ScheduleDeleteValue,
-  ScheduleListValue, ScheduleTimingChange, ScheduleToolError, ScheduleUpdateValue,
+  AtInput, CronInput, DailyInput, WeeklyInput, InternalScheduleError, ScheduleTimingChange, ScheduleToolError,
 } from './types.ts'
 
-const SHARED_VIEW_PROPERTIES = {
+/** Properties every reminder view carries, spread into the six kind schemas below. */
+export const SHARED_VIEW_PROPERTIES = {
   id: { type: 'string', required: true },
   title: { type: 'string', required: true },
   prompt: { type: 'string', required: true },
@@ -24,7 +21,8 @@ const SHARED_VIEW_PROPERTIES = {
   deliveryMode: { type: 'string', required: true, const: 'host' },
 } as const
 
-const AFTER_VIEW_SCHEMA = {
+/** Output schema for a reminder that fires a fixed delay after it is created. */
+export const AFTER_VIEW_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   properties: {
@@ -34,7 +32,8 @@ const AFTER_VIEW_SCHEMA = {
   },
 } as const
 
-const AT_VIEW_SCHEMA = {
+/** Output schema for a reminder with an absolute target instant. */
+export const AT_VIEW_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   properties: {
@@ -43,7 +42,8 @@ const AT_VIEW_SCHEMA = {
   },
 } as const
 
-const EVERY_VIEW_SCHEMA = {
+/** Output schema for a fixed-rate reminder. */
+export const EVERY_VIEW_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   properties: {
@@ -53,7 +53,8 @@ const EVERY_VIEW_SCHEMA = {
   },
 } as const
 
-const DAILY_VIEW_SCHEMA = {
+/** Output schema for a reminder that repeats every day at a local time. */
+export const DAILY_VIEW_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   properties: {
@@ -64,7 +65,8 @@ const DAILY_VIEW_SCHEMA = {
   },
 } as const
 
-const WEEKLY_VIEW_SCHEMA = {
+/** Output schema for a reminder that repeats weekly on the given ISO weekdays. */
+export const WEEKLY_VIEW_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   properties: {
@@ -76,7 +78,8 @@ const WEEKLY_VIEW_SCHEMA = {
   },
 } as const
 
-const CRON_VIEW_SCHEMA = {
+/** Output schema for a reminder driven by a five-field cron expression. */
+export const CRON_VIEW_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   properties: {
@@ -87,7 +90,8 @@ const CRON_VIEW_SCHEMA = {
   },
 } as const
 
-const VIEW_SCHEMA = {
+/** Output schema matching a reminder view of any one kind. */
+export const VIEW_SCHEMA = {
   oneOf: [
     AFTER_VIEW_SCHEMA, AT_VIEW_SCHEMA, EVERY_VIEW_SCHEMA, DAILY_VIEW_SCHEMA, WEEKLY_VIEW_SCHEMA, CRON_VIEW_SCHEMA,
   ],
@@ -116,14 +120,18 @@ const ERROR_SCHEMAS = [
   basicErrorSchema('internal_error'),
 ] as const
 
-const CREATE_OUTPUT_SCHEMA = { oneOf: [VIEW_SCHEMA, ...ERROR_SCHEMAS] } as const
-const LIST_OUTPUT_SCHEMA = {
+/** `schedule_create` output: a reminder view or one of the canonical errors. */
+export const CREATE_OUTPUT_SCHEMA = { oneOf: [VIEW_SCHEMA, ...ERROR_SCHEMAS] } as const
+
+/** `schedule_list` output: the active reminder views or one of the canonical errors. */
+export const LIST_OUTPUT_SCHEMA = {
   oneOf: [
     { type: 'array', items: VIEW_SCHEMA },
     ...ERROR_SCHEMAS,
   ],
 } as const
-const DELETE_OUTPUT_SCHEMA = {
+/** `schedule_delete` output: the per-id deletion result or one of the canonical errors. */
+export const DELETE_OUTPUT_SCHEMA = {
   oneOf: [
     {
       type: 'object',
@@ -146,7 +154,8 @@ const DELETE_OUTPUT_SCHEMA = {
   ],
 } as const
 
-const UPDATE_OUTPUT_SCHEMA = {
+/** `schedule_update` output: the updated view, a per-id update refusal, or one of the canonical errors. */
+export const UPDATE_OUTPUT_SCHEMA = {
   oneOf: [
     VIEW_SCHEMA,
     {
@@ -166,45 +175,71 @@ const UPDATE_OUTPUT_SCHEMA = {
   ],
 } as const
 
-const CREATE_DESCRIPTION =
+/** Model-facing description of `schedule_create`. */
+export const CREATE_DESCRIPTION =
   'Create a reminder in the current session that delivers prompt when it becomes due. '
   + 'Supply exactly one timing parameter: after_seconds, at, every_seconds, daily, weekly, or cron. '
   + 'Local times that do not exist in the zone are skipped; repeated local times fire once, at the earlier instant. '
   + 'After downtime, a recurring reminder delivers only its latest missed occurrence. Delivery can repeat after a crash.'
 
-const LIST_DESCRIPTION = 'List the active reminders in the current session.'
+/** Model-facing description of `schedule_list`. */
+export const LIST_DESCRIPTION = 'List the active reminders in the current session.'
 
-const DELETE_DESCRIPTION =
+/** Model-facing description of `schedule_delete`. */
+export const DELETE_DESCRIPTION =
   'Delete a reminder in the current session, active or inactive. Deletion does not retract a reminder message that is already queued.'
 
-const UPDATE_DESCRIPTION =
+/** Model-facing description of `schedule_update`. */
+export const UPDATE_DESCRIPTION =
   'Change a reminder in place, keeping its id. Supply a new title, prompt, or at most one timing parameter; '
   + 'omitted fields keep their stored values. To change a relative delay, create a new reminder.'
 
-/** Deterministic model content for every canonical Schedule value. */
-function renderValue(_args: unknown, value: unknown): ContentBlock[] {
+/**
+ * Deterministic model content for every canonical Schedule value.
+ * @param _args - Tool arguments, unused because rendering needs only the validated value.
+ * @param value - Result value already validated against the tool's output schema.
+ * @returns One text block carrying the value as JSON.
+ */
+export function renderValue(_args: unknown, value: unknown): ContentBlock[] {
   // The ToolRuntime has already validated the value against the lossless-JSON output schema.
   const text = JSON.stringify(value)
   return [{ type: 'text', text }]
 }
 
-/** Pure generic pending card. */
-function present(title: string, kind: 'read' | 'other', rawInput?: unknown): GenericCallView {
+/**
+ * Pure generic pending card.
+ * @param title - Card title naming the pending operation.
+ * @param kind - Card kind the client treats as read-only or otherwise.
+ * @param rawInput - Optional tool arguments to show while the call is pending.
+ * @returns The pending call view the ToolRuntime presents.
+ */
+export function present(title: string, kind: 'read' | 'other', rawInput?: unknown): GenericCallView {
   return { card: 'generic', title, kind, ...rawInput === undefined ? {} : { rawInput } }
 }
 
-/** Stable error for failures not safe to expose. */
-function internalError(): InternalScheduleError {
+/**
+ * Stable error for failures not safe to expose.
+ * @returns The `internal_error` result carrying the fixed model-facing message.
+ */
+export function internalError(): InternalScheduleError {
   return { code: 'internal_error', message: 'The schedule operation failed.' }
 }
 
-/** Translate invalid input while withholding internal storage failures. */
-function operationError(error: unknown): ScheduleToolError {
+/**
+ * Translate invalid input while withholding internal storage failures.
+ * @param error - Rejection from a Schedule service call.
+ * @returns The input's own code and message, or `internal_error` for anything else.
+ */
+export function operationError(error: unknown): ScheduleToolError {
   return error instanceof ScheduleInputError ? { code: error.code, message: error.message } : internalError()
 }
 
-/** One supplied fixed-rate interval: a safe integer at or above the Host floor, or undefined. */
-function invalidInterval(everySeconds: number | undefined): ScheduleToolError | undefined {
+/**
+ * One supplied fixed-rate interval: a safe integer at or above the Host floor, or undefined.
+ * @param everySeconds - Interval from the request, absent when the request supplies another selector.
+ * @returns The rejection for an out-of-range interval, otherwise undefined.
+ */
+export function invalidInterval(everySeconds: number | undefined): ScheduleToolError | undefined {
   if (everySeconds === undefined) return undefined
   if (!Number.isSafeInteger(everySeconds)) {
     return { code: 'invalid_rule', message: 'every_seconds must be a safe integer.' }
@@ -218,8 +253,12 @@ function invalidInterval(everySeconds: number | undefined): ScheduleToolError | 
   return undefined
 }
 
-/** Validate selector constraints that the open parameter root cannot express. */
-function validateCreateArgs(args: {
+/**
+ * Validate selector constraints that the open parameter root cannot express.
+ * @param args - `schedule_create` arguments after ToolRuntime parameter validation.
+ * @returns The rejection for an unknown key, a selector count other than one, or a bad name or interval; otherwise undefined.
+ */
+export function validateCreateArgs(args: {
   prompt: string
   title: string
   after_seconds?: number
@@ -265,8 +304,12 @@ function validateCreateArgs(args: {
   return invalidInterval(args.every_seconds)
 }
 
-/** Validate the in-place update's selector count, id, and any supplied name, instruction, or interval. */
-function validateUpdateArgs(args: {
+/**
+ * Validate the in-place update's selector count, id, and any supplied name, instruction, or interval.
+ * @param args - `schedule_update` arguments after ToolRuntime parameter validation.
+ * @returns The rejection for an unknown key, extra selectors, a bare id, or an empty name or instruction; otherwise undefined.
+ */
+export function validateUpdateArgs(args: {
   id: string
   title?: string
   prompt?: string
@@ -318,8 +361,12 @@ function validateUpdateArgs(args: {
   return invalidInterval(args.every_seconds)
 }
 
-/** The one timing replacement the update carries, or undefined when the request keeps the committed target. */
-function timingChangeFrom(args: {
+/**
+ * The one timing replacement the update carries, or undefined when the request keeps the committed target.
+ * @param args - `schedule_update` arguments already accepted by {@link validateUpdateArgs}.
+ * @returns The single supplied timing replacement, otherwise undefined.
+ */
+export function timingChangeFrom(args: {
   at?: AtInput
   every_seconds?: number
   daily?: DailyInput
@@ -338,7 +385,7 @@ function timingChangeFrom(args: {
  * Selector parameters shared by `schedule_create` and `schedule_update`, in the order the
  * generated tool catalog states them.
  */
-const SELECTOR_PARAMETERS = {
+export const SELECTOR_PARAMETERS = {
   every_seconds: {
     type: 'number',
     description: `Fixed-rate interval in whole seconds, at least ${MIN_EVERY_INTERVAL_SECONDS}, aligned to the creation time; changing it with schedule_update re-aligns it to the save time.`,
@@ -397,156 +444,3 @@ const SELECTOR_PARAMETERS = {
     ],
   },
 } as const
-
-/**
- * Register all four Schedule tools in one exact agent scope.
- * @param rootCtx - Host context owning the shared Schedule service.
- * @param toolCtx - Exact agent-scoped context receiving the definitions.
- * @param agent - Exact live owner whose session the tools mutate.
- * @returns Idempotent aggregate disposer for the four registrations.
- */
-export function registerScheduleTools(
-  rootCtx: Context,
-  toolCtx: Context,
-  agent: Agent,
-): () => void {
-  const disposers: Array<() => void> = []
-
-  try {
-    disposers.push(toolCtx.tools.register(defineTool({
-      name: 'schedule_create',
-      description: CREATE_DESCRIPTION,
-      parameters: {
-        prompt: {
-          type: 'string',
-          required: true,
-          description: 'Reminder content to present when the target becomes due.',
-        },
-        title: {
-          type: 'string',
-          required: true,
-          description: `Task name of at most ${MAX_TITLE_LENGTH} characters, shown on the task card and in task lists.`,
-        },
-        after_seconds: {
-          type: 'number',
-          description: 'Delay in whole seconds.',
-        },
-        ...SELECTOR_PARAMETERS,
-      },
-      output: { schema: CREATE_OUTPUT_SCHEMA, render: renderValue },
-      async execute(args, exec): Promise<ScheduleCreateValue> {
-        if (exec.agent !== agent) return internalError()
-        const invalid = validateCreateArgs(args)
-        if (invalid !== undefined) return invalid
-        if (exec.signal.aborted) return internalError()
-        try {
-          return scheduleView(await rootCtx.schedule.create(agent.session.id, args, exec.signal), Date.now())
-        } catch (error: unknown) {
-          return operationError(error)
-        }
-      },
-      presentCall: args => present('Create reminder', 'other', args.prompt),
-    })))
-
-    disposers.push(toolCtx.tools.register(defineTool({
-      name: 'schedule_list',
-      description: LIST_DESCRIPTION,
-      parameters: {},
-      output: { schema: LIST_OUTPUT_SCHEMA, render: renderValue },
-      async execute(_args, exec): Promise<ScheduleListValue> {
-        if (exec.agent !== agent) return internalError()
-        if (exec.signal.aborted) return internalError()
-        try {
-          const records = await rootCtx.schedule.list({ sessionId: agent.session.id })
-          return records.map(record => scheduleView(record, Date.now()))
-        } catch (error: unknown) {
-          return operationError(error)
-        }
-      },
-      presentCall: () => present('List reminders', 'read'),
-    })))
-
-    disposers.push(toolCtx.tools.register(defineTool({
-      name: 'schedule_delete',
-      description: DELETE_DESCRIPTION,
-      parameters: {
-        id: { type: 'string', required: true, description: 'Schedule id returned by schedule_list.' },
-      },
-      output: { schema: DELETE_OUTPUT_SCHEMA, render: renderValue },
-      async execute(args, exec): Promise<ScheduleDeleteValue> {
-        if (args.id.length === 0 || args.id.trim() !== args.id) {
-          return { code: 'invalid_rule', message: 'schedule_delete id must be non-empty without surrounding whitespace.' }
-        }
-        const id = ScheduleId(args.id)
-        if (exec.agent !== agent) return internalError()
-        if (exec.signal.aborted) return internalError()
-        try {
-          return await rootCtx.schedule.delete({ sessionId: agent.session.id, id }, exec.signal)
-        } catch (error: unknown) {
-          return operationError(error)
-        }
-      },
-      presentCall: args => present('Delete reminder', 'other', args.id),
-    })))
-
-    disposers.push(toolCtx.tools.register(defineTool({
-      name: 'schedule_update',
-      description: UPDATE_DESCRIPTION,
-      parameters: {
-        id: { type: 'string', required: true, description: 'Schedule id returned by schedule_list.' },
-        title: {
-          type: 'string',
-          description: `New task name of at most ${MAX_TITLE_LENGTH} characters.`,
-        },
-        prompt: {
-          type: 'string',
-          description: 'New reminder content.',
-        },
-        ...SELECTOR_PARAMETERS,
-      },
-      output: { schema: UPDATE_OUTPUT_SCHEMA, render: renderValue },
-      async execute(args, exec): Promise<ScheduleUpdateValue> {
-        if (exec.agent !== agent) return internalError()
-        const invalid = validateUpdateArgs(args)
-        if (invalid !== undefined) return invalid
-        if (exec.signal.aborted) return internalError()
-        const id = ScheduleId(args.id)
-        try {
-          const sessionId = agent.session.id
-          const expected = (await rootCtx.schedule.list({ sessionId }))
-            .find(record => record.id === id)
-          if (expected === undefined) {
-            // The catalog also holds inactive reminders, which is the one not-found
-            // case the model can act on: it has to create a new reminder instead.
-            const ended = (await rootCtx.schedule.catalog())
-              .some(entry => entry.sessionId === sessionId && entry.id === id)
-            return { id, updated: false, code: ended ? 'schedule_ended' : 'schedule_not_found' }
-          }
-          const change = timingChangeFrom(args)
-          const result = await rootCtx.schedule.update({
-            sessionId,
-            id,
-            expected,
-            ...(change === undefined ? {} : { change }),
-            ...(args.title === undefined ? {} : { title: args.title }),
-            ...(args.prompt === undefined ? {} : { prompt: args.prompt }),
-          }, exec.signal)
-          return 'record' in result ? scheduleView(result.record, Date.now()) : result
-        } catch (error: unknown) {
-          return operationError(error)
-        }
-      },
-      presentCall: args => present('Update reminder', 'other', args.id),
-    })))
-  } catch (error) {
-    for (const dispose of disposers.reverse()) dispose()
-    throw error
-  }
-
-  let active = true
-  return () => {
-    if (!active) return
-    active = false
-    for (const dispose of disposers.reverse()) dispose()
-  }
-}

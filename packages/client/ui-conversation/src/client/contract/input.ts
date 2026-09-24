@@ -10,7 +10,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { InboxState } from '@deepseek-ai/dsh-agent/types'
 import type { ObservableSnapshot, SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { ArbitrateKey, ArbitrateOutcome, Occurrence, ReferenceInsert, TokenSpan } from './draft-editor.ts'
+import type { ArbitrateKey, ArbitrateOutcome, Occurrence, ReferenceInsert, TokenSpan } from './editor-vocabulary.ts'
 import type { InputSubmitMode } from './composer-submission.ts'
 
 /** Attachment payload passed to a claimed command submission. */

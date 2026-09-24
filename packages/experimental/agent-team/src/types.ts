@@ -117,6 +117,20 @@ export interface TeamProjection {
   readonly failure?: string
 }
 
+/**
+ * Current Team state selected by durable Team identity. Every applied Team
+ * event produces a new state object and replaces only the collection it
+ * touched; untouched collections keep their references.
+ */
+export interface TeamState {
+  readonly id: TeamId
+  readonly members: readonly TeamMemberSnapshot[]
+  readonly tasks: readonly TeamTaskSnapshot[]
+  readonly messages: readonly TeamMessageSnapshot[]
+  readonly delivered: readonly TeamMessageId[]
+  readonly nextTaskNumber: number
+}
+
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionMap {
     /** Durable roster and non-deleted task board of the Team rooted at the projected Session. */

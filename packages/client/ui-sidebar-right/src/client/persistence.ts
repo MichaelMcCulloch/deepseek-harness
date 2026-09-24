@@ -1,7 +1,7 @@
 /** Validated current-layout snapshots; undo history belongs to the live window. */
 import { z } from 'zod'
 import { EMPTY_HISTORY, type LayoutState } from '@deepseek-ai/dsh-client-ui-dockkit'
-import type { SurfaceState } from './stores.ts'
+import type { SurfaceState } from './contract/surface.ts'
 
 /** Persistence namespace shared by scoped stores and startup discovery. */
 export const sidebarPersistence = 'dsh.sidebar-right.v1'

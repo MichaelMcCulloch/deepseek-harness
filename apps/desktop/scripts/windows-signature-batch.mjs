@@ -1,7 +1,7 @@
 /** Bounded public-key verification batches; every output row must match its requested file. */
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { scrubWindowsSigningEnvironment } from './windows-sign.mjs'
+import { scrubWindowsSigningEnvironment } from './windows-signing-environment.mjs'
 
 const command = '$ErrorActionPreference="Stop"; [Console]::InputEncoding=[System.Text.UTF8Encoding]::new(); [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new(); Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1" -ErrorAction Stop; Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1" -ErrorAction Stop; $files=[Console]::In.ReadToEnd()|ConvertFrom-Json; foreach($file in $files){ $s=Get-AuthenticodeSignature -LiteralPath $file; [pscustomobject]@{path=$file;status=[string]$s.Status;timestamped=($null -ne $s.TimeStamperCertificate);thumbprint=$s.SignerCertificate.Thumbprint}|ConvertTo-Json -Compress }'
 

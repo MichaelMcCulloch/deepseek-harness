@@ -4,28 +4,23 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { extname, isAbsolute, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import { createConverter, type Converter, type ConverterOptions } from '@deepseek-ai/libreoffice-kit'
 import z from '@deepseek-ai/schemastery'
+import { createConverter, type Converter, type ConverterOptions } from '@deepseek-ai/libreoffice-kit'
 import type { WorkspaceFileScope, WorkspaceFileStat } from '@deepseek-ai/dsh-api-workspace-files'
 import type {} from '@deepseek-ai/dsh-fs'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { OfficeToPdfError } from './errors.ts'
 import { OfficeToPdfGeneration, type OfficeSourceKey } from './identity.ts'
-import type { OfficeExtension, OfficeToPdfRequest, OfficeToPdfResult, OfficeToPdfPriority, RenderedDocumentBytes } from './types.ts'
+import type {
+  OfficeExtension, OfficeToPdfRequest, OfficeToPdfResult, OfficeToPdfPriority, RenderedDocumentBytes,
+} from './types.ts'
 import { readPdf } from './output.ts'
 import { ConversionQueue } from './queue.ts'
 
 export * from './errors.ts'
 export * from './identity.ts'
 export * from './types.ts'
-
-declare module '@deepseek-ai/cordis' {
-  interface Context {
-    /** Shared Office conversion and authorized workspace-file rendering. */
-    officeToPdf: OfficeToPdf
-  }
-}
 
 /** Provider concurrency and kit rendering/font configuration. */
 export interface Config {
@@ -91,6 +86,13 @@ export const Config: z<Partial<Config>, Config> = z.object({
   maxFontFileBytes: z.natural().min(1).max(Number.MAX_SAFE_INTEGER).default(256 * 1024 * 1024),
   maxLoadedFontBytes: z.natural().min(1).max(Number.MAX_SAFE_INTEGER).default(512 * 1024 * 1024),
 })
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Shared Office conversion and authorized workspace-file rendering. */
+    officeToPdf: OfficeToPdf
+  }
+}
 
 interface Slot {
   busy: boolean

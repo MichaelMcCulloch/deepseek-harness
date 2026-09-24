@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { renderPersistencePair } from './persistence-artifacts.ts'
 import type { PersistenceArtifact } from './persistence-artifacts.ts'
-import type { PersistenceReleaseEntry, PersistenceReleases } from './persistence-releases.ts'
+import type { PersistenceReleaseEntry, PersistenceReleases } from './persistence-release-types.ts'
 import { canonicalizeSchema, schemaDigest } from './persistence-schema-model.ts'
 
 type Language = 'en' | 'zh'

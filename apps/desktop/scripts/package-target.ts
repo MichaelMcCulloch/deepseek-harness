@@ -22,8 +22,11 @@ import { resolveMacOSNotarizationEnvironment } from './desktop-release-environme
 import { DESKTOP_BUILD_VERSION_ENV, resolveDesktopBuildVersion, validateDesktopBuildVersion } from './desktop-build-version.mjs'
 import { suggestDesktopBuildVersion } from './desktop-build-version-discovery.ts'
 import { desktopBuildCommitEnvironment, readDesktopBuildCommit, resolveDesktopBuildCommit } from './desktop-build-commit.mjs'
+import type { DesktopPackageTargetName } from './desktop-package-target-types.ts'
 import { requireDesktopToolchain } from './desktop-toolchain-preflight.ts'
 import { withMacOSNotarizationProxy } from './macos-notarization-proxy.ts'
+
+export type { DesktopPackageTargetName } from './desktop-package-target-types.ts'
 
 const APP_ROOT = resolve(import.meta.dirname, '..')
 const REPOSITORY_ROOT = resolve(APP_ROOT, '..', '..')
@@ -45,9 +48,6 @@ const DESKTOP_UPLOAD_CREDENTIAL_ENV_NAMES = new Set([
 
 /** `--build-version` value that numbers a build after the ones already taken. */
 const AUTOMATIC_BUILD_VERSION = 'auto'
-
-/** Fixed platform and architecture identifiers exposed by package scripts. */
-export type DesktopPackageTargetName = 'mac-arm64' | 'mac-x64' | 'win-x64'
 
 /** One supported release target and its electron-builder selectors. */
 export interface DesktopPackageTarget {

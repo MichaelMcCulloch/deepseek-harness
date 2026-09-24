@@ -12,6 +12,13 @@ import { persistenceCatalogArtifacts } from './gen-persistence-catalog.ts'
 import { renderPersistencePair } from './persistence-artifacts.ts'
 import { loadPersistenceFinalization } from './persistence-finalization.ts'
 import type { PersistenceArtifact } from './persistence-artifacts.ts'
+import type {
+  PersistenceChange, PersistenceChangeRecord, PersistenceHistory, PersistenceHistoryEntry, Tip,
+} from './persistence-history-types.ts'
+
+export type {
+  PersistenceChange, PersistenceChangeRecord, PersistenceDecision, PersistenceHistory, PersistenceHistoryEntry,
+} from './persistence-history-types.ts'
 
 const HISTORY_DIRECTORY = 'docs/persistence-changes'
 const CURRENT_SCHEMA = 'docs/persistence-schema.json'
@@ -19,31 +26,6 @@ const ID_PATTERN = /^\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*$/u
 const DIGEST_PATTERN = /^[a-f0-9]{64}$/u
 const EXPLANATION_PLACEHOLDER = 'TODO: explain this change.'
 const EVIDENCE_PLACEHOLDER = 'TODO: record validation evidence.'
-
-/** The author's acknowledgement of one mechanically classified transition. */
-export type PersistenceDecision = 'same-version' | 'version-bump'
-
-/** One root's successor; null after values preserve a deletion in its history. */
-export interface PersistenceChange {
-  readonly root: string
-  readonly previous: string | null
-  readonly after: string | null
-  readonly decision: PersistenceDecision
-}
-
-/** A document's machine record, independent of its translated prose. */
-export interface PersistenceChangeRecord {
-  readonly schemaVersion: 1
-  readonly id: string
-  readonly baseline: boolean
-  readonly changes: readonly PersistenceChange[]
-}
-
-/** A parsed acknowledgement and its self-contained after schemas. */
-export interface PersistenceHistoryEntry {
-  readonly record: PersistenceChangeRecord
-  readonly snapshot: PersistenceSchemaInventory
-}
 
 /** One detected type change, with a path that reviewers can locate. */
 export interface PersistenceTypeChange {
@@ -118,17 +100,6 @@ interface CommandResult {
   readonly files: readonly string[]
   readonly recordId?: string
   readonly code?: string
-}
-
-interface Tip {
-  readonly id: string
-  readonly root: PersistenceRoot | null
-}
-
-/** Verified per-root history tips; historical schemas need not match the current tree. */
-export interface PersistenceHistory {
-  readonly entries: readonly PersistenceHistoryEntry[]
-  readonly tips: ReadonlyMap<string, Tip>
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {

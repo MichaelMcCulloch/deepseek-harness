@@ -11,13 +11,13 @@ import {
 import type { RemoteFailure, RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { SessionFace } from '../contract/session.ts'
 import type {
-  AgentContext, ISessions, SessionReference, SessionRetainInfo, SessionRetainOptions, SessionTarget,
+  AgentContext, ISessions, SessionReference, SessionRetainInfo, SessionRetainOptions, SessionSearchResultItem,
+  SessionTarget,
 } from '../contract/sessions.ts'
-import type { SessionReferenceSource } from '../index.ts'
+import type { SessionReferenceSource } from '../contract/reference-source.ts'
 import { createScope, scopeIdentityOf, scopeOf as scopeTagOf } from '../scope.ts'
 import { SessionManager } from './manager.ts'
 import type { SessionRemotes } from './remotes.ts'
-import type { SessionSearchResultItem } from './manager.ts'
 import type { SessionBinding, SessionListState, SessionSummary } from './state.ts'
 import type { Session } from './session.ts'
 

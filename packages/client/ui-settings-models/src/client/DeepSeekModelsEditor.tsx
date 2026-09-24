@@ -9,11 +9,11 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { IconPlusOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { en } from './locales.ts'
+import type { DeepSeekModelDraft } from './model-draft.ts'
 import { ModelRow } from './ModelRow.tsx'
 import styles from './ModelsSection.module.css'
 
-/** One catalog entry kept structurally open so hidden or future fields survive an edit. */
-export type DeepSeekModelDraft = Record<string, unknown>
+export type { DeepSeekModelDraft } from './model-draft.ts'
 
 /** The catalog fields this editor writes. */
 type CatalogField = 'id' | 'name' | 'contextWindow' | 'maxTokens'

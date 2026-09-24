@@ -1294,7 +1294,7 @@
     {
       "doc": "docs/subsystems/sandbox.md",
       "symbol": "RunnerFailureRule",
-      "source": "packages/sandbox/sandbox/src/index.ts"
+      "source": "packages/sandbox/sandbox/src/types.ts"
     },
     {
       "doc": "docs/subsystems/sandbox.md",
@@ -2290,7 +2290,7 @@
     {
       "doc": "docs/subsystems/mcp.md",
       "symbol": "McpResourceRequest",
-      "source": "packages/mcp/mcp-resources/src/index.ts"
+      "source": "packages/mcp/mcp-resources/src/types.ts"
     },
     {
       "doc": "docs/subsystems/mcp.md",

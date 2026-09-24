@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react'
 import { Checkbox } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { DeepSeekModelDraft } from './DeepSeekModelsEditor.tsx'
+import type { DeepSeekModelDraft } from './model-draft.ts'
 import type { ModelsKey } from './locales.ts'
 import styles from './ModelsSection.module.css'
 

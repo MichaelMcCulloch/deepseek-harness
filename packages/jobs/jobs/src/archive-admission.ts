@@ -11,8 +11,17 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionActivity } from '@deepseek-ai/dsh-workspace'
-import type { JobRegistry } from './index.ts'
+import type { JobId } from './types.ts'
 import type { JobView } from './view.ts'
+
+/**
+ * The owned-job access an archive admission answers over: the registry's
+ * `list` and `kill` alone, which every implementation provides.
+ */
+interface JobArchiveSource {
+  list(caller?: SessionId): JobView[]
+  kill(id: JobId, caller?: SessionId, reason?: string): 'requested' | 'already-finished'
+}
 
 /**
  * Answer `workspace/session-activity` with the running or stopping jobs the
@@ -21,7 +30,7 @@ import type { JobView } from './view.ts'
  * @param ctx - the registry's registration context.
  * @param registry - the registry whose `list` and `kill` answer.
  */
-export function installJobArchiveAdmission(ctx: Context, registry: JobRegistry): void {
+export function installJobArchiveAdmission(ctx: Context, registry: JobArchiveSource): void {
   ctx.on('workspace/session-activity', async ({ sessionId }, next) => {
     const jobs = runningJobs(registry, sessionId)
     const rest = await next()
@@ -42,7 +51,7 @@ export function installJobArchiveAdmission(ctx: Context, registry: JobRegistry):
 }
 
 /** The jobs the Session owns that have not settled; unowned jobs in the same listing belong to nobody. */
-function runningJobs(registry: JobRegistry, owner: SessionId): JobView[] {
+function runningJobs(registry: JobArchiveSource, owner: SessionId): JobView[] {
   return registry.list(owner)
     .filter(job => job.owner === owner && (job.status === 'running' || job.status === 'stopping'))
 }

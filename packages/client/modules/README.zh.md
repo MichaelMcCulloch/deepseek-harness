@@ -92,7 +92,8 @@ bundle 路由随注入的 `webServer` 生命周期注册：服务就绪时注册
 | [`src/client/system.ts`](src/client/system.ts) | `ClientModuleSystem`：加载／物化／失效机制 |
 | [`src/client/entries.ts`](src/client/entries.ts) | 页面条目对账、重试与代码替换 |
 | [`src/client/entry-lifecycle.ts`](src/client/entry-lifecycle.ts) | 通过注册表清理 Loader fiber，回收模块自身样式 |
-| [`src/client/manifest.ts`](src/client/manifest.ts) | 协议类型、启动清单解析与 `dsh.client` 声明解析器 |
+| [`src/client/manifest.ts`](src/client/manifest.ts) | 协议类型、解析清单的再导出与 `dsh.client` 声明解析器 |
+| [`src/client/boot-manifest.ts`](src/client/boot-manifest.ts) | 解析后的启动清单与 `window.__DSH_BOOT__` 解析器 |
 
 </details>
 

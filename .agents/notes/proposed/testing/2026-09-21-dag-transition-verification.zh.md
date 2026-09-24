@@ -29,7 +29,7 @@ Status: proposed
 5. **修复测试钉住的缺陷（三至四天）。** 在 `git.prepare` 运行前持久记录合并前的 HEAD，或从冻结 wave base 与依赖 commit 图推导它；为已存在但未注册的 worktree 路径加入显式修复转换；把恢复的撕裂尾部与其截断合并为一次持久步骤。每个修复都是设计变更，需要各自的 Agent Note。
 6. **关闭退出路径缺口（一天）。** 把 `settlement.stop()` 移入 `finally`，决定抛异常的 owner 控制器对子级做什么，并补上缺失的测试：真实 Activation 驱动 `DagService.ownerStop`、抛异常的 owner 控制器，以及子级 settlement 与挂起中的 redirect 竞争。
 
-`fast-check@^4.8.0` 已经是根 devDependency（`package.json:222`），因此步骤 3 不引入新依赖。新测试文件放在 `packages/dag/dag/tests/model-property.spec.ts` 或 `packages/dag/dag/tests/crash-recovery.spec.ts` 即可运行：根 vitest 的 `include` 是 `packages/*/*/tests/**/*.spec.{ts,tsx}`（`vitest.config.ts:123-128`），因此 `pnpm run test` 与 `ci-primary` 中的 `test:coverage` 门禁会自动收集它，无需注册。进程外套件使用 `.e2e.ts`（`vitest.e2e.config.ts:45`，由 `pnpm run test:e2e` 运行），从而保持可选。必须在 `ci-primary` 中单独把关的崩溃恢复套件，在 `scripts/run-gates.ts` 中与现有覆盖率门禁并列新增一个具名门禁。
+`fast-check@^4.8.0` 已经是根 devDependency（`package.json:222`），因此步骤 3 不引入新依赖。新测试文件放在 `packages/dag/dag/tests/` 下，命名为 `model-property.spec.ts` 或 `crash-recovery.spec.ts` 即可运行：根 vitest 的 `include` 是 `packages/*/*/tests/**/*.spec.{ts,tsx}`（`vitest.config.ts:123-128`），因此 `pnpm run test` 与 `ci-primary` 中的 `test:coverage` 门禁会自动收集它，无需注册。进程外套件使用 `.e2e.ts`（`vitest.e2e.config.ts:45`，由 `pnpm run test:e2e` 运行），从而保持可选。必须在 `ci-primary` 中单独把关的崩溃恢复套件，在 `scripts/run-gates.ts` 中与现有覆盖率门禁并列新增一个具名门禁。
 
 ## 状态模型与当前检查的内容
 
@@ -180,8 +180,8 @@ Status: proposed
 
 - 有一个可选组合挂载 `@deepseek-ai/dsh-dag/invariant`，且一个真实组合测试通过 Loader 启动它、驱动一个节点从声明到完成，并在向流中注入刻意的不变量违规时失败。
 - `packages/dag/dag/tests/model.spec.ts` 从每个出队状态发出被改动守卫的命令，并断言精确的 `DagStateError.code` 或返回同一对象的空操作，两个分支都不留下未覆盖的接受路径。
-- `packages/dag/dag/tests/model-property.spec.ts` 在 `pnpm run test` 下运行，生成不做前置条件过滤的命令序列，并断言提案中的全部四项性质；失败的运行可从记录的 seed 复现。
-- `packages/dag/dag/tests/crash-recovery.spec.ts` 在真实 `JsonlSessionPersistence` 根上通过，在每次重新打开时断言 `dag/state` 折叠的每一步都满足 `validateDagState`，并断言 `reconcile` 不留下任何未结算 mailbox 命令。
+- `packages/dag/dag/tests/` 下的 `model-property.spec.ts` 在 `pnpm run test` 下运行，生成不做前置条件过滤的命令序列，并断言提案中的全部四项性质；失败的运行可从记录的 seed 复现。
+- `packages/dag/dag/tests/` 下的 `crash-recovery.spec.ts` 在真实 `JsonlSessionPersistence` 根上通过，在每次重新打开时断言 `dag/state` 折叠的每一步都满足 `validateDagState`，并断言 `reconcile` 不留下任何未结算 mailbox 命令。
 - `preparedFrom` 窗口的回归测试存在，并在当前代码上失败：在依赖合并与 `git-prepared` 追加之间终止进程后，空操作完成仍必须被 `DagGit.validateCompletion` 拒绝。
 - 有一个测试在 `git worktree add` 期间终止进程，并断言存在一条已记录的转换让该节点重新可调度。
 - 有一个测试在截断与重写之间中断撕裂尾部修复，并断言恢复的事件在重新打开后要么持久，要么可证明从未被据以行动。

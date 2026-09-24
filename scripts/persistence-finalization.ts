@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { JSON_SCHEMA, load } from 'js-yaml'
-import type { PersistenceHistory, PersistenceHistoryEntry } from './persistence-changes.ts'
+import type { PersistenceHistory, PersistenceHistoryEntry } from './persistence-history-types.ts'
 import type { PersistenceRoot, PersistenceSchemaInventory } from './persistence-schema-model.ts'
 
 const DIRECTORY = 'docs/persistence-changes/finalized'

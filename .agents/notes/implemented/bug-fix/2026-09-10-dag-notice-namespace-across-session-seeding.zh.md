@@ -15,7 +15,13 @@ Status: implemented
 `DagService.write` 从已折叠的状态解析命名空间，仅在首次声明之前回退到当前智能体 id：
 
 ```ts
-noticeNamespace: this.state(agent)?.noticeNamespace ?? agent.id,
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { DagService } from '@deepseek-ai/dsh-dag'
+
+declare const service: DagService
+declare const agent: Agent
+
+const noticeNamespace = service.state(agent)?.noticeNamespace ?? agent.id
 ```
 
 首次声明确定命名空间；此后的每次写入，无论在声明它的会话中运行，还是在由该会话播种出的会话中运行，都保留该值。reducer 的稳定性规则不变——状态值在首次写入之后永不改变命名空间——因此通知 id 保持稳定，被继承的投递记录也仍然可以匹配。

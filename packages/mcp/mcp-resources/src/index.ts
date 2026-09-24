@@ -10,17 +10,15 @@ import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { ToolExecution } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import { registerResourceTools } from './tools.ts'
+import type { McpResourceRequest } from './types.ts'
+
+export type { McpResourceRequest } from './types.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
     mcpResources: McpResourceRuntime
   }
 }
-
-/** One supported resource operation, with server-owned cursors and URIs. */
-export type McpResourceRequest =
-  | { method: 'resources/list' | 'resources/templates/list'; cursor?: string }
-  | { method: 'resources/read'; uri: string }
 
 /** One configured server's resource access, owned by its MCP connection plugin. */
 export interface McpResourceProvider {

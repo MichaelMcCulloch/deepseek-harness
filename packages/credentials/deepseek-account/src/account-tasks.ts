@@ -2,7 +2,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { LlmError } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type {} from './index.ts'
+// Type-only: the `deepseek-account/*` Events declarations behind the emit and listener below.
+import type {} from './types.ts'
 
 /**
  * Identify running work whose latest bound request used the account route.

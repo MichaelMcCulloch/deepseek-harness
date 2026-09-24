@@ -92,7 +92,8 @@ The host contributes structured index rows that inject, into `<head>`: the `wind
 | [`src/client/system.ts`](src/client/system.ts) | `ClientModuleSystem`: load/materialize/invalidate machinery |
 | [`src/client/entries.ts`](src/client/entries.ts) | Page entry reconciliation, retries and code replacement |
 | [`src/client/entry-lifecycle.ts`](src/client/entry-lifecycle.ts) | Loader fiber teardown through the registry and owned-style cleanup |
-| [`src/client/manifest.ts`](src/client/manifest.ts) | Wire types, boot-manifest parsing, and the `dsh.client` declaration parser |
+| [`src/client/manifest.ts`](src/client/manifest.ts) | Wire types, the parsed-manifest re-exports, and the `dsh.client` declaration parser |
+| [`src/client/boot-manifest.ts`](src/client/boot-manifest.ts) | The parsed boot manifest and the `window.__DSH_BOOT__` parser |
 
 </details>
 

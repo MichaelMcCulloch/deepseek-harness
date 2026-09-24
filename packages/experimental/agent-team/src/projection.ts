@@ -6,12 +6,11 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent, SessionEventMap, SessionId } from '@deepseek-ai/dsh-session'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import type {
-  TeamId,
   TeamMemberProjection,
   TeamMemberSnapshot,
-  TeamMessageId,
   TeamMessageSnapshot,
   TeamProjection,
+  TeamState,
   TeamTaskSnapshot,
   TeamTaskView,
 } from './types.ts'
@@ -22,6 +21,8 @@ import {
 } from './types.ts'
 import { assertTaskGraphCandidate } from './task-graph.ts'
 import { projectTaskView } from './task-view.ts'
+
+export type { TeamState } from './types.ts'
 
 const nonNegativeSafeInteger = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const positiveSafeInteger = nonNegativeSafeInteger.min(1)
@@ -122,20 +123,6 @@ const teamMessageDeliveredEventSchema = z.object({
   messageId: teamMessageIdSchema,
   targetId: sessionIdSchema,
 }).strict() as z.ZodType<SessionEventMap['team/message/delivered']>
-
-/**
- * Current Team state selected by durable Team identity. Every applied Team
- * event produces a new state object and replaces only the collection it
- * touched; untouched collections keep their references.
- */
-export interface TeamState {
-  readonly id: TeamId
-  readonly members: readonly TeamMemberSnapshot[]
-  readonly tasks: readonly TeamTaskSnapshot[]
-  readonly messages: readonly TeamMessageSnapshot[]
-  readonly delivered: readonly TeamMessageId[]
-  readonly nextTaskNumber: number
-}
 
 /**
  * Construct empty state for one Team identity.

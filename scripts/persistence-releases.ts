@@ -9,56 +9,19 @@ import type { PersistenceTypeChange } from './persistence-changes.ts'
 import { canonicalizeSchema, schemaDigest } from './persistence-schema-model.ts'
 import type { PersistenceRoot, PersistenceSchemaInventory } from './persistence-schema-model.ts'
 import { persistenceReleaseFactArtifacts } from './persistence-release-facts.ts'
+import type {
+  PersistenceRelease, PersistenceReleaseEntry, PersistenceReleaseManifest, PersistenceReleaseRecord,
+  PersistenceReleases,
+} from './persistence-release-types.ts'
+
+export type {
+  PersistenceRelease, PersistenceReleaseChange, PersistenceReleaseEntry, PersistenceReleaseManifest,
+  PersistenceReleaseRecord, PersistenceReleases,
+} from './persistence-release-types.ts'
 
 const ARCHIVE_DIRECTORY = 'docs/persistence-changes/releases'
 const TAG_PATTERN = /^dsh-v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-(alpha|rc)\.(0|[1-9]\d*)$/u
 const DIGEST_PATTERN = /^[a-f0-9]{64}$/u
-
-/** Published identity and version constants observed in one pinned tag. */
-export interface PersistenceRelease {
-  readonly tag: string
-  readonly sourceDate: string
-  readonly publishedAt: string | null
-  readonly sessionFormatVersion: number
-}
-
-/** Offline corpus captured from the repository's alpha and release-candidate tags. */
-export interface PersistenceReleaseManifest {
-  readonly schemaVersion: 1
-  readonly capturedAt: string
-  readonly releases: readonly PersistenceRelease[]
-}
-
-/** One changed root between consecutive archived releases. */
-export interface PersistenceReleaseChange {
-  readonly root: string
-  readonly before: string | null
-  readonly after: string | null
-}
-
-/** Machine declaration shared byte-for-byte by a release's bilingual documents. */
-export interface PersistenceReleaseRecord {
-  readonly schemaVersion: 1
-  readonly tag: string
-  readonly previous: string | null
-  readonly sessionFormatVersion: number
-  readonly changes: readonly PersistenceReleaseChange[]
-}
-
-/** Validated release, changed after schemas, and complete reconstructed root state. */
-export interface PersistenceReleaseEntry {
-  readonly release: PersistenceRelease
-  readonly record: PersistenceReleaseRecord
-  readonly snapshot: PersistenceSchemaInventory
-  readonly roots: ReadonlyMap<string, PersistenceRoot>
-  readonly differences: readonly (PersistenceTypeChange & { readonly root: string })[]
-}
-
-/** Complete validated archive; classifications describe modern rules, not historical migration obligations. */
-export interface PersistenceReleases {
-  readonly manifest: PersistenceReleaseManifest
-  readonly entries: readonly PersistenceReleaseEntry[]
-}
 
 function object(value: unknown, fields: readonly string[], label: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label}: expected an object`)

@@ -25,7 +25,7 @@ import { Notifier } from './notifier.ts'
 import { ProjectionValueStore } from './projection-store.ts'
 import { Session } from './session.ts'
 import type { SessionRemotes } from './remotes.ts'
-import type { SessionTarget } from '../contract/sessions.ts'
+import type { SessionSearchResultItem, SessionTarget } from '../contract/sessions.ts'
 import type { SessionListPhase, SessionProjectionSnapshot } from './state.ts'
 
 // Client Session store vocabulary lives in ./state.ts; re-exported here so
@@ -34,12 +34,6 @@ export type { SessionListPhase, SessionProjectionSnapshot } from './state.ts'
 
 function sessionSeqCursor(value: number): SessionSeqCursor {
   return value === -1 ? -1 : SessionSeq(value)
-}
-
-/** Request-local content hit returned to sidebar search consumers. */
-export interface SessionSearchResultItem {
-  sessionId: SessionId
-  snippet: string
 }
 
 /** Immutable session-list snapshot for useSessionList. */

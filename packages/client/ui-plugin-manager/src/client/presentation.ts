@@ -92,16 +92,6 @@ export function managementText(error: {
 }
 
 /**
- * Compact a package name to what a person calls it.
- * @param name - the package name.
- * @returns the unscoped name without the harness prefixes.
- */
-export function shortName(name: string): string {
-  const unscoped = name.startsWith('@') ? name.slice(name.indexOf('/') + 1) : name
-  return unscoped.replace(/^dsh-(?:host-|client-)?/, '')
-}
-
-/**
  * Resolve installed package metadata without changing its technical identity.
  * @param pkg - package identity and local metadata.
  * @param resolveText - current-locale package text resolver.

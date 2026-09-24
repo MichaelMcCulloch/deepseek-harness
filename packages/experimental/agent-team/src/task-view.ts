@@ -2,8 +2,7 @@
 
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import type { TeamState } from './projection.ts'
-import type { TeamTaskSnapshot, TeamTaskView } from './types.ts'
+import type { TeamState, TeamTaskSnapshot, TeamTaskView } from './types.ts'
 
 /**
  * Whether two normalized file or directory prefixes overlap on path components.

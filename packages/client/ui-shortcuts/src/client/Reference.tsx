@@ -2,23 +2,16 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Button, IconCloseOutlineRegular, IconRefreshOutlineRegular, Modal, ShortcutKeys, Tooltip, Toast, focusWithoutRing, isBehindModal, rankByName } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ObservableSnapshot, PropsStore } from '@deepseek-ai/dsh-client-store'
-import type { ShortcutCatalogEntry, ShortcutPlatform, Shortcuts } from '@deepseek-ai/dsh-client-shortcuts/client'
+import type { PropsStore } from '@deepseek-ai/dsh-client-store'
+import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
+import type { ReferenceInjected } from './reference-injected.ts'
 import { ShortcutEditor } from './Editor.tsx'
 import { ShortcutIcon } from './Icons.tsx'
 import { shortcutFailure, shortcutReadFailure } from './feedback.ts'
 import type { createShortcutsStore } from './store.ts'
 import css from './Reference.module.css'
 
-/** Catalog and device labels delivered through renderer-bound hooks. */
-export interface ReferenceInjected {
-  platform: ShortcutPlatform
-  runtime: Shortcuts['runtime']
-  edit: Shortcuts['edit']
-  recording: Shortcuts['recording']
-  describeBinding: Shortcuts['describeBinding']
-  hooks: { catalog: ObservableSnapshot<readonly ShortcutCatalogEntry[]>; config: Shortcuts['config']; fixedCatalog: Shortcuts['fixedCatalog'] }
-}
+export type { ReferenceInjected } from './reference-injected.ts'
 type Store = PropsStore<ReturnType<typeof createShortcutsStore>>
 type Locale = PropsLocale<'shortcuts'>
 

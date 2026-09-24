@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 import { lstat, open, readdir, readFile, realpath } from 'node:fs/promises'
 import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
-import { scrubWindowsSigningEnvironment } from './windows-sign.mjs'
+import { scrubWindowsSigningEnvironment } from './windows-signing-environment.mjs'
 import { recordPackagingEvent } from './packaging-run.mjs'
 import { inspectSignaturesBatched } from './windows-signature-batch.mjs'
 

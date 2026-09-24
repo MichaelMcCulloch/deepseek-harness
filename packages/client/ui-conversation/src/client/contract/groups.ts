@@ -1,7 +1,7 @@
 /** Definition-owned grouping over a target's already materialized Nodes. */
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
-import type { ConversationTimelineSnapshot, ConversationViewNode } from './conversation.ts'
+import type { ConversationTimelineSnapshot, ConversationViewNode } from './location.ts'
 
 /** Existing Node identity, without allocating another execution Node. */
 export type NodeKey = Branded<'ConversationNodeKey'>

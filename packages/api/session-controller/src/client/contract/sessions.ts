@@ -10,16 +10,21 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { AgentContext } from '../scope.ts'
-import type { SessionSearchResultItem } from '../sessions/manager.ts'
 import type { SessionBinding, SessionListState } from '../sessions/state.ts'
 import type { SessionFace } from './session.ts'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
-import type { SessionReferenceSource } from '../index.ts'
+import type { SessionReferenceSource } from './reference-source.ts'
 
 export type { AgentContext } from '../scope.ts'
 
 /** Known Session identity or durable direct-parent subagent address; an address owns no lifetime. */
 export type SessionTarget = SessionId | SubagentAddress
+
+/** Request-local content hit returned to sidebar search consumers. */
+export interface SessionSearchResultItem {
+  sessionId: SessionId
+  snippet: string
+}
 
 /** One independent use of an exact Client generation, without Host Agent ownership. */
 export interface SessionReference extends Disposable {
