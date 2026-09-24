@@ -1,12 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { DagService } from '@deepseek-ai/dsh-dag'
 import { DagNodeId, DagOperationId, DagWaveId } from '@deepseek-ai/dsh-dag'
 import type { DagNodeSnapshot, DagProjection } from '@deepseek-ai/dsh-dag'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import type { ContinuableSetupContribution, SubagentRuntime } from '@deepseek-ai/dsh-subagent'
+import type { ContinuableSetupContribution } from '@deepseek-ai/dsh-subagent'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
@@ -100,7 +99,7 @@ function fakeDag(options: FakeDagOptions = {}) {
     blockFrom: record('blockFrom', accepted),
     statusFrom: record('statusFrom', { revision: 4, topology: [{ id: DagNodeId('a'), deps: [], status: 'in_progress' }], own: projection().nodes[0] }),
   }
-  return { service: service as unknown as DagService, calls }
+  return { service, calls }
 }
 
 async function dispatcherBench(options: FakeDagOptions = {}) {
@@ -304,7 +303,7 @@ describe('owner-bound child tools', () => {
         setup = contribution
         return () => { setup = undefined }
       },
-    } as unknown as SubagentRuntime
+    }
     ctx.provide('dag', dag.service)
     ctx.provide('subagents', subagents)
     await ctx.plugin(SystemPrompt)
@@ -322,7 +321,7 @@ describe('owner-bound child tools', () => {
       tools: {
         restrict: () => () => {},
         register: (definition: ToolDefinition) => ctx.tools.register(definition),
-      } as unknown as Context['tools'],
+      },
       systemPrompt: ctx.systemPrompt,
     })
     expect(() => childCtx.dag).toThrow('cannot get property "dag" without inject')

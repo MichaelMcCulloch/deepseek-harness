@@ -94,7 +94,8 @@ describe('read-only DAG dock', () => {
 
   it('reads the dag projection through the dock adapter', () => {
     const value = board()
-    const props = { useProjection: () => value, t: makeTranslate(en) } as unknown as Parameters<typeof DagDock>[0]
+    const useProjection: Parameters<typeof DagDock>[0]['useProjection'] = () => value
+    const props = { useProjection, t: makeTranslate(en) } as Parameters<typeof DagDock>[0]
     const result = render(<DagDock {...props} />)
     expect(result.getByText('Task Graph')).toBeTruthy()
   })

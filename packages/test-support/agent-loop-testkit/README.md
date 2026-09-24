@@ -1,5 +1,5 @@
 ---
-description: "Prerequisite mounting, production AgentLoop drivers, and explicit Inbox stubs for agent-loop tests."
+description: "Prerequisite mounting, production AgentLoop drivers, and explicit Agent and Inbox stubs for agent-loop tests."
 kind: "package-library"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Use `dsh-agent-loop-testkit` to give AgentLoop tests the standard prerequisites and a production loop driver without repeating setup. The harness creates real Agents and exposes Inbox input claiming for tests of durable events, recovery, notifications, and claim behavior. For consumer tests that need only queue editing, choose the process-local Inbox stub; choose the fail-fast Inbox when pending input must never be touched. Tests still own adapters, optional plugins, load order, and context disposal, and the package adds no model-visible behavior.
+Use `dsh-agent-loop-testkit` to give AgentLoop tests the standard prerequisites and a production loop driver without repeating setup. The harness creates real Agents and exposes Inbox input claiming for tests of durable events, recovery, notifications, and claim behavior. For a subject that only reads an agent's identity, session, or pending input, choose the structural Agent stub; for one that needs only queue editing, choose the process-local Inbox stub; choose the fail-fast Inbox when pending input must never be touched. Tests still own adapters, optional plugins, load order, and context disposal, and the package adds no model-visible behavior.
 
 ## Table of Contents
 
@@ -55,6 +55,15 @@ The dependency helper forwards system-prompt and tool-registry configuration thr
 
 ### Build a structural Agent stub
 
+Use `liveAgentStub()` when the test subject reads an agent's identity, session, or pending input but must not run loop work. The returned Agent carries every live member and is registered nowhere, so live lookups treat it as a retired agent; its delivery and cancellation methods do nothing, its inbox is the fail-fast placeholder unless the caller supplies one, and an absent session defaults to an empty Session for the same identity.
+
+```ts
+import { liveAgentStub } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { SessionId } from '@deepseek-ai/dsh-session'
+
+const agent = liveAgentStub({ id: SessionId('stale-agent') })
+```
+
 Use `createInboxStub()` when the test subject needs mutable pending lists but does not exercise durability, projection validation, live Inbox notifications, or the driver's claim policy. The stub implements the public queue operations with two process-local arrays and never writes to a Session. Use `unsupportedInbox()` when the test subject must not touch pending input; every mutation throws at the first unexpected dependency.
 
 ```ts
@@ -86,7 +95,7 @@ This section explains the design of the test utilities; the observable behavior 
 
 ### Design
 
-`mountAgentLoopTestDependencies` mounts six service plugins in a fixed dependency order — LLM, session, session-projection registry, system-prompt registry, tool registry, then agent registry — and stops before `AgentLoop`, so the caller controls loop load order. `mountAgentLoopTestHarness` mounts the public production plugin, creates Agents through its service, and exposes the production driver's claim operation without exporting the loop's concrete Inbox class or projection definition. [`src/inbox.ts`](src/inbox.ts) contains only the process-local mutable stub and the fail-fast unsupported placeholder; it owns no projection or durable event implementation. The mounting and driver implementation lives in [`src/index.ts`](src/index.ts). No invariant companion is published because the package owns only test helpers and has no independent production observations that can diverge.
+`mountAgentLoopTestDependencies` mounts six service plugins in a fixed dependency order — LLM, session, session-projection registry, system-prompt registry, tool registry, then agent registry — and stops before `AgentLoop`, so the caller controls loop load order. `mountAgentLoopTestHarness` mounts the public production plugin, creates Agents through its service, and exposes the production driver's claim operation without exporting the loop's concrete Inbox class or projection definition. [`src/inbox.ts`](src/inbox.ts) contains only the process-local mutable stub and the fail-fast unsupported placeholder; it owns no projection or durable event implementation. [`src/agent.ts`](src/agent.ts) builds an Agent that carries every live member over a caller-supplied or default Session without registering the result. The mounting and driver implementation lives in [`src/index.ts`](src/index.ts). No invariant companion is published because the package owns only test helpers and has no independent production observations that can diverge.
 
 </details>
 

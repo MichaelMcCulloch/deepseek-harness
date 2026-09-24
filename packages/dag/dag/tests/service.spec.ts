@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
-import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { liveAgentStub, mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { LlmAdapter, MessageId, freezeMessage } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
@@ -271,6 +271,11 @@ function serviceField<T>(service: DagService, name: string): T {
   return Reflect.get(service, name) as T
 }
 
+/** Child-agent surface that private turn validation reads from a scripted log. */
+interface ScriptedChildAgent {
+  readonly session: { snapshotEvents(): readonly unknown[] }
+}
+
 function appendStartingOwner(harness: TestHarness, childId = SessionId('owner-child')): {
   readonly state: DagState
   readonly node: DagNodeSnapshot
@@ -368,7 +373,7 @@ describe('native DAG service', { timeout: 60_000 }, () => {
     expect(() => ctx.dag.inspect(dispatcher, DagNodeId('missing')))
       .toThrow(expect.objectContaining({ code: 'dag-node-not-found' }))
 
-    const stale = { id: dispatcher.id, session: dispatcher.session } as unknown as Agent
+    const stale = liveAgentStub({ id: dispatcher.id, session: dispatcher.session })
     expect(() => ctx.dag.state(stale)).toThrow(expect.objectContaining({ code: 'dag-agent-not-live' }))
   })
 
@@ -381,7 +386,7 @@ describe('native DAG service', { timeout: 60_000 }, () => {
 
     ctx.dag.write(dispatcher, { nodes: [node()] })
     expect(() => ctx.dag.reset(dispatcher, DagNodeId('a'), ' ')).toThrow(/reset target must be non-empty/)
-    const stopWithoutNode = ctx.dag.stop.bind(ctx.dag) as unknown as (agent: Agent) => unknown
+    const stopWithoutNode = serviceMethod<[Agent], unknown>(ctx.dag, 'stop')
     expect(() => stopWithoutNode(dispatcher)).toThrow(expect.objectContaining({ code: 'dag-node-not-found' }))
   })
 
@@ -1120,10 +1125,7 @@ describe('native DAG service', { timeout: 60_000 }, () => {
       await expectStateFailure(
         started,
         'dispatcher session has no cwd',
-        {
-          id: harness.dispatcher.id,
-          session: { header: {}, snapshotEvents: () => harness.dispatcher.session.snapshotEvents() },
-        } as unknown as Agent,
+        liveAgentStub({ id: harness.dispatcher.id }),
       )
       const { preparedFrom: _preparedFrom, ...withoutPreparedFrom } = started.nodes[0]!
       for (const preparedNode of [
@@ -1184,17 +1186,7 @@ describe('native DAG service', { timeout: 60_000 }, () => {
     await expect(ensureWave(harness.dispatcher, owner.node, signal))
       .rejects.toThrow(`wave ${waveId} has no active dispatch commands`)
 
-    // The service reads state through the session projection, so this stub
-    // carries the real log cursor as well as the real log itself.
-    const missingRootDispatcher = {
-      id: harness.dispatcher.id,
-      session: {
-        header: { ...harness.dispatcher.session.header, cwd: undefined },
-        seq: harness.dispatcher.session.seq,
-        inheritedEventCount: harness.dispatcher.session.inheritedEventCount,
-        snapshotEvents: () => harness.dispatcher.session.snapshotEvents(),
-      },
-    } as unknown as Agent
+    const missingRootDispatcher = liveAgentStub({ id: harness.dispatcher.id })
     Reflect.set(service, 'requireState', () => owner.state)
     await expect(ensureWave(missingRootDispatcher, owner.node, signal))
       .rejects.toThrow('DAG dispatcher session has no cwd')
@@ -1215,7 +1207,7 @@ describe('native DAG service', { timeout: 60_000 }, () => {
     probes.set(`${harness.dispatcher.id}:${waveId}`, {
       controller: staleController,
       promise: Promise.resolve(),
-      agent: { id: harness.dispatcher.id } as unknown as Agent,
+      agent: liveAgentStub({ id: harness.dispatcher.id }),
       fences: [],
       waiters: 0,
     })
@@ -1244,7 +1236,7 @@ describe('native DAG service', { timeout: 60_000 }, () => {
       probeSignal = activeSignal
       return await new Promise((_resolve, reject) => {
         activeSignal.addEventListener('abort', () => {
-          const reason = activeSignal.reason as unknown
+          const reason: unknown = activeSignal.reason
           reject(reason instanceof Error ? reason : new Error('shared probe aborted', { cause: reason }))
         }, { once: true })
       })
@@ -1434,10 +1426,10 @@ describe('native DAG service', { timeout: 60_000 }, () => {
   it('cancels an ordinary child turn when the durable settlement transition fails', async () => {
     const harness = await setup(new GatedAdapter([]))
     const owner = appendStartingOwner(harness)
-    const child = { id: owner.node.childSessionId } as unknown as Agent
+    const child = liveAgentStub({ id: owner.node.childSessionId! })
     const command = owner.node.commands[0]!
     const failure = new DagStateError('settlement refused', 'dag-invalid-state')
-    vi.spyOn(harness.ctx.dag as unknown as { mutate: () => never }, 'mutate').mockImplementation(() => { throw failure })
+    Reflect.set(harness.ctx.dag, 'mutate', () => { throw failure })
     const stop = vi.fn()
     expect(() => {
       harness.ctx.dag.turnSettled({
@@ -1457,7 +1449,7 @@ describe('native DAG service', { timeout: 60_000 }, () => {
     const harness = await setup(new GatedAdapter([]))
     const owner = appendStartingOwner(harness)
     const command = owner.node.commands[0]!
-    const child = { id: owner.node.childSessionId } as unknown as Agent
+    const child = liveAgentStub({ id: owner.node.childSessionId! })
     const stop = vi.fn()
     const base = {
       binding: owner.binding,
@@ -1470,7 +1462,7 @@ describe('native DAG service', { timeout: 60_000 }, () => {
     }
 
     harness.ctx.dag.turnSettled({ ...base, binding: { ...owner.binding, metadata: { ...owner.binding.metadata, dispatcherSessionId: SessionId('missing') } } })
-    harness.ctx.dag.turnSettled({ ...base, child: { id: SessionId('other') } as unknown as Agent })
+    harness.ctx.dag.turnSettled({ ...base, child: liveAgentStub({ id: SessionId('other') }) })
     const stopped = reduceDagState(owner.state, { type: 'stop', nodeId: DagNodeId('a'), reason: 'stop' }).state
     harness.dispatcher.session.append('dag/state', { state: stopped })
     harness.ctx.dag.turnSettled(base)
@@ -1491,7 +1483,7 @@ describe('native DAG service', { timeout: 60_000 }, () => {
     steerHarness.ctx.dag.turnSettled({
       ...base,
       binding: steerOwner.binding,
-      child: { id: steerOwner.node.childSessionId } as unknown as Agent,
+      child: liveAgentStub({ id: steerOwner.node.childSessionId! }),
       parentSessionId: steerHarness.dispatcher.id,
       messageId: MessageId('generic'),
       stopReason: 'aborted',
@@ -1502,7 +1494,7 @@ describe('native DAG service', { timeout: 60_000 }, () => {
   it('routes owner stops through one durable transition and reuses interruption state', async () => {
     const harness = await setup(new GatedAdapter([]))
     const owner = appendStartingOwner(harness)
-    const child = { id: owner.node.childSessionId } as unknown as Agent
+    const child = liveAgentStub({ id: owner.node.childSessionId! })
     const stop = vi.fn()
     const request = {
       binding: owner.binding,
@@ -1524,7 +1516,7 @@ describe('native DAG service', { timeout: 60_000 }, () => {
   it('rejects missing owner routes, stale bindings, and unowned child agents', async () => {
     const harness = await setup(new GatedAdapter([]))
     const owner = appendStartingOwner(harness)
-    const child = { id: owner.node.childSessionId } as unknown as Agent
+    const child = liveAgentStub({ id: owner.node.childSessionId! })
     const message = userMessageForTest('owner-route')
     const redirect = vi.fn()
 
@@ -1548,7 +1540,7 @@ describe('native DAG service', { timeout: 60_000 }, () => {
     )
     expect(() => harness.ctx.dag.statusFrom(unrelated))
       .toThrow(expect.objectContaining({ code: 'dag-child-owner-missing' }))
-    const stale = { id: unrelated.id, session: unrelated.session } as unknown as Agent
+    const stale = liveAgentStub({ id: unrelated.id, session: unrelated.session })
     expect(() => harness.ctx.dag.statusFrom(stale))
       .toThrow(expect.objectContaining({ code: 'dag-child-not-live' }))
 
@@ -1611,7 +1603,7 @@ describe('native DAG service', { timeout: 60_000 }, () => {
 
     await expect(deliver(harness.dispatcher, owner.node.id, command, {
       binding: owner.binding,
-      child: { id: owner.node.childSessionId } as unknown as Agent,
+      child: liveAgentStub({ id: owner.node.childSessionId! }),
       message: userMessageForTest('disposed-owner-redirect'),
       redirect: vi.fn(),
     })).rejects.toMatchObject({ code: 'dag-service-disposed' })
@@ -1637,7 +1629,7 @@ describe('native DAG service', { timeout: 60_000 }, () => {
     const stop = vi.fn()
     harness.ctx.dag.stop({
       binding: owner.binding,
-      child: { id: owner.node.childSessionId } as unknown as Agent,
+      child: liveAgentStub({ id: owner.node.childSessionId! }),
       authority: { kind: 'ancestor', agent: harness.dispatcher },
       stop,
     })
@@ -1656,7 +1648,7 @@ describe('native DAG service', { timeout: 60_000 }, () => {
     const activeStop = vi.fn()
     activeHarness.ctx.dag.stop({
       binding: activeOwner.binding,
-      child: { id: activeOwner.node.childSessionId } as unknown as Agent,
+      child: liveAgentStub({ id: activeOwner.node.childSessionId! }),
       authority: { kind: 'user', parentSessionId: activeHarness.dispatcher.id },
       stop: activeStop,
     })
@@ -1668,7 +1660,7 @@ describe('native DAG service', { timeout: 60_000 }, () => {
     expect(() => {
       activeHarness.ctx.dag.stop({
         binding: { ...activeOwner.binding, metadata: { ...activeOwner.binding.metadata, nodeId: 'missing' } },
-        child: { id: activeOwner.node.childSessionId } as unknown as Agent,
+        child: liveAgentStub({ id: activeOwner.node.childSessionId! }),
         authority: { kind: 'user', parentSessionId: activeHarness.dispatcher.id },
         stop: missingStop,
       })
@@ -1683,12 +1675,12 @@ describe('native DAG service', { timeout: 60_000 }, () => {
     const harness = await setup(new GatedAdapter([]))
     const owner = appendStartingOwner(harness)
     const failure = new DagStateError('stop refused', 'dag-invalid-transition')
-    vi.spyOn(harness.ctx.dag as unknown as { mutate: () => never }, 'mutate').mockImplementation(() => { throw failure })
+    Reflect.set(harness.ctx.dag, 'mutate', () => { throw failure })
     const cancel = vi.fn()
     expect(() => {
       harness.ctx.dag.stop({
         binding: owner.binding,
-        child: { id: owner.node.childSessionId } as unknown as Agent,
+        child: liveAgentStub({ id: owner.node.childSessionId! }),
         authority: { kind: 'user', parentSessionId: harness.dispatcher.id },
         stop: cancel,
       })
@@ -1702,7 +1694,7 @@ describe('native DAG service', { timeout: 60_000 }, () => {
     const deliverNotices = serviceMethod<[Agent], unknown>(harness.ctx.dag, 'deliverNotices')
     const reconcile = serviceMethod<[Agent], unknown>(harness.ctx.dag, 'reconcile')
     const canRun = serviceMethod<[Agent], boolean>(harness.ctx.dag, 'canRun')
-    const stale = { id: harness.dispatcher.id, session: harness.dispatcher.session } as unknown as Agent
+    const stale = liveAgentStub({ id: harness.dispatcher.id, session: harness.dispatcher.session })
 
     schedule(harness.dispatcher)
     schedule(stale)
@@ -1873,10 +1865,10 @@ describe('native DAG service', { timeout: 60_000 }, () => {
     const harness = await setup(new GatedAdapter([]))
     const owner = appendStartingOwner(harness)
     const command = owner.node.commands[0]!
-    const assertTurn = serviceMethod<[DagNodeSnapshot, Agent], unknown>(harness.ctx.dag, 'assertCurrentChildTurn')
-    const child = (events: readonly unknown[]): Agent => ({
+    const assertTurn = serviceMethod<[DagNodeSnapshot, ScriptedChildAgent], unknown>(harness.ctx.dag, 'assertCurrentChildTurn')
+    const child = (events: readonly unknown[]): ScriptedChildAgent => ({
       session: { snapshotEvents: () => events },
-    }) as unknown as Agent
+    })
     const start = { type: 'turn/start', data: { turn: 1 } }
     const end = { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } }
     const currentMessage = {

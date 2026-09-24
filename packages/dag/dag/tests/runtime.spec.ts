@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { createInboxStub, liveAgentStub } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { MessageId, freezeMessage } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import {
   DagCommandId,
   DagNodeId,
@@ -74,10 +75,17 @@ function fakeAgent(
   nextStep: readonly UserMessage[] = [],
   events: readonly unknown[] = [],
 ): Agent {
-  return {
-    inbox: { nextTurn, nextStep },
-    session: { snapshotEvents: () => events },
-  } as unknown as Agent
+  const id = SessionId('runtime-agent')
+  const inbox = createInboxStub()
+  for (const message of nextTurn) inbox.append('next-turn', message)
+  for (const message of nextStep) inbox.append('next-step', message)
+  // The helpers under test read only the complete-log view, so the stub
+  // reports the scripted events over an otherwise empty Session.
+  return liveAgentStub({
+    id,
+    inbox,
+    session: Object.assign(Session.create(id), { snapshotEvents: () => events }),
+  })
 }
 
 describe('DAG runtime scalar helpers', () => {

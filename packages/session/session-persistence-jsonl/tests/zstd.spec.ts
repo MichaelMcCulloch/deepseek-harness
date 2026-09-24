@@ -734,7 +734,7 @@ describe('JsonlSessionPersistence: default Zstandard encoding', () => {
     const handle = await ctx.sessionPersistence.open(header.id, 'write')
     try {
       const failure = new Error('rewrite refused')
-      const service = ctx.sessionPersistence as unknown as { persistBatch: () => Promise<void> }
+      const service = ctx.sessionPersistence as InstanceType<typeof JsonlSessionPersistence>
       vi.spyOn(service, 'persistBatch').mockRejectedValueOnce(failure)
       const closers: SessionEvent[] = [
         { type: 'step/end', seq: SessionSeq(8), time: 10, data: { turn: 2, step: 1 } },

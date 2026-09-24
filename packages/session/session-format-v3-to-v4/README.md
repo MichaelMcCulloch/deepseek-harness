@@ -143,7 +143,7 @@ There is no recursive source search. Captured request text, assistant replay sta
 | Available evidence | Migration decision |
 |---|---|
 | One descriptor with version 1 | Require string provider and label; derive `mode: 'continuable'`. |
-| One descriptor with version 2 or 3 | Require string provider; use its mode and optional label under catalog rules. |
+| One descriptor with version 2, 3, or 4 | Require string provider; use its mode and optional label under catalog rules. |
 | Zero descriptors, or an unsupported descriptor version | Retain an existing parent entry; otherwise append unknown-mode membership. |
 | More than one own descriptor | Retain an existing parent entry without mode/label comparison; otherwise append unknown-mode membership. |
 | Existing own parent entry | Retain it and its extensions; require matching child creation time and mode/label from exactly one supported own descriptor, when available. |

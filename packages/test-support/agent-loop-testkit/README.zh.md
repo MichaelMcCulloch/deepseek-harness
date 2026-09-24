@@ -1,5 +1,5 @@
 ---
-description: "为 agent-loop 测试提供先决依赖挂载、生产 AgentLoop 驱动与职责明确的 Inbox 桩。"
+description: "为 agent-loop 测试提供先决依赖挂载、生产 AgentLoop 驱动，以及职责明确的 Agent 桩与 Inbox 桩。"
 kind: "package-library"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-library"
 
 ## 概述
 
-使用 `dsh-agent-loop-testkit` 可以为 AgentLoop 测试准备标准先决条件和生产 loop 驱动，避免重复设置。harness 可以创建真实 Agent，并公开 Inbox 输入认领能力，以测试持久事件、恢复、通知和认领行为。只需编辑队列的消费方测试应选择进程内 Inbox 桩；待处理输入绝不应被访问时，应选择快速失败的 Inbox。测试仍然负责适配器、可选插件、加载顺序和上下文释放，本包不会添加模型可见行为。
+使用 `dsh-agent-loop-testkit` 可以为 AgentLoop 测试准备标准先决条件和生产 loop 驱动，避免重复设置。harness 可以创建真实 Agent，并公开 Inbox 输入认领能力，以测试持久事件、恢复、通知和认领行为。只读取 Agent 身份、会话或待处理输入的测试对象应选择结构化 Agent 桩；只需编辑队列的消费方测试应选择进程内 Inbox 桩；待处理输入绝不应被访问时，应选择快速失败的 Inbox。测试仍然负责适配器、可选插件、加载顺序和上下文释放，本包不会添加模型可见行为。
 
 ## 目录
 
@@ -55,6 +55,15 @@ const admitted = harness.claim(agent, 'next-turn', 1)
 
 ### 构造结构化 Agent 桩
 
+当测试对象只读取 Agent 的身份、会话或待处理输入，而不运行 loop 工作时，使用 `liveAgentStub()`。返回的 Agent 携带全部实时成员，且不注册到任何位置，因此实时查询会将其视为已退出的 Agent；其投递与取消方法不做任何事，除非调用方提供，否则其 Inbox 为快速失败占位值；未提供 session 时，默认使用同一身份的空 Session。
+
+```ts
+import { liveAgentStub } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { SessionId } from '@deepseek-ai/dsh-session'
+
+const agent = liveAgentStub({ id: SessionId('stale-agent') })
+```
+
 当测试对象需要可变的待处理列表，但不测试持久性、投影校验、实时 Inbox 通知或驱动的认领策略时，使用 `createInboxStub()`。该桩通过两个进程内数组实现公开队列操作，且绝不会写入 Session。当测试对象不应访问待处理输入时，使用 `unsupportedInbox()`；每次变更都会在首个意外依赖处抛错。
 
 ```ts
@@ -86,7 +95,7 @@ harness 不会挂载任何 LLM（大语言模型）适配器。若测试发送�
 
 ### 设计
 
-`mountAgentLoopTestDependencies` 按固定依赖顺序——LLM、会话、会话投影注册表、系统提示词注册表、工具注册表、agent 注册表——挂载六个服务插件，并在 `AgentLoop` 之前停下，使调用方控制 loop 加载顺序。`mountAgentLoopTestHarness` 挂载公开的生产插件，通过其服务创建 Agent，并公开生产驱动的认领操作，而不导出 loop 的具体 Inbox 类或投影定义。[`src/inbox.ts`](src/inbox.ts) 仅包含进程内可变桩和快速失败且不支持操作的占位值；它不持有投影或持久事件实现。挂载与驱动实现位于 [`src/index.ts`](src/index.ts)。本包不发布 invariant companion，因为它只持有测试辅助工具，不存在可能相互偏离的独立生产观测。
+`mountAgentLoopTestDependencies` 按固定依赖顺序——LLM、会话、会话投影注册表、系统提示词注册表、工具注册表、agent 注册表——挂载六个服务插件，并在 `AgentLoop` 之前停下，使调用方控制 loop 加载顺序。`mountAgentLoopTestHarness` 挂载公开的生产插件，通过其服务创建 Agent，并公开生产驱动的认领操作，而不导出 loop 的具体 Inbox 类或投影定义。[`src/inbox.ts`](src/inbox.ts) 仅包含进程内可变桩和快速失败且不支持操作的占位值；它不持有投影或持久事件实现。[`src/agent.ts`](src/agent.ts) 在调用方提供或默认的 Session 之上构造携带全部实时成员的 Agent，且不注册该结果。挂载与驱动实现位于 [`src/index.ts`](src/index.ts)。本包不发布 invariant companion，因为它只持有测试辅助工具，不存在可能相互偏离的独立生产观测。
 
 </details>
 

@@ -387,9 +387,7 @@ describe('SubagentRuntime', () => {
     expect(() => { subagents.registerOwnerController('dag', controller) })
       .toThrow(expect.objectContaining({ code: 'DUPLICATE_OWNER' }))
 
-    const ownerControllers = (subagents as unknown as {
-      ownerControllers: Map<string, SubagentOwnerController>
-    }).ownerControllers
+    const ownerControllers = Reflect.get(subagents, 'ownerControllers') as Map<string, SubagentOwnerController>
     ownerControllers.set('dag', replacement)
     dispose()
     expect(ownerControllers.get('dag')).toBe(replacement)

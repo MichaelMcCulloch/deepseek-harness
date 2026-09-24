@@ -1,7 +1,7 @@
 /**
- * Shared service mounting, real AgentLoop drivers, and structural Inbox stubs
- * for agent-loop tests. Callers retain ownership of their contexts, adapters,
- * optional plugins, agents, and teardown.
+ * Shared service mounting, real AgentLoop drivers, and structural Agent and
+ * Inbox stubs for agent-loop tests. Callers retain ownership of their
+ * contexts, adapters, optional plugins, agents, and teardown.
  * @module @deepseek-ai/dsh-agent-loop-testkit
  */
 
@@ -18,6 +18,8 @@ import type { Config as SystemPromptConfig } from '@deepseek-ai/dsh-system-promp
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { Config as ToolRuntimeConfig } from '@deepseek-ai/dsh-tools'
 
+export { liveAgentStub } from './agent.ts'
+export type { LiveAgentStubOptions } from './agent.ts'
 export { createInboxStub, unsupportedInbox } from './inbox.ts'
 
 interface DriverInbox extends Inbox {

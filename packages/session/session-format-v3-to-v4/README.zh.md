@@ -143,7 +143,7 @@ V3 未知内容标签变为 `plugin:<original-type>`，其他字段原样保留�
 | 可用证据 | 迁移决定 |
 |---|---|
 | 一个 version 1 descriptor | 要求字符串 provider 与 label；导出 `mode: 'continuable'`。 |
-| 一个 version 2 或 3 descriptor | 要求字符串 provider；按目录规则使用其 mode 和可选 label。 |
+| 一个 version 2、3 或 4 descriptor | 要求字符串 provider；按目录规则使用其 mode 和可选 label。 |
 | 没有 descriptor，或 descriptor 版本不受支持 | 保留已有父目录项；否则追加模式未知的目录项。 |
 | 多个自身 descriptor | 保留已有父目录项，不比较 mode／label；否则追加模式未知的目录项。 |
 | 已有自身父目录项 | 保留条目及其扩展；要求子创建时间一致，并在恰好一个受支持的自身 descriptor 可用时比较其 mode／label。 |
