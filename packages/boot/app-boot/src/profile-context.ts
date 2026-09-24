@@ -1,7 +1,7 @@
 /** Launcher-owned profile locations and composition inputs. */
 import { join } from 'node:path'
 import { composeEntries, loadProfileDirectory, PROFILE_PATCH_FILENAME, type Profile } from './profile.ts'
-import { loadOptionalPatches } from './index.ts'
+import { loadOptionalPatches } from './profile.ts'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 
 /** Application-owned package manager executable; environment applies only to package operations. */

@@ -1,6 +1,8 @@
 /** Excel previews use ordinary authorized file bytes without Office conversion. */
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from '../index.ts'
+// Type-only: the declaration merges behind ctx.locale, ctx.slots, and ctx.documentPreviews.
+import type {} from '@deepseek-ai/dsh-client-locale/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { Config } from '../../config.ts'
 import { LazyExcelBody } from './LazyExcelBody.tsx'
 import { en, zh } from './locales.ts'
