@@ -134,13 +134,17 @@ export class RepositoryCleaner {
       const parsed = parseConfig(configPath)
       if (parsed.options.outDir !== undefined) {
         const typesDirectory = resolve(parsed.options.outDir)
+        // `lib/types` is the shared intermediate every emitting project writes,
+        // so its parent `lib` owns the sibling runtime bundles too. A
+        // declaration-only face outside that convention writes `lib/<name>`
+        // and owns exactly that directory; the native entry owns its `lib`.
         const outputDirectory = basename(typesDirectory) === 'types'
           ? dirname(typesDirectory)
-          : typesDirectory === nativeEntryOutput
+          : typesDirectory === nativeEntryOutput || basename(dirname(typesDirectory)) === 'lib'
             ? typesDirectory
             : undefined
         if (outputDirectory === undefined) {
-          throw new Error(`clean: expected TypeScript outDir to end in /types: ${repositoryPath(this.root, typesDirectory)}`)
+          throw new Error(`clean: expected TypeScript outDir to be lib/<name> or to end in /types: ${repositoryPath(this.root, typesDirectory)}`)
         }
         this.assertRepositoryTarget(outputDirectory)
         outputs.add(outputDirectory)

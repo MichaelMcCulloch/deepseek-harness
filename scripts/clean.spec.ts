@@ -82,6 +82,29 @@ describe('RepositoryCleaner', () => {
     expect(existsSync(join(root, 'native/system/tsconfig.tsbuildinfo'))).toBe(false)
   })
 
+  it('removes a declaration-only face whose outDir sits directly under lib', async () => {
+    const root = fixture()
+    addProject(root, 'apps/desktop/tests/keyboard', 'lib/keyboard-test-types')
+    write(join(root, 'apps/desktop/tests/keyboard/lib/keyboard-test-types/index.d.ts'))
+    write(join(root, 'apps/desktop/tests/keyboard/lib/other/fixture.json'))
+
+    await new RepositoryCleaner(root).clean()
+
+    expect(existsSync(join(root, 'apps/desktop/tests/keyboard/lib/keyboard-test-types'))).toBe(false)
+    expect(existsSync(join(root, 'apps/desktop/tests/keyboard/lib/other/fixture.json'))).toBe(true)
+    expect(existsSync(join(root, 'apps/desktop/tests/keyboard/src/index.ts'))).toBe(true)
+  })
+
+  it('refuses a project whose outDir belongs to no known build-output shape', async () => {
+    const root = fixture()
+    addProject(root, 'products/shell', 'dist/out')
+    write(join(root, 'products/shell/dist/out/index.js'))
+
+    await expect(new RepositoryCleaner(root).clean()).rejects.toThrow('lib/<name> or to end in /types')
+
+    expect(existsSync(join(root, 'products/shell/dist/out/index.js'))).toBe(true)
+  })
+
   it('refuses project outputs reached through a symlink outside the repository', async () => {
     const root = fixture()
     const externalProject = fixture()
