@@ -1,6 +1,37 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for service.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/cordis-api/service.md
-service.md: 5ddc1082f823349e16d856bc2581b8ecbb5bfb28
-service.zh.md: 35995fa29d238901761a17f2c6bd7a3eff9d91ff
+/:
+  en: d2c0c5bce430d1be
+  zh: 124ab2656ea6d044
+/service:
+  en: 8b52ccce5c52c717
+  zh: 7b0206428e08dee4
+/service/service-name:
+  en: 1417c9d8e9846fe3
+  zh: 18bfa5ab4844c856
+/service/static-members:
+  en: ceb197529207a8ed
+  zh: 7d444c03f8be0f0d
+/service/static-members/service-init:
+  en: 3f2b50f55f603e48
+  zh: 94a6b391c15b3e56
+/service/static-members/service-check:
+  en: a59e7ddb994c8d86
+  zh: 95de0664a113357a
+/service/static-members/service-config:
+  en: 18ecfb3319574cf2
+  zh: cfc54185146bc7f0
+/service/static-members/service-invoke:
+  en: b8e72b8123566292
+  zh: 88d0c8ea46391969
+/service/static-members/service-extend:
+  en: deaf9a128400ef65
+  zh: c4046b341be698e4
+/service/static-members/service-tracker:
+  en: a6e8a8a0398e449c
+  zh: 097961489c7e4839
+/service/static-members/service-resolveconfig:
+  en: bded8c8ac47d5cc2
+  zh: 3f51ed510d0a510c

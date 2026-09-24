@@ -1,6 +1,37 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for events.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/cordis-api/events.md
-events.md: 587607834d435e397481fb166657bf99bf0fd036
-events.zh.md: a8f82933ecd06b8ab7aa995786e7364349594804
+/:
+  en: d2c0c5bce430d1be
+  zh: af1ac3203cdfdad2
+/events:
+  en: 9d809e3de33dd783
+  zh: b965aee4a65c6c1a
+/events/ctx-parallel-name-args:
+  en: 142b97fa3e4668a3
+  zh: 8c933379a59aed36
+/events/ctx-emit-name-args:
+  en: 0ce9462ed4fee9d4
+  zh: 9156d13bc7dcfd46
+/events/ctx-serial-name-args:
+  en: a583e8dfcec25266
+  zh: f097057148a27091
+/events/ctx-bail-name-args:
+  en: 6259e3dfa2f9e430
+  zh: 5861b4d5b1039e9d
+/events/ctx-waterfall-name-args:
+  en: aa73c567910966f5
+  zh: dcd069392a7287f5
+/events/ctx-on-name-listener-options:
+  en: 581b7a55adfd0e8b
+  zh: 774691513275bb5e
+/events/ctx-once-name-listener-options:
+  en: ed65c4c05e1c95ee
+  zh: 6e1e53ba1569d6c9
+/events/eventoptions:
+  en: 27f9834a9042496a
+  zh: b667cfe7d9d80de7
+/events/dispatchmode:
+  en: c634ccef697aabc6
+  zh: be97575bacff88a9

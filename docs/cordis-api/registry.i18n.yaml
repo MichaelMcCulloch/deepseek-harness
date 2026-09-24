@@ -1,6 +1,22 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for registry.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/cordis-api/registry.md
-registry.md: ae1c78e498959f6cc42d4ce0741bc055107bdab0
-registry.zh.md: 2aa57b667e460173d287eb8fb4192cd1ff2770c5
+/:
+  en: d2c0c5bce430d1be
+  zh: 24c4f62d45c2be68
+/registry:
+  en: 002c10f39db567b7
+  zh: 4bfdc14c16c43162
+/registry/ctx-inject-deps-callback:
+  en: 2ba76ec566842731
+  zh: 998c989d21c53fa0
+/registry/ctx-plugin-plugin-args:
+  en: d73257d284468e73
+  zh: 0f75283abe078d39
+/registry/plugin:
+  en: 987eb1bded74e04f
+  zh: 14894749da464f70
+/registry/inject:
+  en: 25a1811bd2785a72
+  zh: 2402a2ce6c309873

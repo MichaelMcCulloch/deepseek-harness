@@ -7,7 +7,9 @@ import type { MessageId, ToolCallId } from './brand.ts'
 import type {
   AssistantMessage,
   ContentBlock,
+  DeveloperMessage,
   Message,
+  MessageRoleMap,
   ModelMessageSource,
   SystemMessage,
   ToolResultMessage,
@@ -23,20 +25,23 @@ export type {
   ContextForm,
   ContextFormed,
   ContextSnapshotSection,
+  DeveloperMessage,
   Message,
+  MessageRoleMap,
   MessageSource,
   MessageSourceMap,
   ModelMessageSource,
   SystemMessage,
+  SystemPromptMessageSource,
   ToolMessageSource,
   ToolResultMessage,
   UserMessage,
 } from './types.ts'
 
 /**
- * Bound for a `notice` summary. The account rides a collapsed transcript row
- * and is committed to the durable log, while its inputs — task labels, goal
- * objectives, tool arguments — are caller text with no length of their own.
+ * Bound for a `notice` summary. Producers commit the one-line account to the
+ * durable log; its inputs — task labels, goal objectives, tool arguments —
+ * are caller text with no length of their own.
  */
 export const CONTEXT_SUMMARY_MAX_CHARS = 120
 
@@ -51,7 +56,10 @@ export function boundContextSummary(summary: string): string {
     : `${summary.slice(0, CONTEXT_SUMMARY_MAX_CHARS - 1)}…`
 }
 
-type NewMessage = Omit<Message, 'id'>
+type NewMessage = {
+  [Role in keyof MessageRoleMap]: Omit<MessageRoleMap[Role], 'id'>
+}[keyof MessageRoleMap]
+type NewDeveloperMessage = Omit<DeveloperMessage, 'id' | 'role'>
 type NewUserMessage = Omit<UserMessage, 'id' | 'role'>
 type NewAssistantMessage = Omit<AssistantMessage, 'id' | 'role' | 'source'> & {
   readonly source: Omit<ModelMessageSource, 'kind'> & { readonly kind?: never }
@@ -74,10 +82,21 @@ export function freezeMessage<T extends Message>(message: T): T {
 export function createMessage<T extends NewMessage>(
   input: T & { readonly id?: never },
 ): T & Pick<Message, 'id'> {
-  return freezeMessage({
+  return deepFreeze(structuredClone({
     ...input,
     id: brandString<MessageId>(randomUUID()),
-  })
+  }))
+}
+
+/**
+ * Create an identified, immutable developer message.
+ * @param input - content and producer source for the new message.
+ * @returns a detached developer message with a fresh identity.
+ */
+export function createDeveloperMessage<T extends NewDeveloperMessage>(
+  input: T & { readonly id?: never; readonly role?: never },
+): T & Pick<DeveloperMessage, 'id' | 'role'> {
+  return createMessage({ ...input, role: 'developer' })
 }
 
 /**
@@ -116,37 +135,34 @@ export function createAssistantMessage(
  * Create and freeze one identified system-role message holding a rendered
  * system prompt.
  * @param text - the complete rendered prompt; `''` records "no system prompt".
- * @param plugin - the plugin that assembled the prompt.
  * @returns an immutable system message with a fresh stable identity.
  */
-export function createSystemMessage(text: string, plugin: string): SystemMessage {
+export function createSystemMessage(text: string): SystemMessage {
   return createMessage({
     role: 'system',
     content: text.length === 0 ? [] : [{ type: 'text', text }],
-    source: { kind: 'plugin', plugin },
+    source: { kind: 'system-prompt' },
   })
 }
 
 /** Input whose acceptance creates one tool-result message. */
 export interface ToolResultMessageInput {
   readonly callId: ToolCallId
-  readonly content: ContentBlock[]
+  readonly content: readonly ContentBlock[]
   readonly isError: boolean
 }
 
 /**
  * Create and freeze one identified tool-result message.
  * @param input - call identity, raw result blocks, and outcome.
- * @returns an immutable user-role tool-result message.
+ * @returns an immutable tool-role message that answers the tool call.
  */
 export function createToolResultMessage(input: ToolResultMessageInput): ToolResultMessage {
-  return createUserMessage({
+  return createMessage({
+    role: 'tool',
     source: { kind: 'tool', callId: input.callId },
-    content: [{
-      type: 'tool-result',
-      toolCallId: input.callId,
-      content: input.content,
-      isError: input.isError,
-    }],
+    toolCallId: input.callId,
+    content: input.content,
+    isError: input.isError,
   })
 }

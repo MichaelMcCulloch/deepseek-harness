@@ -12,7 +12,7 @@ import type { UseSidebarRightTabInfo } from './contract/slots.ts'
  */
 export const tabInfoFactory: SlotHookFactory<'sidebar.right.pane.tab', UseSidebarRightTabInfo> = (standard, context) => {
   const { sessionId } = standard
-  const { tabId, title, fullscreen, signal, actions, useStore, useTabNavigation } = context
+  const { tabId, title, fullscreen, active, signal, actions, useStore, useTabNavigation, shortcuts } = context
   return function useTabInfo() {
     const layout = useStore(state => state.bySession[sessionId]?.layout)
     const navigation = useTabNavigation(tabId)
@@ -27,13 +27,14 @@ export const tabInfoFactory: SlotHookFactory<'sidebar.right.pane.tab', UseSideba
         panel: { id: pane.id },
         tab: {
           ...tab,
-          visible: pane.host === 'float' || (layout.expanded && (title || pane.activeTabId === tabId)),
+          visible: active && (pane.host === 'float' || (layout.expanded && (title || pane.activeTabId === tabId))),
           navigation,
           signal,
           actions,
+          refreshShortcut: shortcuts.find(row => row.id === 'page.refresh'),
         },
       }
-    }, [layout, navigation, tabId, title, fullscreen, signal, actions])
+    }, [layout, navigation, tabId, title, fullscreen, active, signal, actions, shortcuts])
   }
 }
 

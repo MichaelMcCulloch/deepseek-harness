@@ -41,7 +41,7 @@ export interface SubagentOwnerSettlement {
   readonly stopReason: SubagentResult['stopReason']
   /** Stable identity of the last ordinary turn admitted by this activation. */
   readonly messageId?: MessageId
-  readonly output?: ContentBlock[]
+  readonly output?: readonly ContentBlock[]
   readonly error?: string
 }
 

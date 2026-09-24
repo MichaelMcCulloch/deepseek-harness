@@ -1,9 +1,13 @@
 /** Builtin image metadata and keyed document-body registration. */
 import type { Context } from '@deepseek-ai/cordis'
+import type { BoundActions } from '@deepseek-ai/dsh-client-store'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 // Type-only: the declaration merges behind ctx.locale, ctx.slots, and ctx.documentPreviews.
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { DocumentPreviewDefinition } from '../document/registry.ts'
+import { retainDocumentTabs } from '../document/tab-lifetime.ts'
+import { createZoomStore, type ZoomInjected, type ZoomStore } from '../zoom/store.ts'
 import { ImageBody } from './ImageBody.tsx'
 import { en, zh } from './locales.ts'
 
@@ -41,7 +45,12 @@ export function apply(ctx: Context): void {
   const t = ctx.locale.bind('sidebarImage')
   ctx.effect(() => ctx.locale.register('sidebarImage', { zh, en }), 'document-image: dictionaries')
   ctx.effect(() => ctx.documentPreviews.register(imageBodyDefinition(() => t('title'))), 'document-image: metadata')
-  ctx.effect(() => ctx.slots.inject('sidebar.right.tab.document', () => ctx.slots.register(
-    { name: 'sidebar.right.tab.document', key: IMAGE_BODY_ID, locale: 'sidebarImage' }, ImageBody,
-  )), 'document-image: body')
+  const store = createZoomStore()
+  const retainTab = retainDocumentTabs(ctx)
+  ctx.effect(() => ctx.slots.inject('sidebar.right.tab.document', () => ctx.slots.register({
+    name: 'sidebar.right.tab.document', key: IMAGE_BODY_ID, locale: 'sidebarImage', store,
+    inject: (_sessionId: SessionId, actions: BoundActions<ZoomStore>): ZoomInjected => ({
+      retainTab: (tabId, signal) => { retainTab(tabId, signal, actions.forget) },
+    }),
+  }, ImageBody)), 'document-image: body')
 }

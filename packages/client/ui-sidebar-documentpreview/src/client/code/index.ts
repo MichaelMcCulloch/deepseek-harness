@@ -1,10 +1,10 @@
 /** Code preview metadata and body registered through the public document extension points. */
 import type { Context } from '@deepseek-ai/cordis'
+import { CODE_HIGHLIGHT_EXTENSIONS } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: the declaration merges behind ctx.locale and ctx.slots.
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { CodeBody } from './CodeBody.tsx'
-import { CODE_EXTENSIONS } from './languages.ts'
 import { en, zh } from './locales.ts'
 
 const ID = '@deepseek-ai/dsh-client-ui-sidebar-documentpreview/code'
@@ -16,7 +16,7 @@ export function apply(ctx: Context): void {
   const t = ctx.locale.bind(NS)
   ctx.effect(() => ctx.documentPreviews.register({
     id: ID,
-    extensions: CODE_EXTENSIONS,
+    extensions: CODE_HIGHLIGHT_EXTENSIONS,
     priority: 'builtin',
     title: () => t('title'),
     loading: 'text-pages',

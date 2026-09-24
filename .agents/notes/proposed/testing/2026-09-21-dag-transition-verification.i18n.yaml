@@ -1,6 +1,58 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-21-dag-transition-verification.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/testing/2026-09-21-dag-transition-verification.md
-2026-09-21-dag-transition-verification.md: 9d6bd34c5103e552add9341fe3d42130415d3cac
-2026-09-21-dag-transition-verification.zh.md: 7929652c6e544b52918e9d090e6477952db78780
+/agent-note-verifying-every-dag-transition-leaves-a-valid-state:
+  en: 2e4160254268bd91
+  zh: 663ebd63dcdfc428
+/agent-note-verifying-every-dag-transition-leaves-a-valid-state/problem:
+  en: 415eff340a8e64c5
+  zh: 62f3ec4b9ff96451
+/agent-note-verifying-every-dag-transition-leaves-a-valid-state/proposal:
+  en: b60324dee8f50dac
+  zh: d6f5ee8415508e58
+/agent-note-verifying-every-dag-transition-leaves-a-valid-state/the-state-model-and-what-is-checked:
+  en: 049c69b895114e80
+  zh: e825d7424a1e873c
+/agent-note-verifying-every-dag-transition-leaves-a-valid-state/the-three-transition-sources:
+  en: 1cce6bc24b1ad88d
+  zh: 71beaac456e3f1ff
+/agent-note-verifying-every-dag-transition-leaves-a-valid-state/the-three-transition-sources/agent-tool-calls:
+  en: 4b704301b075df98
+  zh: 030f8227e9aa09be
+/agent-note-verifying-every-dag-transition-leaves-a-valid-state/the-three-transition-sources/user-intercession:
+  en: e5ff37b4a61d3734
+  zh: 3328769d83f6c301
+/agent-note-verifying-every-dag-transition-leaves-a-valid-state/the-three-transition-sources/process-death-and-reopen:
+  en: bb48e9d2e74609e9
+  zh: b000af2cedcc277a
+/agent-note-verifying-every-dag-transition-leaves-a-valid-state/what-the-existing-model-harness-covers:
+  en: f87ac24d032a8adf
+  zh: 99ff3fbc59058ed7
+/agent-note-verifying-every-dag-transition-leaves-a-valid-state/defects-found:
+  en: d2fc77059671deda
+  zh: f8f2fd8eb9acb083
+/agent-note-verifying-every-dag-transition-leaves-a-valid-state/defects-found/the-preparedfrom-window-defeats-the-no-op-completion-guard:
+  en: 5794b2f054ab7bf2
+  zh: 190696413b201df3
+/agent-note-verifying-every-dag-transition-leaves-a-valid-state/defects-found/the-torn-tail-repair-has-a-crash-window-that-drops-recovered-events:
+  en: c418b8df9d1fdca3
+  zh: 70836fa8c39b8b18
+/agent-note-verifying-every-dag-transition-leaves-a-valid-state/defects-found/an-interrupted-git-worktree-add-strands-a-node-id:
+  en: 7e04e5558862f226
+  zh: ba7cc473c7d61461
+/agent-note-verifying-every-dag-transition-leaves-a-valid-state/verification-options:
+  en: 046f5758750aafcb
+  zh: eaf4f940f2519f09
+/agent-note-verifying-every-dag-transition-leaves-a-valid-state/recommendation:
+  en: 6f879828ad581050
+  zh: 6e5baeca6e4de71d
+/agent-note-verifying-every-dag-transition-leaves-a-valid-state/alternatives-considered:
+  en: 7bbe09c478e1b3ad
+  zh: 3ffa5a686c8240cb
+/agent-note-verifying-every-dag-transition-leaves-a-valid-state/acceptance-criteria:
+  en: a27d28ca63f2e8de
+  zh: ed2dbb80caed0a8c
+/agent-note-verifying-every-dag-transition-leaves-a-valid-state/risks:
+  en: 7115749c717696d1
+  zh: f5512e665e408915

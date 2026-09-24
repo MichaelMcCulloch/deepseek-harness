@@ -1,6 +1,25 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/dag/README.md
-README.md: 76306bfd82789198755748ab98520374109f9eaf
-README.zh.md: 630fa140d8b45bbcb6873fcad0c4b2becf22504e
+/:
+  en: 3ea01aeb645ad07a
+  zh: 53717d0abb59919c
+/dag-native-dependency-graph-orchestration:
+  en: 9affcbc8b461e325
+  zh: f50c4b2ffae1db9d
+/dag-native-dependency-graph-orchestration/summary:
+  en: b9c62c80631aa81b
+  zh: 60c166bc2af496d3
+/dag-native-dependency-graph-orchestration/table-of-contents:
+  en: 1eb35b015a6c423f
+  zh: a8a3dceee2c9e943
+/dag-native-dependency-graph-orchestration/packages:
+  en: 03b5e5d6cd16783d
+  zh: 67c2e0d6d0b1e257
+/dag-native-dependency-graph-orchestration/related-documentation:
+  en: c03af3269628aa01
+  zh: 15981327e51fecbc
+/dag-native-dependency-graph-orchestration/dev-note:
+  en: b75c8458928b72b9
+  zh: 003ba4e17b4b5269

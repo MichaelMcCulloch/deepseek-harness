@@ -24,6 +24,7 @@ This file is GENERATED from source (`scripts/gen-cordis-catalog.ts`) and verifie
 
 - `internal/plugin` — A plugin fiber was created. ([`vendor/cordis/src/context.ts:836`](../../vendor/cordis/src/context.ts))
 - `internal/status` — A fiber changed lifecycle state. ([`vendor/cordis/src/context.ts:838`](../../vendor/cordis/src/context.ts))
+- `internal/config` — Waterfall: a fiber config is being resolved before validation. ([`vendor/cordis/src/context.ts:844`](../../vendor/cordis/src/context.ts))
 - `internal/service` — Interception hook for a service binding (no core producer). ([`vendor/cordis/src/context.ts:846`](../../vendor/cordis/src/context.ts))
 - `internal/update` — Waterfall: a fiber config update is being applied. ([`vendor/cordis/src/context.ts:848`](../../vendor/cordis/src/context.ts))
 - `internal/get` — Waterfall: a service is being read from the store. ([`vendor/cordis/src/context.ts:850`](../../vendor/cordis/src/context.ts))
@@ -36,4 +37,5 @@ This file is GENERATED from source (`scripts/gen-cordis-catalog.ts`) and verifie
 - `loader/config-update` — The loader config tree changed. ([`vendor/loader/src/index.ts:20`](../../vendor/loader/src/index.ts))
 - `loader/entry-init` — A config entry is being initialized. ([`vendor/loader/src/index.ts:21`](../../vendor/loader/src/index.ts))
 - `loader/partial-dispose` — An entry is being partially disposed on reload. ([`vendor/loader/src/index.ts:22`](../../vendor/loader/src/index.ts))
-- `loader/patch-context` — A context is being patched during a reload. ([`vendor/loader/src/index.ts:23`](../../vendor/loader/src/index.ts))
+- `loader/volatile-update` — Volatile config values committed into the running fiber without a remount; dispatched to the owning fiber only. ([`vendor/loader/src/index.ts:28`](../../vendor/loader/src/index.ts))
+- `loader/patch-context` — A context is being patched during a reload. ([`vendor/loader/src/index.ts:35`](../../vendor/loader/src/index.ts))

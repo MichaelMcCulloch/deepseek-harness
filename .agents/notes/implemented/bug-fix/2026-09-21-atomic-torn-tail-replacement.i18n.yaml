@@ -1,6 +1,31 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-21-atomic-torn-tail-replacement.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-21-atomic-torn-tail-replacement.md
-2026-09-21-atomic-torn-tail-replacement.md: 3edd1ff1fcadfcbd4c2057cefc65552960449c6b
-2026-09-21-atomic-torn-tail-replacement.zh.md: cb5025aa612a49409f780270074dfc575fc62cdf
+/agent-note-one-durable-step-for-the-torn-tail-repair:
+  en: 0f02f26a61660451
+  zh: 2a0f6af4bd618c48
+/agent-note-one-durable-step-for-the-torn-tail-repair/problem:
+  en: 277b895a9d8ac256
+  zh: e45a4ebceb6dfe14
+/agent-note-one-durable-step-for-the-torn-tail-repair/decision:
+  en: 39e8ca4059cad9c9
+  zh: 4f51a56e7d40f269
+/agent-note-one-durable-step-for-the-torn-tail-repair/decision/what-each-failure-leaves-behind:
+  en: 822013e1b1cbb1a1
+  zh: a63185722be45172
+/agent-note-one-durable-step-for-the-torn-tail-repair/decision/which-write-paths-carry-a-repair:
+  en: ed8babf731726818
+  zh: 595a65bc45bc53ff
+/agent-note-one-durable-step-for-the-torn-tail-repair/decision/the-replacement-file:
+  en: b01368fda48cdcb8
+  zh: 214faa2debfbd781
+/agent-note-one-durable-step-for-the-torn-tail-repair/consequences:
+  en: 0036f64570d45027
+  zh: 959234dd5696a30c
+/agent-note-one-durable-step-for-the-torn-tail-repair/alternatives-considered:
+  en: c3e5ebd7fa0c4d5c
+  zh: f4dee86f0c8f6f0b
+/agent-note-one-durable-step-for-the-torn-tail-repair/related:
+  en: 8717498c9659c9a6
+  zh: 884d50803e0e86bf

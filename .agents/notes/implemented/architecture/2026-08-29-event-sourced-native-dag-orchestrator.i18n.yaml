@@ -1,6 +1,34 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-08-29-event-sourced-native-dag-orchestrator.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-29-event-sourced-native-dag-orchestrator.md
-2026-08-29-event-sourced-native-dag-orchestrator.md: 20a42a842785de8e6d46bda1bdbaee146bbeb60a
-2026-08-29-event-sourced-native-dag-orchestrator.zh.md: be06d472eee10b70b5ab62401c08e888499bf928
+/agent-note-event-sourced-native-dag-orchestration:
+  en: 781444f455d9f84e
+  zh: e98cdeb4ac72fce9
+/agent-note-event-sourced-native-dag-orchestration/problem:
+  en: 891312d5ce5180a8
+  zh: 3984deafd002bfae
+/agent-note-event-sourced-native-dag-orchestration/decision:
+  en: a15c7c13f167e5ac
+  zh: 63bcc2ef60c2f344
+/agent-note-event-sourced-native-dag-orchestration/decision/complete-state-snapshots-are-the-durable-authority:
+  en: e27245c639b4070f
+  zh: be99914a8f693d5b
+/agent-note-event-sourced-native-dag-orchestration/decision/durable-mailboxes-own-asynchronous-work:
+  en: b68fd63951755be1
+  zh: eb161b7d9483b1d2
+/agent-note-event-sourced-native-dag-orchestration/decision/local-git-provides-execution-evidence:
+  en: 2c4237c756b7f6f5
+  zh: 4ebddd466352b324
+/agent-note-event-sourced-native-dag-orchestration/decision/the-subagent-service-keeps-authorization:
+  en: cceb1dab631d32f0
+  zh: 2d7005983476b4a2
+/agent-note-event-sourced-native-dag-orchestration/testing:
+  en: d0e4408c2fb7194e
+  zh: b4a8c790ba7fd16f
+/agent-note-event-sourced-native-dag-orchestration/alternatives-considered:
+  en: c9b20889e7855e0a
+  zh: a465a116a5b4ab99
+/agent-note-event-sourced-native-dag-orchestration/consequences:
+  en: 234c37b18c01e62e
+  zh: 7db517d4b3784dc4

@@ -1,6 +1,25 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-10-zero-import-cycles-in-the-module-graph.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-09-10-zero-import-cycles-in-the-module-graph.md
-2026-09-10-zero-import-cycles-in-the-module-graph.md: c9035154a7c2262836c412848b3004e6e823d74c
-2026-09-10-zero-import-cycles-in-the-module-graph.zh.md: 39411bd8ee2ec942bcc05c9977c0f22b1ea6c8a3
+/agent-note-zero-import-cycles-in-the-module-graph:
+  en: f31722d9368e678d
+  zh: 168d2259d9acd4c0
+/agent-note-zero-import-cycles-in-the-module-graph/problem:
+  en: 9c57e9b464b3426e
+  zh: 52a3e94357bba373
+/agent-note-zero-import-cycles-in-the-module-graph/decision:
+  en: e08227ecdf954738
+  zh: 9bc2464ca0e656e8
+/agent-note-zero-import-cycles-in-the-module-graph/alternatives-considered:
+  en: dfca20a1d36e5b0d
+  zh: 9c6685b42e4d4d78
+/agent-note-zero-import-cycles-in-the-module-graph/consequences:
+  en: b747dacb9ad8fb6c
+  zh: 6d62ddddced5708b
+/agent-note-zero-import-cycles-in-the-module-graph/testing:
+  en: a846152f34b6cb27
+  zh: 9a488c0fd2e1fcd4
+/agent-note-zero-import-cycles-in-the-module-graph/related:
+  en: 712f709d385acddd
+  zh: 7ce5b7255e72f954

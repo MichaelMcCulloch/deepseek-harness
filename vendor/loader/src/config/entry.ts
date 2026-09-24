@@ -1,5 +1,6 @@
-import { composeError, Context, FiberState, Inject, Service, type Fiber } from '@deepseek-ai/cordis'
-import { deepEqual, defineProperty, isNullable, isNonNullable, type Dict } from '@deepseek-ai/cosmokit'
+import { composeError, Context, FiberState, Inject, resolveConfig, Service, type Fiber } from '@deepseek-ai/cordis'
+import { deepEqual, defineProperty, isNullable, isNonNullable, updateVolatile, volatileEntries, type Dict, type Volatile } from '@deepseek-ai/cosmokit'
+import { equalExceptVolatile } from './diff.ts'
 import { ModuleLoader } from '../internal.ts'
 import { evaluate, interpolate, isJsExpr } from './utils.ts'
 
@@ -139,15 +140,60 @@ export class Entry {
 
     // step 3: check if options are changed
     if (this.fiber?.uid) {
-      const diff = Object
-        .keys({ ...this.options, ...legacy })
-        .filter(key => !deepEqual(this.options[key], legacy[key]))
-      if (!diff.length && !force) return
+      const changes = Object.keys({ ...this.options, ...legacy })
+        .filter(key => !deepEqual(this.options[key], legacy[key], key === 'config'))
+      // Only an active fiber in an unchanged context takes volatile-only config changes without a remount.
+      const volatileOnly = changes.length === 1 && changes[0] === 'config'
+        && this.fiber.state === FiberState.ACTIVE && Object.getPrototypeOf(this.ctx) === this.parent.ctx
+        && equalExceptVolatile(legacy.config, this.options.config, this.fiber.runtime?.Config)
+      if (volatileOnly) this.fiber._config = this.options.config
+      const pending = volatileOnly && this._commitVolatile() ? [] : changes
+      if (!pending.length && !force) return
       this.context.emit('loader/partial-dispose', this, legacy, true)
-      this._patchContext(diff)
+      this._patchContext(pending)
     } else {
       await this.init()
     }
+  }
+
+  /**
+   * Parse a volatile-only raw config change and commit its values into the running fiber's references.
+   * An invalid candidate is logged and leaves the running references unchanged; the raw config stays retained for the next activation.
+   * @returns `false` when an ordinary effective value changed, so the caller applies the ordinary update lifecycle.
+   */
+  private _commitVolatile(): boolean {
+    const fiber = this.fiber!
+    const refs = volatileEntries(fiber.config)
+    if (!refs.length) return true
+    const raw = this.options.config
+    let candidate: unknown
+    try {
+      candidate = resolveConfig(fiber.runtime!, fiber.ctx.waterfall(fiber, 'internal/config', raw, () => raw))
+    } catch (error) {
+      this.ctx.logger.warn('volatile config update failed for %C', this.options.id)
+      this.ctx.logger.warn(error)
+      return true
+    }
+    if (!deepEqual(fiber.config, candidate, true)) {
+      this.ctx.logger.debug('ordinary config values of %C changed with its volatile values; applying the ordinary update', this.options.id)
+      return false
+    }
+    const paths = refs.flatMap(({ path, ref }) => {
+      const source = path.reduce<unknown>((value, key) => Reflect.get(value as object, key), candidate) as Volatile<unknown>
+      if (deepEqual(ref.get(), source.get(), true)) return []
+      updateVolatile(ref, source)
+      return [path]
+    })
+    if (!paths.length) return true
+    const self: Context = Object.create(fiber.ctx)
+    self[Context.filter] = (owner: Context) => owner.fiber === fiber
+    try {
+      fiber.ctx.emit(self, 'loader/volatile-update', paths)
+    } catch (error) {
+      // A listener failure must not fail the entry update; every value is already committed.
+      this.ctx.logger.warn(error)
+    }
+    return true
   }
 
   getOuterStack = () => {
@@ -614,7 +660,7 @@ export class Loader extends EntryTree {
     ctx.on('internal/update', function (config, noSave, next) {
       if (!this.entry || noSave || this.parent.fiber?.entry === this.entry) return next()
       const unparse = this.runtime?.Config?.['simplify']
-      this.entry.options.config = unparse ? unparse(config) : config
+      this.entry.options.config = unparse ? unparse.call(this.runtime!.Config, config) : config
       this.entry.parent.tree.write()
       return next()
     }, { global: true, prepend: true })

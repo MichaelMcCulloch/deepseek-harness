@@ -1,6 +1,25 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for dag.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/subsystems/dag.md
-dag.md: 573179b26f0b3c4f927135f932ac5c2e15ed5452
-dag.zh.md: e09a054cd5450d6322459f16c8d1cff73d67a816
+/native-dag-orchestration:
+  en: eb819671439609f5
+  zh: 319980e275b89ab6
+/native-dag-orchestration/durable-state:
+  en: ad3e063c53082175
+  zh: 0fbfdb16c08b7b73
+/native-dag-orchestration/node-lifecycle:
+  en: d8bce90e5e2fc0cd
+  zh: 7546b66f8063a60c
+/native-dag-orchestration/commands-and-effects:
+  en: 8ef4cf5bab785b9b
+  zh: bc63ae940d1279a2
+/native-dag-orchestration/notices-and-waiting:
+  en: 5a28c276e5cffd32
+  zh: 266fd2f1b06d351d
+/native-dag-orchestration/owner-controlled-subagents:
+  en: 2a8b7220019185f5
+  zh: daee6a7aace4a93f
+/native-dag-orchestration/local-git-execution:
+  en: b464c8b25a8582dd
+  zh: ad30ffcc97e5c2b4

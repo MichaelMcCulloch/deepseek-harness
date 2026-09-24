@@ -25,7 +25,7 @@ import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import { dagWorktreeRoot, DagGit } from './git.ts'
 import type { DagGitConfig, DagPreparedWorktree } from './git.ts'
-import { dagSlug, dispatcherHash, shortHash } from './ids.ts'
+import { dagSlug, DagCommandId as brandCommandId, DagNodeId as brandNodeId, DagNoticeId as brandNoticeId, DagOperationId as brandOperationId, DagWaveId as brandWaveId, dispatcherHash, shortHash } from './ids.ts'
 import {
   actionable,
   asError,
@@ -140,6 +140,12 @@ class DagPersistenceBarrierError extends Error {
   }
 }
 
+const nodeIdSchema = zod.string().transform(value => brandNodeId(value))
+const waveIdSchema = zod.string().transform(value => brandWaveId(value))
+const noticeIdSchema = zod.string().transform(value => brandNoticeId(value))
+const commandIdSchema = zod.string().transform(value => brandCommandId(value))
+const operationIdSchema = zod.string().transform(value => brandOperationId(value))
+const sessionIdSchema = zod.string().transform(value => SessionId(value))
 const statusSchema = zod.enum(['pending', 'starting', 'in_progress', 'completed', 'blocked', 'failed', 'interrupted'])
 const countsSchema = zod.object({
   pending: zod.number().int().nonnegative(),
@@ -157,20 +163,20 @@ const settlementSchema = zod.union([
   zod.object({ kind: zod.literal('interrupted'), reason: zod.string() }),
 ])
 const waveSchema = zod.object({
-  id: zod.string(),
-  nodeIds: zod.array(zod.string()),
+  id: waveIdSchema,
+  nodeIds: zod.array(nodeIdSchema),
   rootBranch: zod.string(),
   rootHead: zod.string(),
   status: zod.enum(['open', 'settled']),
-  pendingNodeIds: zod.array(zod.string()),
-  completedNodeIds: zod.array(zod.string()),
-  failedNodeIds: zod.array(zod.string()),
+  pendingNodeIds: zod.array(nodeIdSchema),
+  completedNodeIds: zod.array(nodeIdSchema),
+  failedNodeIds: zod.array(nodeIdSchema),
 })
 /** Node row fields the durable state and its browser projection both carry. */
 const nodeRowFields = {
-  id: zod.string(),
+  id: nodeIdSchema,
   content: zod.string(),
-  deps: zod.array(zod.string()),
+  deps: zod.array(nodeIdSchema),
   kind: zod.enum(['task', 'integration']),
   policy: zod.enum(['delegate', 'ours', 'theirs']),
   files: zod.array(zod.string()),
@@ -183,19 +189,19 @@ const dagProjectionSchema = zod.object({
   nodes: zod.array(zod.object({
     ...nodeRowFields,
     branch: zod.string().optional(),
-    waveId: zod.string().optional(),
+    waveId: waveIdSchema.optional(),
     dependencyCommits: zod.array(zod.string()),
     conflictedFiles: zod.array(zod.string()),
     settlement: settlementSchema.optional(),
     completedCommit: zod.string().optional(),
   })),
   counts: countsSchema,
-  readyNodeIds: zod.array(zod.string()),
+  readyNodeIds: zod.array(nodeIdSchema),
   openWaves: zod.array(waveSchema),
-}) as unknown as ZodType<DagProjection>
+}) as ZodType<DagProjection>
 const commandSchema = zod.object({
-  id: zod.string(),
-  operationId: zod.string(),
+  id: commandIdSchema,
+  operationId: operationIdSchema,
   kind: zod.enum(['dispatch', 'resume', 'steer', 'stop', 'reset', 'complete']),
   state: zod.enum(['accepted', 'running', 'settled']),
   generation: zod.number().int().nonnegative(),
@@ -208,12 +214,12 @@ const commandSchema = zod.object({
   error: zod.string().optional(),
 })
 const noticeSchema = zod.object({
-  id: zod.string(),
+  id: noticeIdSchema,
   kind: zod.enum(['node-failed', 'node-blocked', 'node-interrupted', 'node-completed', 'wave-settled']),
   revision: zod.number().int().positive(),
   graphGeneration: zod.number().int().positive(),
-  nodeId: zod.string().optional(),
-  waveId: zod.string().optional(),
+  nodeId: nodeIdSchema.optional(),
+  waveId: waveIdSchema.optional(),
   text: zod.string(),
   delivered: zod.boolean(),
   deliveredRevision: zod.number().int().positive().optional(),
@@ -228,33 +234,33 @@ const dagStateSchema = zod.object({
     ...nodeRowFields,
     brief: zod.string(),
     bindingGeneration: zod.number().int().nonnegative(),
-    childSessionId: zod.string().optional(),
+    childSessionId: sessionIdSchema.optional(),
     branch: zod.string().optional(),
     worktree: zod.string().optional(),
-    waveId: zod.string().optional(),
+    waveId: waveIdSchema.optional(),
     frozenWaveBase: zod.string().optional(),
     preparedFrom: zod.string().optional(),
     preparedHead: zod.string().optional(),
     dependencyCommits: zod.array(zod.string()),
     conflictedFiles: zod.array(zod.string()),
-    currentOperationId: zod.string().optional(),
+    currentOperationId: operationIdSchema.optional(),
     settlement: settlementSchema.optional(),
     completedCommit: zod.string().optional(),
     commands: zod.array(commandSchema),
   })),
-  topologicalOrder: zod.array(zod.string()),
-  readyNodeIds: zod.array(zod.string()),
+  topologicalOrder: zod.array(nodeIdSchema),
+  readyNodeIds: zod.array(nodeIdSchema),
   counts: countsSchema,
   waves: zod.array(waveSchema),
-  activeCommandIds: zod.array(zod.string()),
+  activeCommandIds: zod.array(commandIdSchema),
   receipts: zod.array(zod.object({
-    id: zod.string(),
+    id: operationIdSchema,
     cause: zod.string(),
     acceptedRevision: zod.number().int().nonnegative(),
-    nodeIds: zod.array(zod.string()),
+    nodeIds: zod.array(nodeIdSchema),
   })),
   notices: zod.array(noticeSchema),
-}).strict() as unknown as ZodType<DagState>
+}).strict() as ZodType<DagState>
 
 /** Native DAG service backed only by complete session-log state values. */
 export class DagService extends Service implements SubagentOwnerController {

@@ -1,6 +1,25 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-10-dag-notice-namespace-across-session-seeding.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-10-dag-notice-namespace-across-session-seeding.md
-2026-09-10-dag-notice-namespace-across-session-seeding.md: f3b2f0f3cfad6d6d370e59f1a7e239b3b8a80ccb
-2026-09-10-dag-notice-namespace-across-session-seeding.zh.md: 7a563fb706a6370c02a801d25a90cd70ae0098b4
+/agent-note-dag-notice-namespace-across-session-seeding:
+  en: 0d0ee1d82740f1fa
+  zh: cc8693ad11388f1b
+/agent-note-dag-notice-namespace-across-session-seeding/problem:
+  en: 284fed94286c5ff8
+  zh: 8baa938a0a03966d
+/agent-note-dag-notice-namespace-across-session-seeding/decision:
+  en: 3cc038217fe10755
+  zh: 315186ddab73895c
+/agent-note-dag-notice-namespace-across-session-seeding/alternatives-considered:
+  en: c550e3a7c4a270ca
+  zh: 24c2091c7a32d506
+/agent-note-dag-notice-namespace-across-session-seeding/consequences:
+  en: 1f1934d685616853
+  zh: 6fdb23edad4ea77f
+/agent-note-dag-notice-namespace-across-session-seeding/testing:
+  en: 4bb1440e4b7727bb
+  zh: 176a9c9a68cc0d70
+/agent-note-dag-notice-namespace-across-session-seeding/related:
+  en: a3370bbc03364fa3
+  zh: 0d357cea720b7e42

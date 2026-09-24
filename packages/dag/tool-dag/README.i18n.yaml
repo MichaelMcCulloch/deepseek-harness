@@ -1,6 +1,52 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/dag/tool-dag/README.md
-README.md: f07b67240222d8a28e98aeeeeaa3e23f5acf6caa
-README.zh.md: 5b05986abc78aee2c108f13e659fa64f9c31a8e4
+/:
+  en: 06aa4343f9b9e2b5
+  zh: 60325bafc440f9dc
+/deepseek-ai-dsh-tool-dag:
+  en: d73006237473aa60
+  zh: b72456478288551b
+/deepseek-ai-dsh-tool-dag/summary:
+  en: 80979d266a98603f
+  zh: 6d84b5fc41953c3e
+/deepseek-ai-dsh-tool-dag/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: 09388d293f9be9cb
+/deepseek-ai-dsh-tool-dag/use-this-package:
+  en: fb6d12aab63bef89
+  zh: f7fa0a8b210ebe77
+/deepseek-ai-dsh-tool-dag/use-this-package/dispatcher-tools:
+  en: 9ef33329bfdd47f6
+  zh: 8c70a4a8bee80a1b
+/deepseek-ai-dsh-tool-dag/use-this-package/child-tools:
+  en: 29d484857a6eabfa
+  zh: 1c71b0901b70d134
+/deepseek-ai-dsh-tool-dag/understand-the-implementation:
+  en: ea24e383fb996dd2
+  zh: 9fd27ea5d795783b
+/deepseek-ai-dsh-tool-dag/further-exploration:
+  en: 4d728694a8f76e36
+  zh: a441c30c973977dc
+/deepseek-ai-dsh-tool-dag/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-tool-dag/model-experience/dispatcher-and-child-tools:
+  en: 053cc728a8ec199f
+  zh: c4f6cdb156a384b3
+/deepseek-ai-dsh-tool-dag/model-experience/dispatcher-and-child-tools/what-the-model-sees:
+  en: 89b868de60b7c3c2
+  zh: 1f9c4b15850fdf66
+/deepseek-ai-dsh-tool-dag/model-experience/dispatcher-and-child-tools/token-effect:
+  en: 8656bd4e05116f53
+  zh: 79a4b0372123b092
+/deepseek-ai-dsh-tool-dag/model-experience/dispatcher-and-child-tools/kv-cache-effect:
+  en: 8b5b6b3da374f106
+  zh: 415dc46720644041
+/deepseek-ai-dsh-tool-dag/known-limitations-and-deferred-work:
+  en: ffaa3fcd9b128e5d
+  zh: 66023cabb302608a
+/deepseek-ai-dsh-tool-dag/known-limitations-and-deferred-work/dev-note:
+  en: e67f633dc6fe7773
+  zh: 3bb0c20c93f16f98
